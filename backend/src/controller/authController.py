@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 import src.models.userModel as userModel
 
-SECRET_KEY = "your_secret_key"  # In production, use a secure method to store this key
+SECRET_KEY = "HASQEWQEO!LNDALSDASLKDN"  # In production, use a secure method to store this key
 ALGORITHM = "HS256"
 
 class AuthController:

@@ -124,6 +124,7 @@ export function Register({ onNavigate }: RegisterProps) {
         return;
       }
 
+      console.log(data.message);
       onNavigate("login");
       setIsLoading(false);
     } catch (err) {

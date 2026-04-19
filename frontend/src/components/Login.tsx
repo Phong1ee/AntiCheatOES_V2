@@ -49,6 +49,7 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
         localStorage.setItem("user", JSON.stringify(response.user));
       }
 
+      console.log(response.message);
       // Call callback with user role
       onLogin((response.user?.role as Role) || "student");
       setIsLoading(false);

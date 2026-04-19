@@ -21,7 +21,7 @@ interface LoginProps {
 type Role = "student" | "teacher" | "admin";
 
 export function Login({ onNavigate, onLogin }: LoginProps) {
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,7 +33,7 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
     setError(null);
 
     try {
-      const response = await authAPI.login({ username, password });
+      const response = await authAPI.login({ email, password });
 
       if (!response.success) {
         setError(response.message || "Login failed");
@@ -83,15 +83,15 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="email">Email</Label>
             <div className="relative">
               <Mail className="absolute left-3 top-3 size-4 text-gray-400" />
               <Input
-                id="username"
-                type="text"
-                placeholder="Enter your username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="email"
+                type="email"
+                placeholder="Enter your email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="pl-10"
                 required
               />

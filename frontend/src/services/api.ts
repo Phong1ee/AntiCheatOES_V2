@@ -4,21 +4,20 @@ export interface AuthResponse {
   success: boolean;
   message: string;
   user?: {
-    id: string;
-    username: string;
-    email?: string;
+    fullname: string;
+    email: string;
     role: string;
   };
   token?: string;
 }
 
 export interface LoginRequest {
-  username: string;
+  email: string;
   password: string;
 }
 
 export interface RegisterRequest {
-  username: string;
+  fullname: string;
   email: string;
   password: string;
   role?: string;
@@ -36,7 +35,8 @@ export const authAPI = {
     });
 
     if (!response.ok) {
-      throw new Error(`Login failed: ${response.statusText}`);
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Login failed");
     }
 
     return response.json();
@@ -50,7 +50,8 @@ export const authAPI = {
     });
 
     if (!response.ok) {
-      throw new Error(`Registration failed: ${response.statusText}`);
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Registration failed");
     }
 
     return response.json();

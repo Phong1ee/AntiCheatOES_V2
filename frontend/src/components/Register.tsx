@@ -29,7 +29,7 @@ interface RegisterResponse {
   };
 }
 
-const API_BASE_URL = "http://localhost:5000"; // backend Node.js
+const API_BASE_URL = "http://localhost:8000"; // backend Node.js
 
 // ===== Password rules =====
 const passwordRules = [
@@ -109,17 +109,17 @@ export function Register({ onNavigate }: RegisterProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          full_name: formData.fullName,
+          fullname: formData.fullName,
           email: formData.email,
           password: formData.password,
-          role: "student", // mặc định student
+          role: "student",
         }),
       });
 
-      const data: RegisterResponse | { message?: string } = await res.json();
+      const data: RegisterResponse | { message?: string; detail?: string } = await res.json();
 
       if (!res.ok) {
-        setError((data as any).message || "Đăng ký thất bại");
+        setError((data as any).detail || "Can't register");
         setIsLoading(false);
         return;
       }
@@ -128,7 +128,7 @@ export function Register({ onNavigate }: RegisterProps) {
       setIsLoading(false);
     } catch (err) {
       console.error(err);
-      setError("Không kết nối được tới server");
+      setError("Can't connect to server");
       setIsLoading(false);
     }
   };

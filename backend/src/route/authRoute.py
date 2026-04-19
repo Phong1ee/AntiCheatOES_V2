@@ -1,10 +1,43 @@
-from src.db_config.config import get_db_connection
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from src.controller.authController import AuthController
 
-async def insert_user(username, email, password, role):
-    cnx = get_db_connection()
-    cursor = cnx.cursor()
-    query = "INSERT INTO users (username, email, password, role) VALUES (%s, %s, %s, %s)"
-    cursor.execute(query, (username, email, password, role))
-    cnx.commit()
-    cursor.close()
-    cnx.close()
+router = APIRouter()
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    fullname: str
+    email: str
+    password: str
+    role: str
+
+@router.post("/login")
+async def login(request: LoginRequest):
+    """Endpoint for user login."""
+    try:
+        result = AuthController.login(request.email, request.password)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid email or password") 
+
+@router.post("/register")
+async def register(request: RegisterRequest):
+    """Endpoint for user registration."""
+    try:
+        result = AuthController.register(
+            fullname=request.fullname,
+            email=request.email,
+            password=request.password,
+            role=request.role
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Registration failed")
+
+@router.post("/logout")
+async def logout():
+    """Endpoint for user logout."""
+    return {"success": True, "message": "Logged out successfully"}

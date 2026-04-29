@@ -41,3 +41,5 @@ async def register(request: RegisterRequest):
 async def logout():
     """Endpoint for user logout."""
     return {"success": True, "message": "Logged out successfully"}
+
+@router.get("/")

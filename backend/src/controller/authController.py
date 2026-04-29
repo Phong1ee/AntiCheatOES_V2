@@ -12,7 +12,7 @@ class AuthController:
         payload = {
             "sub": email,
             "role": role,
-            "exp": datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+            "exp": datetime.utcnow() + timedelta(hours=24)  # Token expires in 24 hours
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
         return token
@@ -39,4 +39,13 @@ class AuthController:
         return {
             "success": True,
             "message": "Registration successful"
+        }
+    
+    #Nghiên cứu về cách quản lý phiên làm việc và token để có thể thực hiện logout hiệu quả hơn
+    @staticmethod
+    def logout(): 
+        """Handle user logout (for stateless JWT, this is just a placeholder)."""
+        return {
+            "success": True,
+            "message": "Logged out successfully"
         }

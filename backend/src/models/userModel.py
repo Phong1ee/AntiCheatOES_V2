@@ -1,5 +1,6 @@
 from src.a_db_config.config import get_db_connection
 from werkzeug.security import generate_password_hash, check_password_hash
+import random
 
 
 def registerUser(fullname, email, password, role):
@@ -16,10 +17,11 @@ def registerUser(fullname, email, password, role):
         
         # Hash the password before storing
         password_hash = generate_password_hash(password)
-
+        school_id = generate_school_id(role)
+        
         # Insert new user
-        query = "INSERT INTO user (full_name, email, password_hash, role) VALUES (%s, %s, %s, %s)"
-        cursor.execute(query, (fullname, email, password_hash, role))
+        query = "INSERT INTO user (school_id, full_name, email, password_hash, role) VALUES (%s, %s, %s, %s, %s)"
+        cursor.execute(query, (school_id, fullname, email, password_hash, role))
         cnx.commit()
     except Exception as e:
         raise e
@@ -46,6 +48,22 @@ def verifyUser(email, password):
     finally:
         cursor.close()
         cnx.close()
+
+def generate_school_id(role):
+    """Generate a unique school ID"""
+    cnx = get_db_connection()
+    cursor = cnx.cursor()
+    # Simple implementation: use the first 3 letters of the name + a random number
+    if role == "student":
+        prefix = "S"
+    elif role == "teacher":
+        prefix = "T"
+
+    query = "SELECT COUNT(*) FROM user WHERE role = %s"
+    cursor.execute(query, (role,))
+    count = cursor.fetchone()[0] + 1
+    postfix = f"{count:06d}"  # Format as 6-digit number
+    return f"{prefix}{postfix}"
 
 
     

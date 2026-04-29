@@ -10,6 +10,13 @@ import {
   CardHeader,
   CardTitle,
 } from "./ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { GraduationCap, Mail, Lock, User, Eye, EyeOff } from "lucide-react";
 
 interface RegisterProps {
@@ -65,6 +72,7 @@ export function Register({ onNavigate }: RegisterProps) {
     email: "",
     password: "",
     confirmPassword: "",
+    role: "student" as Role,
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -112,7 +120,7 @@ export function Register({ onNavigate }: RegisterProps) {
           fullname: formData.fullName,
           email: formData.email,
           password: formData.password,
-          role: "student",
+          role: formData.role,
         }),
       });
 
@@ -182,6 +190,20 @@ export function Register({ onNavigate }: RegisterProps) {
                 required
               />
             </div>
+          </div>
+
+          {/* ROLE */}
+          <div className="space-y-2">
+            <Label htmlFor="role">Select Role</Label>
+            <Select value={formData.role} onValueChange={(value) => handleChange("role", value)}>
+              <SelectTrigger id="role" className="w-full">
+                <SelectValue placeholder="Choose your role" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="student">Student</SelectItem>
+                <SelectItem value="teacher">Teacher</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* PASSWORD */}

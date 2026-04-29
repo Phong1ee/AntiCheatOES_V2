@@ -28,7 +28,11 @@ class AuthController:
         return {
             "success": True,
             "message": "Login successful",
-            "user": user,
+            "user": {
+                "full_name": user[0],
+                "email": user[1],
+                "role": user[2]
+            },
             "token": token
         }
         

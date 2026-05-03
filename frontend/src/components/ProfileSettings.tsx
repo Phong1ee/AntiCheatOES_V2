@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { User, Mail, Phone, Calendar, Camera, Save, Lock, Eye, EyeOff } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'http://localhost:8000';
 
 interface ProfileData {
   fullName: string;

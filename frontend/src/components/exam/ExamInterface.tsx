@@ -8,7 +8,7 @@ import { WebcamMonitor } from './WebcamMonitor';
 import { ViolationWarningDialog } from './ViolationWarningDialog';
 import { ExamSettings, defaultExamSettings } from '../../types/examSettings';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'http://localhost:8000';
 
 interface Question {
   id: number;

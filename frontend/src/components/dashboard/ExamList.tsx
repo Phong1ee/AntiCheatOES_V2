@@ -19,7 +19,7 @@ import {
 import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
 
-const API_BASE_URL = "http://localhost:5000";
+const API_BASE_URL = "http://localhost:8000";
 
 interface Exam {
   id: string;
@@ -91,17 +91,17 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
 
         // Chuẩn hoá data từ backend về đúng shape Exam
         const apiExams: Exam[] = (data.exams || []).map((exam: any) => ({
-          id: String(exam.id),
+          id: String(exam.exam_id),
           title: exam.title,
-          subject: exam.subject ?? exam.description ?? "General",
+          subject: exam.description ?? "General",
           date: exam.date ?? "",
           time: exam.time ?? "",
-          duration: exam.duration ?? "",
+          duration: exam.duration_minutes ? `${exam.duration_minutes} min` : "90 min",
           status: exam.status as "upcoming" | "open" | "completed",
 
           // ✅ attempts từ backend
-          maxAttempts: Number(exam.maxAttempts ?? 0),
-          attemptsUsed: Number(exam.attemptsUsed ?? 0),
+          maxAttempts: Number(exam.max_attempt ?? 1),
+          attemptsUsed: Number(exam.attempts_used ?? 0),
         }));
 
         setExams(apiExams);

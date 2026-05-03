@@ -1,16 +1,14 @@
 import jwt
 from datetime import datetime, timedelta
 import src.models.userModel as userModel
-
-SECRET_KEY = "HASQEWQEO!LNDALSDASLKDN"  # In production, use a secure method to store this key
-ALGORITHM = "HS256"
+from src.middleware.constant import SECRET_KEY, ALGORITHM
 
 class AuthController:
     @staticmethod
-    def create_token(email: str, role: str):
+    def create_token(school_id: str, role: str):
         """Create a JWT token for the authenticated user."""
         payload = {
-            "sub": email,
+            "sub": school_id,
             "role": role,
             "exp": datetime.utcnow() + timedelta(hours=24)  # Token expires in 24 hours
         }
@@ -24,14 +22,15 @@ class AuthController:
         if not user:
             raise Exception("Invalid email or password")
         
-        token = AuthController.create_token(user[1], user[2])  # user[1] is email, user[2] is role
+        token = AuthController.create_token(user[4], user[2])  # user[4] is school_id, user[2] is role
         return {
             "success": True,
             "message": "Login successful",
             "user": {
                 "full_name": user[0],
                 "email": user[1],
-                "role": user[2]
+                "role": user[2],
+                "school_id": user[4]
             },
             "token": token
         }

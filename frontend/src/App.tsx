@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import { ForgotPassword } from "./components/ForgotPassword";
@@ -21,10 +21,40 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>("login");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Check for stored token on app load
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    const storedRole = localStorage.getItem("role");
+
+    if (token && storedRole) {
+      // Restore auth state from localStorage
+      setIsAuthenticated(true);
+      setUserRole(storedRole as UserRole);
+      
+      // Navigate to appropriate dashboard
+      if (storedRole === "admin") {
+        setCurrentPage("admin-dashboard");
+      } else if (storedRole === "teacher") {
+        setCurrentPage("teacher-dashboard");
+      } else {
+        setCurrentPage("dashboard");
+      }
+    }
+    
+    setIsLoading(false);
+  }, []);
 
   const handleLogin = (role: UserRole = "student") => {
     setIsAuthenticated(true);
     setUserRole(role);
+    
+    // Store role in localStorage for persistence
+    if (role) {
+      localStorage.setItem("role", role);
+    }
+    
     if (role === "admin") {
       setCurrentPage("admin-dashboard");
     } else if (role === "teacher") {
@@ -38,7 +68,16 @@ export default function App() {
     setIsAuthenticated(false);
     setUserRole(null);
     setCurrentPage("login");
+    
+    // Clear auth data from localStorage
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
   };
+
+  // Show loading state while checking auth
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
 
   return (
     <UserRoleProvider>

@@ -25,8 +25,8 @@ interface Exam {
   id: string;
   title: string;
   subject: string;
-  date: string;
-  time: string;
+  start_time: string; // ISO string from backend
+  end_time: string; // ISO string from backend
   duration: string;
   status: "upcoming" | "open" | "completed";
 
@@ -94,8 +94,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
           id: String(exam.exam_id),
           title: exam.title,
           subject: exam.description ?? "General",
-          date: exam.date ?? "",
-          time: exam.time ?? "",
+          start_time: exam.start_time,
+          end_time: exam.end_time,
           duration: exam.duration_minutes ? `${exam.duration_minutes} min` : "90 min",
           status: exam.status as "upcoming" | "open" | "completed",
 
@@ -259,8 +259,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                   <div className="flex items-center gap-2">
                     <Calendar className="size-4 text-teal-600" />
                     <span>
-                      {exam.date
-                        ? new Date(exam.date).toLocaleDateString("en-US", {
+                      {exam.start_time
+                        ? new Date(exam.start_time).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
@@ -271,7 +271,14 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
 
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 text-teal-600" />
-                    <span>{exam.time || "N/A"}</span>
+                    <span>
+                      {exam.start_time
+                        ? new Date(exam.start_time).toLocaleTimeString("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "N/A"}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2">

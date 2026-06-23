@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -17,6 +17,7 @@ import {
   Eye,
   Search,
   Filter,
+  AlertCircle,
 } from 'lucide-react';
 import { Input } from '../ui/input';
 import { ExamDetailsModal } from './ExamDetailsModal';
@@ -24,86 +25,24 @@ import { ExamSettingsModal } from './ExamSettingsModal';
 import { ExamResultsModal } from './ExamResultsModal';
 
 interface Exam {
-  id: string;
+  exam_id: number;
   title: string;
-  subject: string;
-  date: string;
-  time: string;
-  duration: number;
+  examcode: string;
+  description: string;
+  max_attempt: number;
+  duration_minutes: number;
+  start_time: string;
+  end_time: string;
   totalStudents: number;
-  completedStudents: number;
-  averageScore: number | null;
-  status: 'upcoming' | 'ongoing' | 'completed';
+  manage_by: number;
 }
 
-const mockExams: Exam[] = [
-  {
-    id: '1',
-    title: 'Midterm Exam',
-    subject: 'Database Systems',
-    date: '2025-11-20',
-    time: '09:00 AM',
-    duration: 90,
-    totalStudents: 45,
-    completedStudents: 0,
-    averageScore: null,
-    status: 'upcoming',
-  },
-  {
-    id: '2',
-    title: 'Quiz 3',
-    subject: 'Web Development',
-    date: '2025-11-15',
-    time: '02:00 PM',
-    duration: 30,
-    totalStudents: 38,
-    completedStudents: 35,
-    averageScore: 82.5,
-    status: 'ongoing',
-  },
-  {
-    id: '3',
-    title: 'Final Exam',
-    subject: 'Data Structures',
-    date: '2025-11-10',
-    time: '10:00 AM',
-    duration: 120,
-    totalStudents: 52,
-    completedStudents: 52,
-    averageScore: 76.8,
-    status: 'completed',
-  },
-  {
-    id: '4',
-    title: 'Quiz 2',
-    subject: 'Database Systems',
-    date: '2025-11-08',
-    time: '09:00 AM',
-    duration: 45,
-    totalStudents: 45,
-    completedStudents: 45,
-    averageScore: 88.3,
-    status: 'completed',
-  },
-  {
-    id: '5',
-    title: 'Midterm Exam',
-    subject: 'Web Development',
-    date: '2025-11-25',
-    time: '01:00 PM',
-    duration: 90,
-    totalStudents: 38,
-    completedStudents: 0,
-    averageScore: null,
-    status: 'upcoming',
-  },
-];
-
-const statusConfig = {
-  upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-  completed: { label: 'Completed', color: 'bg-green-100 text-green-700 border-green-200' },
-};
+// Status configuration - commented out for future use
+// const statusConfig = {
+//   upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+//   ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
+//   completed: { label: 'Completed', color: 'bg-green-100 text-green-700 border-green-200' },
+// };
 
 interface TeacherExamListProps {
   onExamClick?: (examId: string) => void;
@@ -117,19 +56,72 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredExams = mockExams
-    .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
-    .filter((exam) =>
-      exam.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exam.subject.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-    .sort((a, b) => {
-      if (sortBy === 'date') {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
+  useEffect(() => {
+    const fetchExams = async () => {
+      try {
+        setLoading(true);
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error("Authentication token not found");
+        }
+
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+        const response = await fetch(`${API_BASE_URL}/api/teacher-exams`, {
+          method: "GET",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || "Failed to fetch exams");
+        }
+
+        const data = await response.json();
+        console.log('Teacher exams response:', data);
+        setExams(data.exams || []);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch exams');
+        setExams([]);
+      } finally {
+        setLoading(false);
       }
-      return 0;
-    });
+    };
+
+    fetchExams();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
+          <p className="mt-4 text-gray-600">Loading exams...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="shadow-lg rounded-2xl border-0">
+        <CardContent className="p-12 text-center">
+          <AlertCircle className="size-12 text-red-400 mx-auto mb-4" />
+          <h3 className="text-red-600 mb-2">Error Loading Exams</h3>
+          {/* <p className="text-sm text-gray-600">{error}</p> */}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const filteredExams = exams;
 
   return (
     <div className="space-y-6">
@@ -176,9 +168,8 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
       {/* Exam List */}
       <div className="grid gap-4">
         {filteredExams.map((exam) => {
-          const config = statusConfig[exam.status];
           return (
-            <Card key={exam.id} className="shadow-lg rounded-2xl border-0 hover:shadow-xl transition-shadow">
+            <Card key={exam.exam_id} className="shadow-lg rounded-2xl border-0 hover:shadow-xl transition-shadow">
               <CardContent className="p-6">
                 <div className="flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
                   {/* Exam Info */}
@@ -187,39 +178,37 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-lg text-gray-800">{exam.title}</h3>
-                          <Badge variant="outline" className={config.color}>
-                            {config.label}
+                          <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
+                            {exam.examcode}
                           </Badge>
                         </div>
-                        <p className="text-gray-600 mt-1">{exam.subject}</p>
+                        <p className="text-gray-600 mt-1">{exam.description}</p>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap gap-4 text-sm text-gray-600">
                       <div className="flex items-center gap-1">
                         <Calendar className="size-4 text-teal-600" />
-                        {new Date(exam.date).toLocaleDateString('en-US', {
+                        Start: {new Date(exam.start_time).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
-                        })}
+                        })} {new Date(exam.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                       </div>
                       <div className="flex items-center gap-1">
                         <Clock className="size-4 text-teal-600" />
-                        {exam.time} ({exam.duration} min)
+                        {exam.duration_minutes} min
                       </div>
                     </div>
 
-                    {/* Progress */}
+                    {/* Total Students */}
                     <div className="flex items-center gap-4 text-sm">
                       <span className="text-gray-600">
-                        Students: {exam.completedStudents}/{exam.totalStudents}
+                        Total Students: <span className="font-medium text-teal-700">{exam.totalStudents}</span>
                       </span>
-                      {exam.averageScore !== null && (
-                        <span className="text-gray-600">
-                          Avg Score: <span className="font-medium text-teal-700">{exam.averageScore.toFixed(1)}%</span>
-                        </span>
-                      )}
+                      <span className="text-gray-600">
+                        Max Attempts: <span className="font-medium text-teal-700">{exam.max_attempt}</span>
+                      </span>
                     </div>
                   </div>
 

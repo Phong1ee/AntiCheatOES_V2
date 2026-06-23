@@ -83,15 +83,17 @@ export function ProfileSettings() {
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          throw new Error((data as any).message || 'Failed to load profile');
+          throw new Error((data as any).detail || (data as any).message || 'Failed to load profile');
         }
 
+        const profileData = (data as any).profile || data;
+
         setProfile({
-          fullName: data.fullName || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          studentId: data.studentId || '',
-          dateOfBirth: data.dateOfBirth || '',
+          fullName: profileData.fullName || profileData.full_name || '',
+          email: profileData.email || '',
+          phone: profileData.phone || '',
+          studentId: profileData.studentId || profileData.school_id || '',
+          dateOfBirth: profileData.dateOfBirth || '',
         });
       } catch (err: any) {
         console.error(err);
@@ -131,7 +133,7 @@ export function ProfileSettings() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error((data as any).message || 'Failed to update profile');
+        throw new Error((data as any).detail || (data as any).message || 'Failed to update profile');
       }
 
       setProfileSuccess('Personal information updated successfully.');
@@ -198,8 +200,9 @@ export function ProfileSettings() {
 
       if (!res.ok) {
         // nếu backend trả issues => bật rules lên cho user thấy
-        if ((data as any).issues?.length) setNewPasswordTouched(true);
-        throw new Error((data as any).message || 'Password change failed.');
+        const detail = (data as any).detail;
+        if (detail?.issues?.length || (data as any).issues?.length) setNewPasswordTouched(true);
+        throw new Error(detail?.message || (data as any).message || 'Password change failed.');
       }
 
       setPasswordSuccess('Password changed successfully.');

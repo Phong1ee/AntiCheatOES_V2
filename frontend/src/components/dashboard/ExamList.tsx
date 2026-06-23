@@ -25,12 +25,10 @@ interface Exam {
   id: string;
   title: string;
   subject: string;
-  start_time: string; // ISO string from backend
-  end_time: string; // ISO string from backend
+  start_time: string;
+  end_time: string;
   duration: string;
-  status: "upcoming" | "open" | "completed";
-
-  // ✅ attempts
+  status: "upcoming" | "open" | "completed" | "closed";
   maxAttempts: number;
   attemptsUsed: number;
 }
@@ -48,6 +46,10 @@ const statusConfig = {
     label: "Completed",
     className: "bg-gray-100 text-gray-700 hover:bg-gray-100",
   },
+  closed: {
+    label: "Closed",
+    className: "bg-slate-100 text-slate-700 hover:bg-slate-100",
+  },
 };
 
 interface ExamListProps {
@@ -61,14 +63,10 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
-
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // =======================
-  // FETCH EXAMS FROM BACKEND
-  // =======================
   useEffect(() => {
     const fetchExams = async () => {
       try {
@@ -89,7 +87,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
           throw new Error(data.message || "Failed to load exams");
         }
 
-        // Chuẩn hoá data từ backend về đúng shape Exam
         const apiExams: Exam[] = (data.exams || []).map((exam: any) => ({
           id: String(exam.exam_id),
           title: exam.title,
@@ -97,9 +94,7 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
           start_time: exam.start_time,
           end_time: exam.end_time,
           duration: exam.duration_minutes ? `${exam.duration_minutes} min` : "90 min",
-          status: exam.status as "upcoming" | "open" | "completed",
-
-          // ✅ attempts từ backend
+          status: exam.status as "upcoming" | "open" | "completed" | "closed",
           maxAttempts: Number(exam.max_attempt ?? 1),
           attemptsUsed: Number(exam.attempts_used ?? 0),
         }));
@@ -116,9 +111,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
     fetchExams();
   }, []);
 
-  // ======================================
-  // FILTERING
-  // ======================================
   const filteredExams = exams.filter(
     (exam) => filterStatus === "all" || exam.status === filterStatus
   );
@@ -139,9 +131,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
     setCodeOpen(true);
   };
 
-  // ======================
-  // VERIFY EXAM CODE (API)
-  // ======================
   const handleCodeSubmit = async (code: string): Promise<boolean> => {
     if (!selectedExam) return false;
 
@@ -149,7 +138,7 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
       const token = localStorage.getItem("token");
 
       const res = await fetch(
-        `${API_BASE_URL}/api/exams/${selectedExam.id}/verify-code`,
+        `${API_BASE_URL}/api/exams/${selectedExam.id}/start`,
         {
           method: "POST",
           headers: {
@@ -160,12 +149,22 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
         }
       );
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        // ❌ không alert
         return false;
       }
 
-      // ✅ đúng code -> cho vào thi
+      localStorage.setItem(
+        "current_exam_attempt",
+        JSON.stringify({
+          examId: selectedExam.id,
+          attemptId: data.attempt_id,
+          attemptNo: data.attempt_no,
+          durationMinutes: data.duration_minutes,
+        })
+      );
+
       setCodeOpen(false);
       handleEnterExam(selectedExam.id);
       return true;
@@ -175,9 +174,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
     }
   };
 
-  // ======================
-  // LOADING + ERROR UI
-  // ======================
   if (loading) {
     return <p className="text-gray-600">Loading exams...</p>;
   }
@@ -188,7 +184,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl text-gray-800">My Exams</h1>
@@ -197,7 +192,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
           </p>
         </div>
 
-        {/* Filters */}
         <div className="flex gap-2 w-full sm:w-auto">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-full sm:w-[140px]">
@@ -209,6 +203,7 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
               <SelectItem value="open">Open Now</SelectItem>
               <SelectItem value="upcoming">Upcoming</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="closed">Closed</SelectItem>
             </SelectContent>
           </Select>
 
@@ -226,7 +221,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
         </div>
       </div>
 
-      {/* Exam Cards */}
       <div className="space-y-4">
         {filteredExams.map((exam) => {
           const reachedMaxAttempts =
@@ -286,7 +280,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                     <span>Duration: {exam.duration}</span>
                   </div>
 
-                  {/* ✅ Attempts */}
                   <div className="flex items-center gap-2">
                     <RefreshCw className="size-4 text-teal-600" />
                     <span>
@@ -295,7 +288,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                   </div>
                 </div>
 
-                {/* Actions */}
                 {exam.status === "open" && (
                   reachedMaxAttempts ? (
                     <Button
@@ -343,6 +335,16 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                     View Results
                   </Button>
                 )}
+
+                {exam.status === "closed" && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => onViewResults?.(exam.id)}
+                  >
+                    View Results
+                  </Button>
+                )}
               </CardContent>
             </Card>
           );
@@ -357,7 +359,6 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
         </Card>
       )}
 
-      {/* Dialogs */}
       <ExamDetailsDialog
         exam={selectedExam}
         open={detailsOpen}

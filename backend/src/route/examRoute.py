@@ -5,7 +5,7 @@ from src.middleware.authMiddleware import verify_token
 router = APIRouter()
 
 @router.get("")
-async def get_student_exams_root(current_user: dict = Depends(verify_token)):
+async def get_student_exams_root(current_user: str = Depends(verify_token)):
     """Get all exams assigned to the current student."""
     try:
         result = ExamController.getStudentExams(current_user['school_id'])

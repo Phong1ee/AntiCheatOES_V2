@@ -1,0 +1,138 @@
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+/**
+ * Get the stored JWT token from localStorage
+ */
+function getToken(): string | null {
+  return localStorage.getItem("token");
+}
+
+/**
+ * Get authorization headers with token
+ */
+function getAuthHeaders(): HeadersInit {
+  const token = getToken();
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  message: string;
+  user?: {
+    fullname: string;
+    email: string;
+    role: string;
+  };
+  token?: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  fullname: string;
+  email: string;
+  password: string;
+  role?: string;
+}
+
+/**
+ * API client for authentication endpoints
+ */
+export const authAPI = {
+  async login(credentials: LoginRequest): Promise<AuthResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credentials),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Login failed");
+    }
+
+    const data = await response.json();
+    
+    // Store token in localStorage if login is successful
+    if (data.token) {
+      localStorage.setItem("token", data.token);
+    }
+    
+    return data;
+  },
+
+  async register(data: RegisterRequest): Promise<AuthResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Registration failed");
+    }
+
+    return response.json();
+  },
+
+  async logout(): Promise<{ success: boolean; message: string }> {
+    const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Logout failed: ${response.statusText}`);
+    }
+
+    // Remove token from localStorage
+    localStorage.removeItem("token");
+
+    return response.json();
+  },
+
+  async getCurrentUser(): Promise<{
+    id: string;
+    username: string;
+    role: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get current user: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+};
+
+/**
+ * Generic API call function for future endpoints
+ */
+export async function apiCall(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<any> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetch(url, {
+    headers: { ...getAuthHeaders(), ...options.headers },
+    ...options,
+  });
+
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.statusText}`);
+  }
+
+  return response.json();
+}

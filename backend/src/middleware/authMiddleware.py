@@ -9,10 +9,11 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Missing authorization header")
     
     try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid authentication scheme")
         
+        token = parts[1]
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return {
             "school_id": payload.get("sub"),
@@ -23,5 +24,5 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    except ValueError:
+    except (ValueError, IndexError):
         raise HTTPException(status_code=401, detail="Invalid authorization header")

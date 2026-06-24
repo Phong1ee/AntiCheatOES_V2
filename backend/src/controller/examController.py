@@ -42,3 +42,15 @@ class ExamController:
             }
         except Exception as e:
             raise e
+    
+    @staticmethod
+    def get_exams_by_teacher(teacher_id: int):
+        """Get all exams created by a teacher."""
+        try:
+            exams = examModel.get_exams_by_teacher(teacher_id)
+            return {
+                "success": True,
+                "exams": exams
+            }
+        except Exception as e:
+            raise e

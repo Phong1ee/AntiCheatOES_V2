@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from src.route.authRoute import router as auth_router
 from src.route.examRoute import router as exam_router
+from src.route.teacherRoute import router as teacherRouter
 
 # Initialize FastAPI app
 app = FastAPI(title="Online Examination System API", version="0.1.0")
@@ -24,6 +25,7 @@ def read_root():
 
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(teacherRouter, prefix="/api/teacher-exams", tags=["teacher-exams"])
 app.include_router(exam_router, prefix="/api/exams", tags=["exams"])
 
 if __name__ == "__main__":

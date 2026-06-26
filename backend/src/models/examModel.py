@@ -2,6 +2,25 @@ from datetime import datetime
 from src.a_db_config.config import get_db_connection
 
 
+def insertQuestion(question_text: str, question_type: str, question_point: int):
+    """Insert a new question into the database."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor()
+    query = """
+    INSERT INTO question (question_text, question_type, question_point)
+    VALUES (%s, %s, %s)
+    """
+    try:
+        cursor.execute(query, (question_text, question_type, question_point))
+        cnx.commit()
+        return cursor.lastrowid
+    except Exception as e:
+        cnx.rollback()
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
+
 def getStudentExams(school_id: str):
     """Get all exams assigned to a specific student."""
     cnx = get_db_connection()
@@ -418,6 +437,43 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
             "score": total_score,
             "essayPending": essay_pending
         }
+    except Exception as e:
+        cnx.rollback()
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
+
+def addQuestionToExam(exam_id: int, question_data: dict):
+    """Add a question to an exam."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor()
+    try:
+        question_id = insertQuestion(
+            question_text=question_data["text"],
+            question_type="MCQ" if question_data["type"] == "multiple-choice" else "essay",
+            question_point=question_data["points"]
+        )
+
+        insert_exam_question_query = """
+        INSERT INTO exam_question (exam_id, question_id)
+        VALUES (%s, %s)
+        """
+        cursor.execute(insert_exam_question_query, (exam_id, question_id))
+
+        if question_data["type"] == "multiple-choice":
+            insert_option_query = """
+            INSERT INTO options (question_id, options_text, is_correct)
+            VALUES (%s, %s, %s)
+            """
+            for option in question_data.get("options", []):
+                cursor.execute(insert_option_query, (
+                    question_id,
+                    option["text"],
+                    option.get("is_correct", False)
+                ))
+
+        cnx.commit()
     except Exception as e:
         cnx.rollback()
         raise e

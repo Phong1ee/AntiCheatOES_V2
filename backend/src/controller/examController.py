@@ -49,17 +49,12 @@ class ExamController:
     @staticmethod
     def getStudentExams(school_id: str, role: str):
         """Get all exams assigned to a student."""
-        try:
-            if role != "student":
-                raise Exception("Only students can view assigned exams")
+        exams = examModel.getStudentExams(school_id)
+        return {
+            "success": True,
+            "exams": exams
+        }
 
-            exams = examModel.getStudentExams(school_id)
-            return {
-                "success": True,
-                "exams": exams
-            }
-        except Exception as e:
-            raise e
 
     @staticmethod
     def getExamWithQuestions(school_id: str, role: str, exam_id: int):
@@ -175,6 +170,18 @@ class ExamController:
             return {
                 "success": True,
                 "exam": exam_details
+            }
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def addQuestionToExam(exam_id: int, question_data: dict):
+        """Add a question to an exam."""
+        try:
+            examModel.addQuestionToExam(exam_id, question_data)
+            return {
+                "success": True,
+                "message": "Question added to exam successfully"
             }
         except Exception as e:
             raise e

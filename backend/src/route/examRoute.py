@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from src.controller.examController import ExamController
-from src.middleware.authMiddleware import verify_token
+#from src.controller.authController import ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
+from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 
 router = APIRouter()
-
 
 class VerifyCodeRequest(BaseModel):
     code: str
@@ -40,18 +40,14 @@ async def get_student_exams_root(current_user: dict = Depends(verify_token)):
 
 
 @router.get("/student")
-async def get_student_exams(current_user: dict = Depends(verify_token)):
+async def get_student_exams(current_user: dict = Depends(verify_token), role_check: dict = Depends(STUDENT_ONLY)):
     """Get all exams assigned to the current student."""
-    try:
-        result = ExamController.getStudentExams(
-            current_user["school_id"],
-            current_user["role"]
-        )
-        return result
-    except Exception as e:
-        detail = str(e)
-        status_code = 403 if detail == "Only students can view assigned exams" else 400
-        raise HTTPException(status_code=status_code, detail=detail)
+    result = ExamController.getStudentExams(
+        current_user["school_id"],
+        current_user["role"]
+    )
+    return result
+
 
 
 @router.post("/{exam_id}/verify-code")
@@ -145,3 +141,13 @@ async def get_exam(exam_id: int, current_user: dict = Depends(verify_token)):
         if detail == "Exam not found or not assigned to student":
             raise HTTPException(status_code=404, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
+
+@router.get("/{student_id}/exams")
+async def get_student_exams_by_id(student_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY)):
+    """Get all exams assigned to a specific student by their school ID."""
+    result = ExamController.getStudentExams(
+        student_id,
+        current_user["role"]
+    )
+    return result
+

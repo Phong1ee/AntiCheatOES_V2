@@ -87,6 +87,39 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
     hours: 14,
     minutes: 23,
   });
+  const [activeExamsCount, setActiveExamsCount] = useState(0);
+
+  useEffect(() => {
+    const fetchActiveExams = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error("Authentication token not found");
+        }
+
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+        const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch exams");
+        }
+
+        const data = await response.json();
+        setActiveExamsCount(data.active_exams_count || 0);
+      } catch (err) {
+        console.error('Failed to fetch active exams:', err);
+        setActiveExamsCount(0);
+      }
+    };
+
+    fetchActiveExams();
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -125,7 +158,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Active Exams</p>
-                <p className="text-xl text-gray-800">3</p>
+                <p className="text-xl text-gray-800">{activeExamsCount}</p>
               </div>
             </div>
           </div>

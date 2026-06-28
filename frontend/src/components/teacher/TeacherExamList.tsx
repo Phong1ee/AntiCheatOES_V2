@@ -36,6 +36,7 @@ interface Exam {
   totalStudents: number;
   manage_by: string;
   status: string;
+  subject?: string | null;
 }
 
 // Status configuration
@@ -198,17 +199,22 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
           return (
             <Card key={exam.exam_id} className="shadow-lg rounded-2xl border-0 hover:shadow-xl transition-shadow">
               <CardContent className="p-6">
-                <div className="flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
+                <div className="flex flex-col gap-4">
                   {/* Exam Info */}
-                  <div className="flex-1 space-y-2">
+                  <div className="space-y-2">
                     <div className="flex items-start gap-3">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-lg text-gray-800">{exam.title}</h3>
-                          <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white border-0 shadow-md">
+                        <div className="flex items-center gap-2 flex-nowrap">
+                          <h3 className="text-lg text-gray-800 truncate">{exam.title}</h3>
+                          <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white border-0 shadow-md flex-shrink-0">
                             {exam.examcode}
                           </Badge>
-                          <Badge className={statusConfig[exam.status as keyof typeof statusConfig]?.color || 'bg-gray-100 text-gray-700'}>
+                          {exam.subject && (
+                            <Badge className="bg-purple-100 text-purple-700 border-purple-200 flex-shrink-0">
+                              {exam.subject}
+                            </Badge>
+                          )}
+                          <Badge className={`${statusConfig[exam.status as keyof typeof statusConfig]?.color || 'bg-gray-100 text-gray-700'} flex-shrink-0`}>
                             {statusConfig[exam.status as keyof typeof statusConfig]?.label || exam.status}
                           </Badge>
                         </div>
@@ -230,8 +236,11 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                         {exam.duration_minutes} min
                       </div>
                     </div>
+                  </div>
 
-                    {/* Total Students */}
+                  {/* Bottom Section - Stats and Actions */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    {/* Total Students and Max Attempts */}
                     <div className="flex items-center gap-4 text-sm">
                       <span className="text-gray-600">
                         Total Students: <span className="font-medium text-teal-700">{exam.totalStudents}</span>
@@ -240,48 +249,48 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                         Max Attempts: <span className="font-medium text-teal-700">{exam.max_attempt}</span>
                       </span>
                     </div>
-                  </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-teal-300 text-teal-700 hover:bg-teal-50"
-                      onClick={() => {
-                        setSelectedExam(exam);
-                        setShowSettingsModal(true);
-                      }}
-                    >
-                      <Settings className="size-4 mr-2" />
-                      Settings
-                    </Button>
-                    {exam.status === 'completed' || exam.status === 'ongoing' ? (
+                    {/* Actions */}
+                    <div className="flex flex-nowrap gap-2 ml-auto">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                        className="border-teal-300 text-teal-700 hover:bg-teal-50 whitespace-nowrap"
                         onClick={() => {
                           setSelectedExam(exam);
-                          setShowResultsModal(true);
+                          setShowSettingsModal(true);
                         }}
                       >
-                        <BarChart3 className="size-4 mr-2" />
-                        View Results
+                        <Settings className="size-4 mr-2" />
+                        Settings
                       </Button>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
-                      onClick={() => {
-                        setSelectedExam(exam);
-                        setShowDetailsModal(true);
-                      }}
-                    >
-                      <Eye className="size-4 mr-2" />
-                      Details
-                    </Button>
+                      {exam.status === 'completed' || exam.status === 'ongoing' ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
+                          onClick={() => {
+                            setSelectedExam(exam);
+                            setShowResultsModal(true);
+                          }}
+                        >
+                          <BarChart3 className="size-4 mr-2" />
+                          View Results
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-gray-300 text-gray-700 hover:bg-gray-50 whitespace-nowrap"
+                        onClick={() => {
+                          setSelectedExam(exam);
+                          setShowDetailsModal(true);
+                        }}
+                      >
+                        <Eye className="size-4 mr-2" />
+                        Details
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>

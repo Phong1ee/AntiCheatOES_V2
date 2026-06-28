@@ -12,26 +12,6 @@ def _get_exam_status(start_time, end_time):
     else:
         return "completed"
 
-def insertQuestion(question_text: str, question_type: str, question_point: int):
-    """Insert a new question into the database."""
-    cnx = get_db_connection()
-    cursor = cnx.cursor()
-    query = """
-    INSERT INTO question (question_text, question_type, question_point)
-    VALUES (%s, %s, %s)
-    """
-    try:
-        cursor.execute(query, (question_text, question_type, question_point))
-        cnx.commit()
-        return cursor.lastrowid
-    except Exception as e:
-        cnx.rollback()
-        raise e
-    finally:
-        cursor.close()
-        cnx.close()
-
-
 def get_exams_by_teacher(teacher_id: str):
     """Get all exams created by a specific teacher."""
     cnx = get_db_connection()
@@ -43,15 +23,16 @@ def get_exams_by_teacher(teacher_id: str):
         cursor.execute(query, (teacher_id,))
         result = cursor.fetchall()
         
-        # Add student count for each exam
+        # Add student count, status, and subject for each exam
         for exam in result:
             try:
                 exam['totalStudents'] = getStudentExamCount(exam['exam_id'])
                 exam['status'] = _get_exam_status(exam['start_time'], exam['end_time'])
+                exam['subject'] = returnExamSubject(exam['exam_id'])
             except Exception:
                 exam['totalStudents'] = 0
                 exam['status'] = 'upcoming'
-        
+                exam['subject'] = None
         return result
     except Exception as e:
         print(f"ERROR in get_exams_by_teacher: {str(e)}")
@@ -77,13 +58,48 @@ def getStudentExamCount(Exam_id: int):
         cursor.close()
         cnx.close()
 
+def returnActiveExam (teacher_id: str):
+    """Return the active exam for a specific teacher."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+    SELECT * FROM exam WHERE manage_by = %s AND start_time <= NOW() AND end_time >= NOW()
+    """
+    try:
+        cursor.execute(query, (teacher_id,))
+        result = cursor.fetchone()
+        if result:
+            result['totalStudents'] = getStudentExamCount(result['exam_id'])
+            result['status'] = _get_exam_status(result['start_time'], result['end_time'])
+            result['subject'] = returnExamSubject(result['exam_id'])
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
 
-def __GetExamStatus(exam_start_time: datetime, exam_end_time: datetime):
-    """Determine the status of an exam based on its start and end times."""
-    current_time = datetime.now()
-    if current_time < exam_start_time:
-        return "upcoming"
-    elif exam_start_time <= current_time <= exam_end_time:
-        return "ongoing"
-    else:
-        return "completed"
+
+def returnExamSubject (exam_id: int):
+    """Return the subject of a specific exam."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+    SELECT
+    e.exam_id,
+    e.title,
+    s.subject_name
+    FROM exam e
+    JOIN subject s
+        ON e.subject_id = s.subject_id
+    WHERE e.exam_id = %s;
+        """
+    try:
+        cursor.execute(query, (exam_id,))
+        result = cursor.fetchone()
+        return result['subject_name'] if result else None
+    except Exception as e:
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from src.route.Default import router as default_router
-from src.route.Teacher import router as teacher_router
+from src.route.teacherRoute import router as teacher_router
 
 
 

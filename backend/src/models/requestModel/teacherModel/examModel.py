@@ -21,7 +21,18 @@ def insertQuestion(question_text: str, question_type: str, question_point: int):
         cnx.close()
 
 
-def get_exams_by_teacher(teacher_id: int):
+def _get_exam_status(start_time, end_time):
+    """Calculate exam status based on start and end times."""
+    now = datetime.now()
+    
+    if now < start_time:
+        return "upcoming"
+    elif start_time <= now <= end_time:
+        return "ongoing"
+    else:
+        return "completed"
+
+def get_exams_by_teacher(teacher_id: str):
     """Get all exams created by a specific teacher."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -32,9 +43,15 @@ def get_exams_by_teacher(teacher_id: int):
         cursor.execute(query, (teacher_id,))
         result = cursor.fetchall()
         
-        # Add student count for each exam
+        # Add student count and status for each exam
         for exam in result:
-            exam['totalStudents'] = getStudentExamCount(exam['exam_id'])
+            try:
+                exam['totalStudents'] = getStudentExamCount(exam['exam_id'])
+            except Exception:
+                exam['totalStudents'] = 0
+            
+            # Add status based on exam times
+            exam['status'] = _get_exam_status(exam['start_time'], exam['end_time'])
         
         return result
     except Exception as e:

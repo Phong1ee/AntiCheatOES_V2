@@ -34,15 +34,16 @@ interface Exam {
   start_time: string;
   end_time: string;
   totalStudents: number;
-  manage_by: number;
+  manage_by: string;
+  status: string;
 }
 
-// Status configuration - commented out for future use
-// const statusConfig = {
-//   upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-//   ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-//   completed: { label: 'Completed', color: 'bg-green-100 text-green-700 border-green-200' },
-// };
+// Status configuration
+const statusConfig = {
+  upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
+  completed: { label: 'Completed', color: 'bg-green-100 text-green-700 border-green-200' },
+};
 
 interface TeacherExamListProps {
   onExamClick?: (examId: string) => void;
@@ -50,7 +51,7 @@ interface TeacherExamListProps {
 
 export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<string>('date');
+  const [sortBy, setSortBy] = useState<string>('date-desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -70,7 +71,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
         }
 
         const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-        const response = await fetch(`${API_BASE_URL}/api/teacher-exams`, {
+        const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
           method: "GET",
           headers: { 
             "Content-Type": "application/json",
@@ -85,7 +86,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
 
         const data = await response.json();
         console.log('Teacher exams response:', data);
-        setExams(data.exams || []);
+        setExams(Array.isArray(data) ? data : (data.exams || []));
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch exams');
@@ -121,7 +122,31 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
     );
   }
 
-  const filteredExams = exams;
+  const filteredExams = exams
+    // Filter by status
+    .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
+    // Filter by search query
+    .filter((exam) => {
+      const query = searchQuery.toLowerCase();
+      return (
+        exam.title.toLowerCase().includes(query) ||
+        exam.description.toLowerCase().includes(query) ||
+        exam.examcode.toLowerCase().includes(query)
+      );
+    })
+    // Sort
+    .sort((a, b) => {
+      if (sortBy === 'date-desc') {
+        return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+      } else if (sortBy === 'date-asc') {
+        return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+      } else if (sortBy === 'subject-asc') {
+        return a.description.localeCompare(b.description);
+      } else if (sortBy === 'subject-desc') {
+        return b.description.localeCompare(a.description);
+      }
+      return 0;
+    });
 
   return (
     <div className="space-y-6">
@@ -152,12 +177,14 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                 </SelectContent>
               </Select>
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="date">Sort by Date</SelectItem>
-                  <SelectItem value="subject">Sort by Subject</SelectItem>
+                  <SelectItem value="date-desc">Date (Newest)</SelectItem>
+                  <SelectItem value="date-asc">Date (Oldest)</SelectItem>
+                  <SelectItem value="subject-asc">Subject (A-Z)</SelectItem>
+                  <SelectItem value="subject-desc">Subject (Z-A)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -178,8 +205,11 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-lg text-gray-800">{exam.title}</h3>
-                          <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
+                          <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white border-0 shadow-md">
                             {exam.examcode}
+                          </Badge>
+                          <Badge className={statusConfig[exam.status as keyof typeof statusConfig]?.color || 'bg-gray-100 text-gray-700'}>
+                            {statusConfig[exam.status as keyof typeof statusConfig]?.label || exam.status}
                           </Badge>
                         </div>
                         <p className="text-gray-600 mt-1">{exam.description}</p>

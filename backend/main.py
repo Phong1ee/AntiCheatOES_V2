@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from src.route.Default import router as default_router
+from src.route.Teacher import router as teacher_router
+
 
 
 # Initialize FastAPI app
@@ -22,12 +25,8 @@ def read_root():
     return {"status": "Backend is running"}
 
 # Include routers
-app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-app.include_router(teacherRouter, prefix="/api/teacher-exams", tags=["teacher-exams"])
-app.include_router(exam_router, prefix="/api/exams", tags=["exams"])
-app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
-app.include_router(results_router, prefix="/api/results", tags=["results"])
-app.include_router(teacher_router, prefix="/api/exams", tags=["teacher"])
+app.include_router(default_router, prefix="/api", tags=["default"])
+app.include_router(teacher_router, prefix="/api/teacher", tags=["teacher-exams"])
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

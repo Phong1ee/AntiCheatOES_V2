@@ -8,7 +8,7 @@ def get_db_connection():
     try:
         cnx = mysql.connector.connect(
             user=os.getenv('DB_USER', 'root'),
-            password=os.getenv('DB_PASSWORD', ''),
+            password=os.getenv('DB_PASSWORD', '12345'),
             host=os.getenv('DB_HOST', 'localhost'),
             database=os.getenv('DB_NAME', 'online_exam_db')
         )

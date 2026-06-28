@@ -21,11 +21,13 @@ interface QuestionResult {
   id: number;
   type: "mcq" | "essay";
   topic?: string | null;
-  isCorrect: boolean;
+  isCorrect?: boolean;
   question: string;
   options?: string[];
   studentAnswer?: string | null;
   correctAnswer?: string | null;
+  points?: number;
+  score?: number | null;
 }
 
 interface ExamResultDetail {
@@ -76,20 +78,21 @@ export function ExamResultDetailsPage({
         }
 
         const data = await res.json();
+        const result = data.result || data;
 
         const mapped: ExamResultDetail = {
-          id: data.id,
-          examTitle: data.examTitle,
-          subject: data.subject,
-          date: data.date,
-          duration: data.duration,
-          timeTaken: data.timeTaken,
-          scoreVisible: data.scoreVisible,
-          allowViewDetails: data.allowViewDetails,
-          score: data.score,
-          correctAnswers: data.correctAnswers,
-          totalQuestions: data.totalQuestions,
-          questions: data.questions || [],
+          id: result.id,
+          examTitle: result.examTitle,
+          subject: result.subject,
+          date: result.date,
+          duration: result.duration,
+          timeTaken: result.timeTaken,
+          scoreVisible: result.scoreVisible,
+          allowViewDetails: result.allowViewDetails,
+          score: result.score,
+          correctAnswers: result.correctAnswers,
+          totalQuestions: result.totalQuestions,
+          questions: result.questions || [],
         };
 
         setExam(mapped);

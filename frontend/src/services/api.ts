@@ -4,6 +4,9 @@ export interface AuthResponse {
   success: boolean;
   message: string;
   user?: {
+    id: number;
+    school_id: string;
+    full_name: string;
     fullname: string;
     email: string;
     role: string;
@@ -20,7 +23,7 @@ export interface RegisterRequest {
   fullname: string;
   email: string;
   password: string;
-  role?: string;
+  role?: "student" | "teacher" | "admin";
 }
 
 /**
@@ -46,7 +49,10 @@ export const authAPI = {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        role: data.role?.toLowerCase() ?? "student",
+      }),
     });
 
     if (!response.ok) {

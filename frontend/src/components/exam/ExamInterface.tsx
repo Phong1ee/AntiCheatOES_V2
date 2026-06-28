@@ -18,6 +18,19 @@ interface Question {
   answer?: string;
 }
 
+interface ApiQuestionOption {
+  id: number;
+  text: string;
+}
+
+interface ApiQuestion {
+  id: number;
+  text: string;
+  type: 'multiple-choice' | 'essay';
+  options?: ApiQuestionOption[];
+  answer?: string;
+}
+
 interface ExamInterfaceProps {
   examId: string;
   onExit: () => void;
@@ -40,6 +53,8 @@ export function ExamInterface({
   const [isFullscreen, setIsFullscreen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [attemptId, setAttemptId] = useState<number | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Lưu lại tổng thời gian ban đầu của bài thi (giây)
   const initialTimeRef = useRef<number>(0);
@@ -54,6 +69,20 @@ export function ExamInterface({
   >('copy-paste');
   const [isTerminated, setIsTerminated] = useState(false);
   const warningTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const rawAttempt = localStorage.getItem('current_exam_attempt');
+    if (!rawAttempt) return;
+
+    try {
+      const parsed = JSON.parse(rawAttempt);
+      if (String(parsed.examId) === String(examId) && parsed.attemptId) {
+        setAttemptId(Number(parsed.attemptId));
+      }
+    } catch (err) {
+      console.error('Failed to parse current exam attempt:', err);
+    }
+  }, [examId]);
 
   // ====== FETCH EXAM & QUESTIONS FROM BACKEND ======
   useEffect(() => {
@@ -72,7 +101,7 @@ export function ExamInterface({
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || 'Failed to load exam');
+          throw new Error(data.detail || data.message || 'Failed to load exam');
         }
 
         const data = await res.json();
@@ -84,7 +113,15 @@ export function ExamInterface({
         initialTimeRef.current = dur;
         setTimeRemaining(dur);
 
-        setQuestions(data.questions);
+        const normalizedQuestions: Question[] = (data.questions || []).map((question: ApiQuestion) => ({
+          id: question.id,
+          text: question.text,
+          type: question.type,
+          answer: question.answer,
+          options: (question.options || []).map((option) => option.text),
+        }));
+
+        setQuestions(normalizedQuestions);
       } catch (err: any) {
         console.error(err);
         setLoadError(err.message || 'Error loading exam');
@@ -345,6 +382,7 @@ export function ExamInterface({
 
   const confirmSubmit = async () => {
     setShowSubmitDialog(false);
+    setSubmitError(null);
 
     try {
       const token = localStorage.getItem('token');
@@ -364,6 +402,7 @@ export function ExamInterface({
           Authorization: token ? `Bearer ${token}` : '',
         },
         body: JSON.stringify({
+          attemptId,
           answers: answersPayload,
           timeSpentSeconds,
         }),
@@ -372,17 +411,23 @@ export function ExamInterface({
       const data = await res.json();
       if (!res.ok) {
         console.error('Submit failed:', data);
+        setSubmitError(data.detail || data.message || 'Submit failed');
+        return;
       } else {
         console.log('Submit success:', data);
       }
     } catch (err) {
       console.error('Submit error:', err);
+      setSubmitError('Submit failed');
+      return;
     }
 
+    localStorage.removeItem('current_exam_attempt');
     setIsSubmitted(true);
   };
 
   const handleExitSubmitted = async () => {
+    localStorage.removeItem('current_exam_attempt');
     if (document.fullscreenElement) {
       await document.exitFullscreen();
     }
@@ -468,6 +513,12 @@ export function ExamInterface({
         answeredCount={answeredCount}
         totalQuestions={questions.length}
       />
+
+      {submitError && (
+        <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">
+          {submitError}
+        </div>
+      )}
 
       {/* <WebcamMonitor /> */}
 

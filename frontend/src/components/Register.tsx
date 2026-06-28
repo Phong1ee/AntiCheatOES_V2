@@ -26,17 +26,11 @@ interface RegisterProps {
 type Role = "student" | "teacher" | "admin";
 
 interface RegisterResponse {
+  success?: boolean;
   message: string;
-  token: string;
-  user: {
-    id: number;
-    full_name: string;
-    email: string;
-    role: Role;
-  };
 }
 
-const API_BASE_URL = "http://localhost:8000"; // backend Node.js
+const API_BASE_URL = "http://localhost:8000";
 
 // ===== Password rules =====
 const passwordRules = [
@@ -120,7 +114,7 @@ export function Register({ onNavigate }: RegisterProps) {
           fullname: formData.fullName,
           email: formData.email,
           password: formData.password,
-          role: formData.role,
+          role: formData.role.toLowerCase(),
         }),
       });
 

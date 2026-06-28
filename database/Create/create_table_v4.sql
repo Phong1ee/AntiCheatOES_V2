@@ -111,7 +111,7 @@ CREATE TABLE chapter_lo(
 
 CREATE TABLE exam(
     exam_id INT AUTO_INCREMENT PRIMARY KEY,
-    manage_by INT NULL,
+    manage_by varchar(30),
     title VARCHAR(255) NOT NULL,
     examcode VARCHAR(20) NOT NULL UNIQUE,
     max_attempt INT,

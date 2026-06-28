@@ -1,15 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from src.route.authRoute import router as auth_router
-from src.route.examRoute import router as exam_router
-<<<<<<< HEAD
-from src.route.teacherRoute import router as teacherRouter
-=======
-from src.route.profileRoute import router as profile_router
-from src.route.resultsRoute import router as results_router
-from src.route.Teacher import router as teacher_router
->>>>>>> duchuy_v2
+
 
 # Initialize FastAPI app
 app = FastAPI(title="Online Examination System API", version="0.1.0")

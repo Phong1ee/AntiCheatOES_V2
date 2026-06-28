@@ -1,4 +1,4 @@
-import src.models.examModel as examModel
+# import src.models.examModel as examModel
 import src.models.userModel as userModel
 from datetime import datetime
 
@@ -173,7 +173,6 @@ class ExamController:
             }
         except Exception as e:
             raise e
-<<<<<<< HEAD
     
     @staticmethod
     def get_exams_by_teacher(teacher_id: int):
@@ -183,17 +182,6 @@ class ExamController:
             return {
                 "success": True,
                 "exams": exams
-=======
-
-    @staticmethod
-    def addQuestionToExam(exam_id: int, question_data: dict):
-        """Add a question to an exam."""
-        try:
-            examModel.addQuestionToExam(exam_id, question_data)
-            return {
-                "success": True,
-                "message": "Question added to exam successfully"
->>>>>>> duchuy_v2
             }
         except Exception as e:
             raise e

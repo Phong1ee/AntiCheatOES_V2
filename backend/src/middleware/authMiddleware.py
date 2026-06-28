@@ -23,10 +23,6 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-<<<<<<< HEAD
-    except (ValueError, IndexError):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-=======
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid authorization header")
 
@@ -46,4 +42,3 @@ class RoleChecker:
 ADMIN_ONLY = RoleChecker(allowed_roles=["admin"])
 STUDENT_ONLY = RoleChecker(allowed_roles=["student"])
 TEACHER_ONLY = RoleChecker(allowed_roles=["teacher"])
->>>>>>> duchuy_v2

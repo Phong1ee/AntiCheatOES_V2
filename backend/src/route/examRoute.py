@@ -1,31 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict, Field
 from src.controller.examController import ExamController
-#from src.controller.authController import ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
-from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
+from src.middleware.authMiddleware import ADMIN_ONLY, STUDENT_ONLY
+from src.models.requestModel.examRequestModel import SubmitExamRequest, VerifyCodeRequest
 
 router = APIRouter()
 
-class VerifyCodeRequest(BaseModel):
-    code: str
-
-
-class SubmitAnswerRequest(BaseModel):
-    questionId: int
-    selectedOptionId: int | None = None
-    answerText: str | None = None
-
-
-class SubmitExamRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    attemptId: int = Field(alias="attempt_id")
-    answers: list[SubmitAnswerRequest]
-    timeSpentSeconds: int | None = None
-
 
 @router.get("")
-async def get_student_exams_root(current_user: dict = Depends(verify_token)):
+async def get_student_exams_root(current_user: dict = Depends(STUDENT_ONLY)):
     """Get all exams assigned to the current student."""
     try:
         result = ExamController.getStudentExams(
@@ -40,7 +22,7 @@ async def get_student_exams_root(current_user: dict = Depends(verify_token)):
 
 
 @router.get("/student")
-async def get_student_exams(current_user: dict = Depends(verify_token), role_check: dict = Depends(STUDENT_ONLY)):
+async def get_student_exams(current_user: dict = Depends(STUDENT_ONLY)):
     """Get all exams assigned to the current student."""
     result = ExamController.getStudentExams(
         current_user["school_id"],
@@ -54,7 +36,7 @@ async def get_student_exams(current_user: dict = Depends(verify_token), role_che
 async def verify_exam_code(
     exam_id: int,
     request: VerifyCodeRequest,
-    current_user: dict = Depends(verify_token)
+    current_user: dict = Depends(STUDENT_ONLY)
 ):
     """Verify exam code for an assigned student without creating an attempt."""
     try:
@@ -79,7 +61,7 @@ async def verify_exam_code(
 async def start_exam(
     exam_id: int,
     request: VerifyCodeRequest,
-    current_user: dict = Depends(verify_token)
+    current_user: dict = Depends(STUDENT_ONLY)
 ):
     """Start exam and create or reuse an attempt."""
     try:
@@ -104,7 +86,7 @@ async def start_exam(
 async def submit_exam(
     exam_id: int,
     request: SubmitExamRequest,
-    current_user: dict = Depends(verify_token)
+    current_user: dict = Depends(STUDENT_ONLY)
 ):
     """Submit an exam attempt and close it."""
     try:
@@ -125,7 +107,7 @@ async def submit_exam(
 
 
 @router.get("/{exam_id}")
-async def get_exam(exam_id: int, current_user: dict = Depends(verify_token)):
+async def get_exam(exam_id: int, current_user: dict = Depends(STUDENT_ONLY)):
     """Get exam details with student-safe questions and options."""
     try:
         result = ExamController.getExamWithQuestions(
@@ -143,11 +125,10 @@ async def get_exam(exam_id: int, current_user: dict = Depends(verify_token)):
         raise HTTPException(status_code=400, detail=detail)
 
 @router.get("/{student_id}/exams")
-async def get_student_exams_by_id(student_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY)):
+async def get_student_exams_by_id(student_id: str, current_user: dict = Depends(ADMIN_ONLY)):
     """Get all exams assigned to a specific student by their school ID."""
     result = ExamController.getStudentExams(
         student_id,
         current_user["role"]
     )
     return result
-

@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.controller.resultsController import ResultsController
-from src.middleware.authMiddleware import verify_token
+from src.middleware.authMiddleware import STUDENT_ONLY
 
 router = APIRouter()
 
 
 @router.get("")
-async def get_student_results(current_user: dict = Depends(verify_token)):
+async def get_student_results(current_user: dict = Depends(STUDENT_ONLY)):
     """Get all exam results for the current student."""
     try:
         return ResultsController.getStudentResults(
@@ -26,7 +26,7 @@ async def get_student_results(current_user: dict = Depends(verify_token)):
 @router.get("/{attempt_id}")
 async def get_student_result_detail(
     attempt_id: int,
-    current_user: dict = Depends(verify_token),
+    current_user: dict = Depends(STUDENT_ONLY),
 ):
     """Get one exam result detail for the current student."""
     try:

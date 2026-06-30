@@ -1,21 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 
 from src.controller.profileController import ProfileController
 from src.middleware.authMiddleware import verify_token
+from src.models.requestModel.profileRequestModel import (
+    ChangePasswordRequest,
+    UpdateProfileRequest,
+)
 
 router = APIRouter()
-
-
-class UpdateProfileRequest(BaseModel):
-    fullName: str
-    phone: str | None = None
-    dateOfBirth: str | None = None
-
-
-class ChangePasswordRequest(BaseModel):
-    currentPassword: str
-    newPassword: str
 
 
 @router.get("/me")

@@ -1,21 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
 from src.controller.authController import AuthController
 from src.middleware.authMiddleware import verify_token
+from src.models.requestModel.authModel import LoginRequest, RegisterRequest
 
 router = APIRouter()
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class RegisterRequest(BaseModel):
-    fullname: str
-    email: str
-    password: str
-    role: str
 
 
 @router.post("/login")

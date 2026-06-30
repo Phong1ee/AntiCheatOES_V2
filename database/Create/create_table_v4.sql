@@ -122,7 +122,7 @@ CREATE TABLE exam(
     result_visibility ENUM('hidden', 'score-only', 'full') DEFAULT 'full',
 
     FOREIGN KEY (manage_by)
-        REFERENCES user(id)
+        REFERENCES user(school_id)
         ON DELETE SET NULL
 );
 

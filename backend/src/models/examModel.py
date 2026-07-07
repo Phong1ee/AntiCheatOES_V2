@@ -2,16 +2,16 @@ from datetime import datetime
 from src.a_db_config.config import get_db_connection
 
 
-def insertQuestion(question_text: str, question_type: str, question_point: int):
+def insertQuestion(question_text: str, question_type: str):
     """Insert a new question into the database."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
     query = """
-    INSERT INTO question (question_text, question_type, question_point)
+    INSERT INTO question (question_text, question_type)
     VALUES (%s, %s, %s)
     """
     try:
-        cursor.execute(query, (question_text, question_type, question_point))
+        cursor.execute(query, (question_text, question_type))
         cnx.commit()
         return cursor.lastrowid
     except Exception as e:
@@ -451,8 +451,7 @@ def addQuestionToExam(exam_id: int, question_data: dict):
     try:
         question_id = insertQuestion(
             question_text=question_data["text"],
-            question_type="MCQ" if question_data["type"] == "multiple-choice" else "essay",
-            question_point=question_data["points"]
+            question_type=question_data["type"],
         )
 
         insert_exam_question_query = """

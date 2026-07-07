@@ -8,7 +8,7 @@ from src.route.resultsRoute import router as results_router
 from src.route.Teacher import router as teacher_router
 from sqlalchemy.orm import Session
 from database import Base, engine, SessionLocal
-import src.a_db_config.model  
+import src.a_db_config  
 
 # Initialize FastAPI app
 app = FastAPI(title="Online Examination System API", version="0.1.0")
@@ -22,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-src.a_db_config.model.Base.metadata.create_all(bind=engine)  # Create tables if they don't exist
+src.a_db_config.Base.metadata.create_all(bind=engine)  # Create tables if they don't exist
 
 # Health check endpoint
 @app.get("/")

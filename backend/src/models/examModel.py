@@ -461,7 +461,7 @@ def addQuestionToExam(exam_id: int, question_data: dict):
         """
         cursor.execute(insert_exam_question_query, (exam_id, question_id))
 
-        if question_data["type"] == "multiple-choice":
+        if question_data["type"] == "multiple-choice" | question_data["type"] == "TF":
             insert_option_query = """
             INSERT INTO options (question_id, options_text, is_correct)
             VALUES (%s, %s, %s)
@@ -472,7 +472,23 @@ def addQuestionToExam(exam_id: int, question_data: dict):
                     option["text"],
                     option.get("is_correct", False)
                 ))
-
+        # if question_data["type"] == "essay":
+        #     insert_essay_query = """
+        #     INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
+        #     VALUES (NULL, %s, NULL, NULL)
+        #     """
+        #     cursor.execute(insert_essay_query, (question_id,))
+        if question_data["type"] == "multiple-answer":
+            insert_option_query = """
+            INSERT INTO options (question_id, options_text, is_correct)
+            VALUES (%s, %s, %s)
+            """
+            for option in question_data.get("options", []):
+                cursor.execute(insert_option_query, (
+                    question_id,
+                    option["text"],
+                    option.get("is_correct", False)
+                ))
         cnx.commit()
     except Exception as e:
         cnx.rollback()
@@ -480,3 +496,4 @@ def addQuestionToExam(exam_id: int, question_data: dict):
     finally:
         cursor.close()
         cnx.close()
+        

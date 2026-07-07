@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
-from src.models.requestModel.addQuestionModel import QuestionAddToExamRequest
+from src.models.requestModel.QuestionAddToExamRequest import QuestionAddToExamRequest
 from src.controller.examController import ExamController
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
+from src.a_db_config import model
 
 router = APIRouter()
 

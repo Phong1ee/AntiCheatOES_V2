@@ -12,7 +12,7 @@ def verify_token(authorization: str = Header(None)):
         if scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid authentication scheme")
         
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], expires_delta=24*60*60)  # Token expires in 24 hours
         return {
             "school_id": payload.get("sub"),
             "role": payload.get("role"),

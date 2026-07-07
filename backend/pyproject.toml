@@ -15,4 +15,7 @@ dependencies = [
     "PyJWT>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     "werkzeug>=3.1.8",
+    "sqlalchemy>=2.0.51",
+    "alembic>=1.18.5",
+    "pymysql>=1.2.0",
 ]

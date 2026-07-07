@@ -12,10 +12,14 @@ class ExamController:
             exams = examModel.get_exams_by_teacher(teacher_id)
             active_exam = examModel.returnActiveExam(teacher_id)
             active_exams_count = 1 if active_exam else 0
+            subjects = examModel.returnSubject()
+            total_student = userModel.getTotalStudentByTeacher(teacher_id)
             return {
                 "success": True,
                 "exams": exams,
-                "active_exams_count": active_exams_count
+                "active_exams_count": active_exams_count,
+                "subjects": subjects,
+                "total_student": total_student
             }
         except Exception as e:
             raise e

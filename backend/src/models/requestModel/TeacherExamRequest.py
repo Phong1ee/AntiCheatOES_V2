@@ -12,3 +12,4 @@ class TeacherExamRequest(BaseModel):
     end_time: str = Field(..., description="The end time of the exam in ISO 8601 format.")
     results_visibility: str = Field(..., description="The visibility of the exam results (e.g., 'public', 'private').")
     subject_id: int = Field(..., description="The ID of the subject associated with the exam.")
+    

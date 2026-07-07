@@ -35,6 +35,12 @@ class ResultVisibility(str, enum.Enum):
     full = "full"
 
 
+result_visibility_enum = Enum(
+    ResultVisibility,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+)
+
+
 class QuestionDifficulty(str, enum.Enum):
     easy = "easy"
     medium = "medium"
@@ -238,7 +244,7 @@ class Exam(Base):
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     result_visibility: Mapped[Optional[ResultVisibility]] = mapped_column(
-        Enum(ResultVisibility), default=ResultVisibility.full
+        result_visibility_enum, default=ResultVisibility.full
     )
     subject_id: Mapped[Optional[str]] = mapped_column(
         String(20), ForeignKey("subject.subject_id")

@@ -1,2 +1,2 @@
-SECRET_KEY = "HASQEWQEO!LNDALSDASLKDN"  # In production, use a secure method to store this key
+SECRET_KEY = "HASQEWQEO!LNDALSDASLKDN12345678"
 ALGORITHM = "HS256"

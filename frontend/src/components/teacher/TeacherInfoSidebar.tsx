@@ -28,6 +28,12 @@ interface QuestionBank {
   question_count: number;
 }
 
+interface QuickStat {
+  activeExams: number;
+  totalStudents: number;
+  averagePerformance: number; 
+}
+
 const mockNotifications = [
   { id: '1', message: '35 students completed Quiz 3', time: '10 min ago', type: 'info' },
   { id: '2', message: 'Midterm Exam starting in 6 days', time: '1 hour ago', type: 'warning' },
@@ -48,6 +54,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
   const [activeExamsCount, setActiveExamsCount] = useState(0);
   const [upcomingExams, setUpcomingExams] = useState<UpcomingExam[]>([]);
   const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
+  const [totalStudentsCount, setTotalStudentsCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -72,7 +79,9 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
         }
 
         const data = await response.json();
+        console.log("Fetched exam data:", data);
         setActiveExamsCount(data.active_exams_count || 0);
+        setTotalStudentsCount(data.total_student || 0);
         
         // Filter upcoming exams (start_time > now) and limit to 4
         const now = new Date();
@@ -86,6 +95,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
       } catch (err) {
         console.error('Failed to fetch data:', err);
         setActiveExamsCount(0);
+        setTotalStudentsCount(0);
         setUpcomingExams([]);
         setQuestionBanks([]);
       } finally {
@@ -145,12 +155,12 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Total Students</p>
-                <p className="text-xl text-gray-800">135</p>
+                <p className="text-xl text-gray-800">{totalStudentsCount}</p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-gradient-to-r from-green-50 to-teal-50 rounded-xl">
+          {/* <div className="flex items-center justify-between p-3 bg-gradient-to-r from-green-50 to-teal-50 rounded-xl">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-green-100 rounded-lg">
                 <TrendingUp className="size-5 text-green-700" />
@@ -160,7 +170,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
                 <p className="text-xl text-gray-800">82.5%</p>
               </div>
             </div>
-          </div>
+          </div> */}
         </CardContent>
       </Card>
 

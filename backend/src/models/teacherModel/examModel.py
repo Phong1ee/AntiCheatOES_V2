@@ -160,18 +160,17 @@ def returnTotalStudentCount(teacher_id: str):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     query = """
-        SELECT COUNT(*) AS total_students
+        SELECT COUNT(DISTINCT se.student_id) AS total_students
         FROM student_exam se
         JOIN exam e
             ON se.exam_id = e.exam_id
         WHERE e.manage_by = %s;
-    """
+        """
     try:
         cursor.execute(query, (teacher_id,))
         result = cursor.fetchone()
         return result['total_students'] if result else 0
     except Exception as e:
-        print(f"ERROR in returnTotalStudentCount: {str(e)}")
         raise e
     finally:
         cursor.close()

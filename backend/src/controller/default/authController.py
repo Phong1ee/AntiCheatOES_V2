@@ -42,7 +42,6 @@ class AuthController:
                 "id": user[0],
                 "school_id": user[5],
                 "full_name": user[1],
-                "fullname": user[1],
                 "email": user[2],
                 "role": role
             },

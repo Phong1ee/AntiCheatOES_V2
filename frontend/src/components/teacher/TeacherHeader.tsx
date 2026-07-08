@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { GraduationCap, LogOut, ChevronDown } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import {
@@ -23,7 +24,30 @@ const navigation = [
   { id: 'support', label: 'Technical Support' },
 ];
 
+function getStoredTeacherName(): string {
+  try {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      const fullName = parsedUser?.full_name || parsedUser?.fullname || parsedUser?.fullName;
+      if (typeof fullName === 'string' && fullName.trim()) {
+        return fullName;
+      }
+    }
+  } catch {
+    // Ignore parsing errors and fall back to the simple storage key.
+  }
+
+  return localStorage.getItem('full_name') || localStorage.getItem('fullname') || 'Teacher';
+}
+
 export function TeacherHeader({ activeTab, onTabChange, onLogout }: TeacherHeaderProps) {
+  const [teacherName, setTeacherName] = useState<string>(getStoredTeacherName);
+
+  useEffect(() => {
+    setTeacherName(getStoredTeacherName());
+  }, []);
+
   return (
     <header className="sticky top-0 z-50 w-full bg-white/95 backdrop-blur-sm shadow-md">
       <div className="container mx-auto px-4 max-w-7xl">
@@ -65,7 +89,7 @@ export function TeacherHeader({ activeTab, onTabChange, onLogout }: TeacherHeade
                     <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=Teacher" />
                     <AvatarFallback>DR</AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:block text-sm text-gray-700">Dr. Anderson</span>
+                  <span className="hidden sm:block text-sm text-gray-700">{teacherName}</span>
                   <ChevronDown className="size-4 text-gray-500" />
                 </button>
               </DropdownMenuTrigger>

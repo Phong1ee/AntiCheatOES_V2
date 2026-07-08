@@ -47,6 +47,12 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
       }
       if (response.user) {
         localStorage.setItem("user", JSON.stringify(response.user));
+
+        const fullName = response.user.full_name || response.user.fullname || "";
+        if (fullName) {
+          localStorage.setItem("full_name", fullName);
+          localStorage.setItem("fullname", fullName);
+        }
       }
 
       console.log(response.message);

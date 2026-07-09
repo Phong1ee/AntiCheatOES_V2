@@ -1,6 +1,6 @@
 from datetime import date
 
-import src.models.default.profileModel as profileModel
+import src.models.profileModel as profileModel
 
 
 class ProfileController:

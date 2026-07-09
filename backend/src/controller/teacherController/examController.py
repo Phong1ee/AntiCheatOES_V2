@@ -1,5 +1,5 @@
 # import src.models.examModel as examModel
-import src.models.default.userModel as userModel
+import src.models.userModel as userModel
 import src.models.teacherModel.examModel as examModel
 from datetime import datetime
 

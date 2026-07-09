@@ -1,7 +1,7 @@
 import jwt
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Depends, status
-import src.models.default.userModel as userModel
+import src.models.userModel as userModel
 from src.middleware.constant import SECRET_KEY, ALGORITHM
 #from src.middleware.authMiddleware import RoleChecker, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from src.controller.default.authController import AuthController
+from src.controller.authController import AuthController
 from src.middleware.authMiddleware import verify_token
 
 router = APIRouter()

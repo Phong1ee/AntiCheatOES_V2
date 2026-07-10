@@ -4,7 +4,7 @@ import uvicorn
 from src.route.authRoute import router as auth_router
 # from backend.src.route.teacherRoute.examRoute import router as exam_router
 from src.route.profileRoute import router as profile_router
-from src.route.resultsRoute import router as results_router
+# from src.route.resultsRoute import router as results_router
 from src.route.teacherRoute import router as teacher_router
 from sqlalchemy.orm import Session
 from database import Base, engine, SessionLocal
@@ -47,7 +47,7 @@ app.include_router(teacher_router, prefix="/api/teacher", tags=["teacher"])
 app.include_router(teacher_router, prefix="/api/exams", tags=["teacher"])
 # app.include_router(exam_router, prefix="/api/exams", tags=["exams"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
-app.include_router(results_router, prefix="/api/results", tags=["results"])
+# app.include_router(results_router, prefix="/api/results", tags=["results"])
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

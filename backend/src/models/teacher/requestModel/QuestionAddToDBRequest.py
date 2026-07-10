@@ -1,7 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 class QuestionAddToDBRequest(BaseModel):
-    question_id: str = Field(..., description="The ID of the question to be added to the exam.")
     question_text: str = Field(..., description="The text of the question.")
     question_difficulties: str = Field(..., description="The difficulty level of the question.")
     question_type: str = Field(..., description="The type of the question (e.g., multiple-choice, essay).")

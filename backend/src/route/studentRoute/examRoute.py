@@ -9,12 +9,10 @@ router = APIRouter()
 class VerifyCodeRequest(BaseModel):
     code: str
 
-
 class SubmitAnswerRequest(BaseModel):
     questionId: int
     selectedOptionId: int | None = None
     answerText: str | None = None
-
 
 class SubmitExamRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

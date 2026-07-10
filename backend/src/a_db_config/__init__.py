@@ -23,6 +23,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
+class QuestionStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    draft = "draft"
+
 class UserRole(str, enum.Enum):
     student = "student"
     teacher = "teacher"

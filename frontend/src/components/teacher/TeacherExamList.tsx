@@ -40,6 +40,7 @@ interface Exam {
 }
 
 // Status configuration
+const navigate = useNavigate();
 const statusConfig = {
   upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
@@ -270,15 +271,16 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                           size="sm"
                           className="border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
                           onClick={() => {
-                            setSelectedExam(exam);
-                            setShowResultsModal(true);
+                            // setSelectedExam(exam);
+                            // setShowResultsModal(true);
+                            navigate(`/teacher/exams/results`);
                           }}
                         >
                           <BarChart3 className="size-4 mr-2" />
                           View Results
                         </Button>
                       ) : null}
-                      <Button
+                      {/* <Button
                         variant="outline"
                         size="sm"
                         className="border-gray-300 text-gray-700 hover:bg-gray-50 whitespace-nowrap"
@@ -289,7 +291,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                       >
                         <Eye className="size-4 mr-2" />
                         Details
-                      </Button>
+                      </Button> */}
                     </div>
                   </div>
                 </div>

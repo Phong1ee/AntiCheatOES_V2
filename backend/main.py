@@ -1,10 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from src.route.Default import router as default_router
+from src.route import router as default_router
 from src.route.teacherRoute import router as teacher_router
-
-
 
 # Initialize FastAPI app
 app = FastAPI(title="Online Examination System API", version="0.1.0")
@@ -12,7 +10,18 @@ app = FastAPI(title="Online Examination System API", version="0.1.0")
 # Configure CORS to allow frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:5000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

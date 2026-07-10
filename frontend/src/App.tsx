@@ -15,7 +15,11 @@ type Page =
   | "dashboard"
   | "teacher-dashboard"
   | "admin-dashboard";
+
 type UserRole = "student" | "teacher" | "admin" | null;
+
+const SESSION_DURATION = 2 * 60 * 60 * 1000; // 2 hours
+// const SESSION_DURATION = 10 * 1000; // 10 seconds for testing
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>("login");
@@ -23,60 +27,118 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check for stored token on app load
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    const storedRole = localStorage.getItem("role");
-
-    if (token && storedRole) {
-      // Restore auth state from localStorage
-      setIsAuthenticated(true);
-      setUserRole(storedRole as UserRole);
-      
-      // Navigate to appropriate dashboard
-      if (storedRole === "admin") {
-        setCurrentPage("admin-dashboard");
-      } else if (storedRole === "teacher") {
-        setCurrentPage("teacher-dashboard");
-      } else {
-        setCurrentPage("dashboard");
-      }
-    }
-    
-    setIsLoading(false);
-  }, []);
-
-  const handleLogin = (role: UserRole = "student") => {
-    setIsAuthenticated(true);
-    setUserRole(role);
-    
-    // Store role in localStorage for persistence
-    if (role) {
-      localStorage.setItem("role", role);
-    }
-    
-    if (role === "admin") {
-      setCurrentPage("admin-dashboard");
-    } else if (role === "teacher") {
-      setCurrentPage("teacher-dashboard");
-    } else {
-      setCurrentPage("dashboard");
-    }
-  };
-
   const handleLogout = () => {
     setIsAuthenticated(false);
     setUserRole(null);
     setCurrentPage("login");
-    
-    // Clear auth data from localStorage
+
     localStorage.removeItem("token");
     localStorage.removeItem("role");
+    localStorage.removeItem("loginTime");
   };
 
-  // Show loading state while checking auth
+  // Restore session on app load
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    const storedRole = localStorage.getItem("role");
+    const loginTime = localStorage.getItem("loginTime");
+
+    if (token && storedRole && loginTime) {
+      const elapsed = Date.now() - Number(loginTime);
+
+      if (elapsed >= SESSION_DURATION) {
+        handleLogout();
+      } else {
+        setIsAuthenticated(true);
+        setUserRole(storedRole as UserRole);
+
+        switch (storedRole) {
+          case "admin":
+            setCurrentPage("admin-dashboard");
+            break;
+          case "teacher":
+            setCurrentPage("teacher-dashboard");
+            break;
+          default:
+            setCurrentPage("dashboard");
+        }
+      }
+    }
+
+    setIsLoading(false);
+  }, []);
+
+  // Auto logout after remaining session time
+useEffect(() => {
+  if (!isAuthenticated) return;
+
+  let timeout: ReturnType<typeof setTimeout>;
+
+  const logout = () => {
+    alert("Your session has expired due to inactivity.");
+    handleLogout();
+  };
+
+  const resetTimer = () => {
+    clearTimeout(timeout);
+
+    // Update the last activity time
+    localStorage.setItem("loginTime", Date.now().toString());
+
+    timeout = setTimeout(logout, SESSION_DURATION);
+  };
+
+  // User activities that reset the timer
+  const events = [
+    "mousemove",
+    "mousedown",
+    "keydown",
+    "scroll",
+    "touchstart",
+    "click",
+  ];
+
+  events.forEach((event) =>
+    window.addEventListener(event, resetTimer)
+  );
+
+  // Start timer immediately
+  resetTimer();
+
+  return () => {
+    clearTimeout(timeout);
+
+    events.forEach((event) =>
+      window.removeEventListener(event, resetTimer)
+    );
+  };
+}, [isAuthenticated]);
+
+  const handleLogin = (role: UserRole = "student") => {
+    setIsAuthenticated(true);
+    setUserRole(role);
+
+    localStorage.setItem("role", role!);
+    localStorage.setItem("loginTime", Date.now().toString());
+
+    switch (role) {
+      case "admin":
+        setCurrentPage("admin-dashboard");
+        break;
+      case "teacher":
+        setCurrentPage("teacher-dashboard");
+        break;
+      default:
+        setCurrentPage("dashboard");
+    }
+  };
+
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
   }
 
   return (
@@ -85,13 +147,12 @@ export default function App() {
         <Dashboard onLogout={handleLogout} />
       )}
 
-      {isAuthenticated &&
-        currentPage === "teacher-dashboard" && (
-          <>
-            <TeacherDashboard onLogout={handleLogout} />
-            <Toaster />
-          </>
-        )}
+      {isAuthenticated && currentPage === "teacher-dashboard" && (
+        <>
+          <TeacherDashboard onLogout={handleLogout} />
+          <Toaster />
+        </>
+      )}
 
       {isAuthenticated && currentPage === "admin-dashboard" && (
         <>
@@ -108,9 +169,11 @@ export default function App() {
               onLogin={handleLogin}
             />
           )}
+
           {currentPage === "register" && (
             <Register onNavigate={setCurrentPage} />
           )}
+
           {currentPage === "forgot-password" && (
             <ForgotPassword onNavigate={setCurrentPage} />
           )}

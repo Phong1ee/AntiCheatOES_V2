@@ -524,7 +524,6 @@ def returnSubject():
         cursor.close()
         cnx.close()
 
-
 def returnTotalStudentCount(teacher_id: str):
     """Return the total count of students for a specific teacher."""
     cnx = get_db_connection()

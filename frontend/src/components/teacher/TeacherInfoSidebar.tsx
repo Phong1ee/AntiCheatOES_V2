@@ -66,7 +66,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
         }
 
         const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_URL || "http://localhost:8000";
-        const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
+        const response = await fetch(`${API_BASE_URL}/api/teacher/get_exam_overview`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -80,17 +80,9 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
 
         const data = await response.json();
         console.log("Fetched exam data:", data);
-        setActiveExamsCount(data.active_exams_count || 0);
-        setTotalStudentsCount(data.total_student || 0);
-        
-        // Filter upcoming exams (start_time > now) and limit to 4
-        const now = new Date();
-        const upcoming = (data.exams || [])
-          .filter((exam: any) => new Date(exam.start_time) > now)
-          .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-          .slice(0, 4);
-        
-        setUpcomingExams(upcoming);
+        setActiveExamsCount(data.active_exam ? 1 : 0);
+        setTotalStudentsCount(data.total_students || 0);
+        setUpcomingExams(data.upcoming_exams || []);
         setQuestionBanks(data.subjects || []);
       } catch (err) {
         console.error('Failed to fetch data:', err);

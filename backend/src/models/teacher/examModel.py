@@ -496,3 +496,52 @@ def addQuestionToExam(exam_id: int, question_data: dict):
         cursor.close()
         cnx.close()
         
+def returnSubject():
+    """Return all subjects with question count."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+    SELECT 
+        s.subject_id,
+        s.subject_name,
+        s.subject_description,
+        COALESCE(COUNT(q.question_id), 0) as question_count
+    FROM subject s
+    LEFT JOIN chapter c ON s.subject_id = c.subject_id
+    LEFT JOIN question q ON c.chapter_id = q.chapter_id
+    GROUP BY s.subject_id, s.subject_name, s.subject_description
+    ORDER BY s.subject_name
+    LIMIT 5
+    """
+    try:
+        cursor.execute(query)
+        result = cursor.fetchall()
+        return result
+    except Exception as e:
+        print(f"ERROR in returnSubject: {str(e)}")
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def returnTotalStudentCount(teacher_id: str):
+    """Return the total count of students for a specific teacher."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+        SELECT COUNT(DISTINCT se.student_id) AS total_students
+        FROM student_exam se
+        JOIN exam e
+            ON se.exam_id = e.exam_id
+        WHERE e.manage_by = %s;
+        """
+    try:
+        cursor.execute(query, (teacher_id,))
+        result = cursor.fetchone()
+        return result['total_students'] if result else 0
+    except Exception as e:
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()

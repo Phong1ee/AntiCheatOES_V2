@@ -545,3 +545,47 @@ def returnTotalStudentCount(teacher_id: str):
     finally:
         cursor.close()
         cnx.close()
+
+def returnActiveExam (teacher_id: str):
+    """Return the active exam for a specific teacher."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+    SELECT * FROM exam WHERE manage_by = %s AND start_time <= NOW() AND end_time >= NOW()
+    """
+    try:
+        cursor.execute(query, (teacher_id,))
+        result = cursor.fetchone()
+        if result:
+            result['totalStudents'] = getStudentExamCount(result['exam_id'])
+            result['status'] = _get_exam_status(result['start_time'], result['end_time'])
+            result['subject'] = returnExamSubject(result['exam_id'])
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
+
+def returnUpcomingExam (teacher_id: str):
+    """Return the upcoming exam for a specific teacher."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    query = """
+    SELECT * FROM exam WHERE manage_by = %s AND start_time > NOW() ORDER BY start_time ASC LIMIT 4
+    """
+    try:
+        cursor.execute(query, (teacher_id,))
+        result = cursor.fetchall()
+        if result:
+            for exam in result:
+                exam['totalStudents'] = getStudentExamCount(exam['exam_id'])
+                exam['status'] = _get_exam_status(exam['start_time'], exam['end_time'])
+                exam['subject'] = returnExamSubject(exam['exam_id'])
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        cursor.close()
+        cnx.close()
+

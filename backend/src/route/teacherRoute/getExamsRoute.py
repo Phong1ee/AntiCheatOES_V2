@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, Depends
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 from sqlalchemy.orm import sessionmaker
@@ -9,16 +11,60 @@ router = APIRouter()
 Session = sessionmaker(bind=engine)
 session = Session()
 
-@router.get("/get_exams")
-async def get_exams(
+
+def get_exam_status(exam, now_time: datetime | None = None) -> str:
+    """Compute a frontend-friendly exam status."""
+    current_time = now_time or datetime.now()
+
+    if exam.start_time and current_time < exam.start_time:
+        return "upcoming"
+    if exam.start_time and exam.end_time and exam.start_time <= current_time <= exam.end_time:
+        return "ongoing"
+    if exam.end_time and current_time > exam.end_time:
+        return "completed"
+    return "ongoing"
+
+
+@router.get("/exams")
+async def get_teacher_exams(
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY)
 ):
     """Get teacher's exams."""
     managed = session.query(User).filter_by(school_id=current_user["school_id"]).first()
+    if not managed:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
     exam_list = session.query(Exam).filter_by(manage_by=managed.school_id).all()
-    print(exam_list)
-    return exam_list
+    now_time = datetime.now()
+
+    result = []
+    for exam in exam_list:
+        exam_data = {
+            "exam_id": exam.exam_id,
+            "title": exam.title,
+            "examcode": exam.examcode,
+            "description": exam.description,
+            "max_attempt": exam.max_attempt,
+            "duration_minutes": exam.duration_minutes,
+            "start_time": exam.start_time.isoformat() if exam.start_time else None,
+            "end_time": exam.end_time.isoformat() if exam.end_time else None,
+            "totalStudents": 0,
+            "manage_by": exam.manage_by,
+            "status": get_exam_status(exam, now_time),
+            "subject": exam.subject.subject_name if exam.subject else None,
+        }
+        result.append(exam_data)
+
+    return result
+
+@router.get("/get_exams")
+async def get_exams(
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY)
+):
+    """Backwards-compatible alias for teacher exams."""
+    return await get_teacher_exams(current_user=current_user, role_check=role_check)
 
 @router.get("/get_exam/{exam_id}")
 async def get_exam(

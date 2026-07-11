@@ -65,7 +65,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
           throw new Error("Authentication token not found");
         }
 
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+        const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_URL || "http://localhost:8000";
         const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
           method: "GET",
           headers: {

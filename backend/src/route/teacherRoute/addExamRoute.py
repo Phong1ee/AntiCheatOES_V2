@@ -33,3 +33,40 @@ async def add_exam_to_database(
     )
     session.add(exam_add)
     session.commit()
+
+@router.put("/update_exam/{exam_id}")
+async def update_exam_in_database(
+    exam_id: str,
+    request: TeacherExamRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY)
+):
+    """Update question in database."""
+    exam = session.query(Exam).filter_by(exam_id=exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    # Update the exam fields with the new values from the request
+    exam.title = request.title
+    exam.examcode = request.examcode
+    exam.duration_minutes = request.duration_minutes
+    exam.max_attempt = request.max_attemmpt
+    exam.description = request.description
+    exam.result_visibility = request.result_visibility
+    exam.subject_id = request.subject_id
+
+    session.commit()
+
+@router.delete("/delete_exam/{exam_id}")
+async def delete_exam_from_database(
+    exam_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY)
+):
+    """Delete question from database."""
+    exam = session.query(Exam).filter_by(exam_id=exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    session.delete(exam)
+    session.commit()

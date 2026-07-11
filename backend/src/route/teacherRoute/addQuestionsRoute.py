@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from src.models.teacher.requestModel.QuestionAddToExamRequest import QuestionAddToExamRequest
 from src.models.teacher.requestModel.QuestionAddToDBRequest import QuestionAddToDBRequest
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
+from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.controller.teacherController.examController import ExamController
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 from sqlalchemy.orm import sessionmaker
@@ -62,7 +63,7 @@ async def add_question_to_exam(
 async def update_question_in_exam(
     exam_id: str,
     question_id: str,
-    request: QuestionAddToExamRequest,
+    request: QuestionUpdateRequest,
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY)
 ):
@@ -70,6 +71,46 @@ async def update_question_in_exam(
     question_update = session.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
     if not question_update:
         raise HTTPException(status_code=404, detail="Question not found in the exam")
-    
+    options_update = session.query(Option).filter_by(question_id=question_id).all()
+    if not options_update:
+        raise HTTPException(status_code=404, detail="Options not found for the question")
+    for option in request.options:
+        option_update = next((opt for opt in options_update if opt.options_id == option.options_id), None)
+        if option_update:
+            option_update.options_text = option.options_text
+            option_update.is_correct = option.is_correct
     question_update.question_point = request.question_point
+    session.commit()
+    
+@router.delete("/{exam_id}/delete-question/{question_id}")
+async def delete_question_from_exam(
+    exam_id: str,
+    question_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY)
+):
+    """Delete question from a specific exam."""
+    question_delete = session.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
+    if not question_delete:
+        raise HTTPException(status_code=404, detail="Question not found in the exam")
+    options_delete = session.query(Option).filter_by(question_id=question_id).all()
+    for option in options_delete:
+        session.delete(option)
+    session.delete(question_delete)
+    session.commit()
+    
+@router.delete("/delete-question/{question_id}")
+async def delete_question_from_database(
+    question_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY)
+):
+    """Delete question from database."""
+    question_delete = session.query(Question).filter_by(question_id=question_id).first()
+    if not question_delete:
+        raise HTTPException(status_code=404, detail="Question not found in the database")
+    options_delete = session.query(Option).filter_by(question_id=question_id).all()
+    for option in options_delete:
+        session.delete(option)
+    session.delete(question_delete)
     session.commit()

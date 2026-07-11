@@ -174,7 +174,6 @@ def _get_top_subjects(limit: int = 5) -> list[dict]:
         for subject in query
     ]
 
-
 @router.get("/get_exam_overview/")
 async def get_exam_overview(
     current_user: dict = Depends(verify_token),
@@ -212,4 +211,3 @@ async def get_exam_overview(
     }
 
     return overview
-    

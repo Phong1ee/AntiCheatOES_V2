@@ -40,7 +40,7 @@ interface Exam {
 }
 
 // Status configuration
-const navigate = useNavigate();
+// const navigate = useNavigate();
 const statusConfig = {
   upcoming: { label: 'Upcoming', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   ongoing: { label: 'Ongoing', color: 'bg-amber-100 text-amber-700 border-amber-200' },
@@ -63,6 +63,19 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const modalExam = selectedExam ? {
+    id: String(selectedExam.exam_id),
+    title: selectedExam.title,
+    subject: selectedExam.subject || 'General',
+    date: selectedExam.start_time || '',
+    time: selectedExam.start_time || '',
+    duration: selectedExam.duration_minutes,
+    totalStudents: selectedExam.totalStudents,
+    completedStudents: 0,
+    averageScore: null,
+    status: (selectedExam.status === 'completed' || selectedExam.status === 'ongoing' ? selectedExam.status : 'upcoming') as 'upcoming' | 'ongoing' | 'completed',
+  } : null;
+
   useEffect(() => {
     const fetchExams = async () => {
       try {
@@ -72,7 +85,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
           throw new Error("Authentication token not found");
         }
 
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+        const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_URL || "http://localhost:8000";
         const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
           method: "GET",
           headers: { 
@@ -271,9 +284,8 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                           size="sm"
                           className="border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
                           onClick={() => {
-                            // setSelectedExam(exam);
-                            // setShowResultsModal(true);
-                            navigate(`/teacher/exams/results`);
+                            setSelectedExam(exam);
+                            setShowResultsModal(true);
                           }}
                         >
                           <BarChart3 className="size-4 mr-2" />
@@ -311,21 +323,21 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
       )}
 
       {/* Modals */}
-      {showDetailsModal && selectedExam && (
+      {showDetailsModal && selectedExam && modalExam && (
         <ExamDetailsModal
-          exam={selectedExam}
+          exam={modalExam}
           onClose={() => setShowDetailsModal(false)}
         />
       )}
-      {showSettingsModal && selectedExam && (
+      {showSettingsModal && selectedExam && modalExam && (
         <ExamSettingsModal
-          exam={selectedExam}
+          exam={modalExam}
           onClose={() => setShowSettingsModal(false)}
         />
       )}
-      {showResultsModal && selectedExam && (
+      {showResultsModal && selectedExam && modalExam && (
         <ExamResultsModal
-          exam={selectedExam}
+          exam={modalExam}
           onClose={() => setShowResultsModal(false)}
         />
       )}

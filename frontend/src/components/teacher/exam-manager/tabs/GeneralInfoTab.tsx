@@ -39,6 +39,7 @@ export function GeneralInfoTab({
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
   const [attempts, setAttempts] = useState('1');
+  const [unlimitedAttempts, setUnlimitedAttempts] = useState(false);
   const [totalPoints, setTotalPoints] = useState('100');
   const [passingScore, setPassingScore] = useState('60');
   const [tags, setTags] = useState('');
@@ -250,18 +251,35 @@ export function GeneralInfoTab({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="attempts">Number of Attempts</Label>
-            <Select value={attempts} onValueChange={setAttempts}>
-              <SelectTrigger id="attempts">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">1 attempt</SelectItem>
-                <SelectItem value="2">2 attempts</SelectItem>
-                <SelectItem value="3">3 attempts</SelectItem>
-                <SelectItem value="unlimited">Unlimited</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="unlimited-attempts">Allow unlimited attempts</Label>
+                {/* <p className="text-sm text-gray-500">
+                  Students can retake this exam without a limit
+                </p> */}
+              </div>
+              <Switch
+                id="unlimited-attempts"
+                checked={unlimitedAttempts}
+                onCheckedChange={setUnlimitedAttempts}
+              />
+            </div>
+
+            {!unlimitedAttempts && (
+              <div className="space-y-2">
+                {/* <Label htmlFor="attempts">Number of Attempts</Label> */}
+                <Input
+                  id="attempts"
+                  type="number"
+                  value={attempts}
+                  onChange={(e) => setAttempts(e.target.value)}
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  placeholder="Enter number of attempts"
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -285,7 +303,7 @@ export function GeneralInfoTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="passingScore">Passing Score (%)</Label>
+              <Label htmlFor="passingScore">Passing Score</Label>
               <Input
                 id="passingScore"
                 type="number"

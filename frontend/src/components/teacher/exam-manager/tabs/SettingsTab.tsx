@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../ui/select';
-import { Shuffle, Clock, Maximize, Shield, Camera, Lock, CheckCircle } from 'lucide-react';
+import { Shuffle, Clock, Maximize, Shield, Camera, Lock, CheckCircle, Eye } from 'lucide-react';
 
 export function SettingsTab() {
   const [shuffleQuestions, setShuffleQuestions] = useState(true);
@@ -19,11 +19,16 @@ export function SettingsTab() {
   const [gracePeriod, setGracePeriod] = useState('5');
   const [fullscreen, setFullscreen] = useState(true);
   const [tabSwitchAction, setTabSwitchAction] = useState('warn');
+  const [antiCheatEnabled, setAntiCheatEnabled] = useState(false);
   const [disableCopyPaste, setDisableCopyPaste] = useState(true);
   const [webcamMonitoring, setWebcamMonitoring] = useState(true);
   const [lockdownBrowser, setLockdownBrowser] = useState(false);
   const [autoGradeMcq, setAutoGradeMcq] = useState(true);
   const [manualGradeEssay, setManualGradeEssay] = useState(true);
+  const [publishGrades, setPublishGrades] = useState(false);
+  const [showResultsToStudents, setShowResultsToStudents] = useState(true);
+  const [allowAnswerReview, setAllowAnswerReview] = useState(true);
+  const [releaseResults, setReleaseResults] = useState('immediately');
   
   // Individual violation thresholds
   const [tabSwitchThreshold, setTabSwitchThreshold] = useState('3');
@@ -138,6 +143,22 @@ export function SettingsTab() {
           <CardDescription>Enable security features to prevent cheating</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="enable-anti-cheat">Enable Anti-Cheat</Label>
+              {/* <p className="text-sm text-gray-500">
+                Turn on anti-cheat monitoring and security settings
+              </p> */}
+            </div>
+            <Switch
+              id="enable-anti-cheat"
+              checked={antiCheatEnabled}
+              onCheckedChange={setAntiCheatEnabled}
+            />
+          </div>
+
+          {antiCheatEnabled && (
+            <>
           <div className="space-y-2">
             <Label htmlFor="tab-switch">Tab Switch Detection</Label>
             <Select value={tabSwitchAction} onValueChange={setTabSwitchAction}>
@@ -170,7 +191,7 @@ export function SettingsTab() {
             />
           </div>
 
-          <div className="flex items-center justify-between">
+          {/* <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label htmlFor="webcam" className="flex items-center gap-2">
                 <Camera className="size-4 text-teal-600" />
@@ -185,7 +206,7 @@ export function SettingsTab() {
               checked={webcamMonitoring}
               onCheckedChange={setWebcamMonitoring}
             />
-          </div>
+          </div> */}
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
@@ -277,6 +298,8 @@ export function SettingsTab() {
               </div>
             </div>
           </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -287,7 +310,7 @@ export function SettingsTab() {
             <CheckCircle className="size-5 text-teal-600" />
             Grading Settings
           </CardTitle>
-          <CardDescription>Configure automatic and manual grading</CardDescription>
+          {/* <CardDescription>Configure automatic and manual grading</CardDescription> */}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
@@ -300,7 +323,22 @@ export function SettingsTab() {
             <Switch id="auto-grade" checked={autoGradeMcq} onCheckedChange={setAutoGradeMcq} />
           </div>
 
-          <div className="flex items-center justify-between">
+          {/* <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="publish-grades">Publish Grades</Label>
+              <p className="text-sm text-gray-500">
+                Allow students to view their exam results
+              </p>
+            </div>
+            <Switch
+              id="publish-grades"
+              checked={publishGrades}
+              onCheckedChange={setPublishGrades}
+            />
+          </div>
+           */}
+
+          {/* <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label htmlFor="manual-grade">Manual Grading for Essays</Label>
               <p className="text-sm text-gray-500">
@@ -312,6 +350,59 @@ export function SettingsTab() {
               checked={manualGradeEssay}
               onCheckedChange={setManualGradeEssay}
             />
+          </div> */}
+        </CardContent>
+      </Card>
+
+      {/* Result Visibility */}
+      <Card className="shadow-md rounded-2xl border-0">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-gray-800">
+            <Eye className="size-5 text-teal-600" />
+            Result Visibility
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="show-results">Show Results to Students</Label>
+              <p className="text-sm text-gray-500">
+                Students can view their scores after submission
+              </p>
+            </div>
+            <Switch
+              id="show-results"
+              checked={showResultsToStudents}
+              onCheckedChange={setShowResultsToStudents}
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="answer-review">Allow Answer Review</Label>
+              <p className="text-sm text-gray-500">
+                Students can review their answers and correct answers
+              </p>
+            </div>
+            <Switch
+              id="answer-review"
+              checked={allowAnswerReview}
+              onCheckedChange={setAllowAnswerReview}
+            />
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-5 space-y-2">
+            <Label htmlFor="release-results">Release Results</Label>
+            <Select value={releaseResults} onValueChange={setReleaseResults}>
+              <SelectTrigger id="release-results" className="bg-gray-100 border-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="immediately">Immediately after submission</SelectItem>
+                <SelectItem value="after-deadline">After the exam deadline</SelectItem>
+                <SelectItem value="manual">Manually by teacher</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>

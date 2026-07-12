@@ -10,8 +10,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  Monitor,
-  Smartphone,
 } from 'lucide-react';
 
 interface ValidationIssue {
@@ -26,7 +24,7 @@ const mockValidationIssues: ValidationIssue[] = [
 ];
 
 export function PreviewTab() {
-  const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile'>('desktop');
+  const [previewMode] = useState<'desktop' | 'mobile'>('desktop');
   const [isRunningTest, setIsRunningTest] = useState(false);
   const [testResults, setTestResults] = useState<ValidationIssue[] | null>(null);
 
@@ -50,7 +48,7 @@ export function PreviewTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-3">
-            <Button
+            {/* <Button
               variant={previewMode === 'desktop' ? 'default' : 'outline'}
               onClick={() => setPreviewMode('desktop')}
               className={
@@ -61,8 +59,8 @@ export function PreviewTab() {
             >
               <Monitor className="size-4 mr-2" />
               Desktop View
-            </Button>
-            <Button
+            </Button> */}
+            {/* <Button
               variant={previewMode === 'mobile' ? 'default' : 'outline'}
               onClick={() => setPreviewMode('mobile')}
               className={
@@ -73,7 +71,7 @@ export function PreviewTab() {
             >
               <Smartphone className="size-4 mr-2" />
               Mobile View
-            </Button>
+            </Button> */}
           </div>
 
           <div className="border-2 border-gray-200 rounded-xl p-4 bg-gray-50">

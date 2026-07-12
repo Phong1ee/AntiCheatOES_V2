@@ -121,7 +121,7 @@ export function AssignmentTab() {
             )}
           </div>
 
-          <div className="space-y-3">
+          {/* <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label htmlFor="restrict-ip">Restrict by IP Address</Label>
@@ -130,17 +130,17 @@ export function AssignmentTab() {
                 </p>
               </div>
               <Switch id="restrict-ip" checked={restrictIP} onCheckedChange={setRestrictIP} />
-            </div>
+            </div> */}
 
-            {restrictIP && (
-              <Input
-                value={allowedIP}
-                onChange={(e) => setAllowedIP(e.target.value)}
-                placeholder="Enter IP addresses (comma-separated)"
-                className="max-w-sm"
-              />
-            )}
-          </div>
+          {/* {restrictIP && (
+            <Input
+              value={allowedIP}
+              onChange={(e) => setAllowedIP(e.target.value)}
+              placeholder="Enter IP addresses (comma-separated)"
+              className="max-w-sm"
+            />
+          )} */}
+          {/* </div> */}
         </CardContent>
       </Card>
 

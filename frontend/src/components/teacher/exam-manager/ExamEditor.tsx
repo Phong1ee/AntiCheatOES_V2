@@ -230,21 +230,45 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
       {/* Header */}
       <div className="border-b border-gray-200 p-4 space-y-4">
         {/* Title & Actions */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 space-y-2">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Enter exam title..."
-              className="text-2xl border-0 px-0 focus-visible:ring-0"
-            />
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Add description or instructions..."
-              className="resize-none text-sm border-0 px-0 focus-visible:ring-0"
-              rows={2}
-            />
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1 space-y-2">
+            <div
+              className="grid items-center gap-3"
+              style={{ gridTemplateColumns: '85px minmax(0, 1fr)' }}
+            >
+              <label
+                htmlFor="exam-title"
+                className="inline-flex w-full justify-end rounded px-2 py-0.5 text-sm font-medium text-black-600 font-bold"
+              >
+                Exam Title
+              </label>
+              <Input
+                id="exam-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Enter exam title..."
+                className="w-full min-w-0 text-2xl border-0 px-3 focus-visible:ring-0"
+              />
+            </div>
+            <div
+              className="grid items-start gap-3"
+              style={{ gridTemplateColumns: '85px minmax(0, 1fr)' }}
+            >
+              <label
+                htmlFor="exam-description"
+                className="inline-flex w-full justify-end rounded px-2 py-0.5 text-sm font-medium text-black-600 font-bold"
+              >
+                Description
+              </label>
+              <Textarea
+                id="exam-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Add description or instructions..."
+                className="w-full min-w-0 resize-none text-sm border-0 px-3 focus-visible:ring-0"
+                rows={2}
+              />
+            </div>
             
             {/* Exam Info Bar - Only show for existing exams with data */}
             {!isNewExam && (subject || classGroup || duration || examCode) && (

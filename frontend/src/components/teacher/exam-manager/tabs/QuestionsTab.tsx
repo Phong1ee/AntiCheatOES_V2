@@ -28,6 +28,8 @@ import {
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
 import { StudentQuestionPreview } from '../StudentQuestionPreview';
+import { toast } from 'sonner';
+import { questionService } from '../../../../services/question.service';
 
 interface Question {
   id: string;
@@ -38,6 +40,8 @@ interface Question {
   options?: string[];
   correctAnswer?: number | number[] | string;  // Support multiple correct answers for MCQ
   hasMultipleCorrect?: boolean; // Flag to indicate if MCQ has multiple correct answers
+  chapterId?: number;
+  optionIds?: number[];
 }
 
 interface PoolConfig {
@@ -183,9 +187,7 @@ const mockQuestionsData: Record<string, Question[]> = {
 
 export function QuestionsTab({ examId }: QuestionsTabProps) {
   // Load questions based on examId
-  const initialQuestions = examId && !examId.startsWith('new-')
-    ? mockQuestionsData[examId] || []
-    : [];
+  const initialQuestions: Question[] = [];
 
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(questions[0]?.id || null);
@@ -193,26 +195,65 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
   const [poolConfig, setPoolConfig] = useState<PoolConfig | null>(null);
   const [isPoolMode, setIsPoolMode] = useState(false);
   const [showStudentPreview, setShowStudentPreview] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+
+  const loadQuestions = async (questionToSelect?: string) => {
+    if (!examId || examId.startsWith('new-')) {
+      setQuestions([]);
+      setSelectedQuestion(null);
+      return;
+    }
+
+    try {
+      setLoadingQuestions(true);
+      setSaveError(null);
+      const persistedQuestions = await questionService.getExamQuestions(Number(examId));
+      const mappedQuestions: Question[] = persistedQuestions.map((question) => {
+        const correctIndexes = question.options
+          .map((option, index) => option.is_correct ? index : -1)
+          .filter((index) => index >= 0);
+        return {
+          id: String(question.question_id),
+          type: question.question_type === 'essay' ? 'essay' : 'mcq',
+          question: question.question_text,
+          points: question.question_point,
+          difficulty: question.question_difficulties,
+          options: question.options.map((option) => option.options_text),
+          optionIds: question.options.map((option) => option.options_id),
+          correctAnswer: correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
+          hasMultipleCorrect: correctIndexes.length > 1,
+          chapterId: question.chapter_id,
+        };
+      });
+      setQuestions(mappedQuestions);
+      setSelectedQuestion(questionToSelect ?? mappedQuestions[0]?.id ?? null);
+    } catch (error) {
+      setQuestions([]);
+      setSelectedQuestion(null);
+      setSaveError(error instanceof Error ? error.message : 'Unable to load exam questions.');
+    } finally {
+      setLoadingQuestions(false);
+    }
+  };
 
   // Update questions when examId changes
   useEffect(() => {
-    const newQuestions = examId && !examId.startsWith('new-')
-      ? mockQuestionsData[examId] || []
-      : [];
-    setQuestions(newQuestions);
-    setSelectedQuestion(newQuestions[0]?.id || null);
+    void loadQuestions();
   }, [examId]);
 
   const selectedQ = questions.find((q) => q.id === selectedQuestion);
 
   const addQuestion = (type: Question['type']) => {
     const newQuestion: Question = {
-      id: Date.now().toString(),
+      id: `new-${Date.now()}`,
       type,
       question: '',
       points: 5,
       difficulty: 'medium',
       options: type === 'mcq' ? ['', '', '', ''] : undefined,
+      chapterId: undefined,
     };
     setQuestions([...questions, newQuestion]);
     setSelectedQuestion(newQuestion.id);
@@ -228,13 +269,76 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
   const duplicateQuestion = (id: string) => {
     const question = questions.find((q) => q.id === id);
     if (question) {
-      const newQuestion = { ...question, id: Date.now().toString() };
+      const newQuestion = { ...question, id: `new-${Date.now()}`, optionIds: undefined };
       setQuestions([...questions, newQuestion]);
     }
   };
 
   const updateQuestion = (id: string, updates: Partial<Question>) => {
     setQuestions(questions.map((q) => (q.id === id ? { ...q, ...updates } : q)));
+  };
+
+  const saveQuestion = async () => {
+    if (!selectedQ || !examId || examId.startsWith('new-')) {
+      setSaveError('Save the exam before adding questions.');
+      return;
+    }
+    if (!selectedQ.question.trim() || !selectedQ.chapterId) {
+      setSaveError('Question text and a numeric chapter ID are required.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setSaveError(null);
+      const isTrueFalse = selectedQ.type === 'true-false';
+      const questionType = selectedQ.type === 'essay' ? 'essay' : 'MCQ';
+      const optionTexts = isTrueFalse ? ['True', 'False'] : selectedQ.options ?? [];
+      const correctIndices: number[] = isTrueFalse
+        ? [selectedQ.correctAnswer === 'false' ? 1 : 0]
+        : Array.isArray(selectedQ.correctAnswer) ? selectedQ.correctAnswer : [Number(selectedQ.correctAnswer ?? 0)];
+
+      if (questionType === 'MCQ' && optionTexts.some((option) => !option.trim())) {
+        throw new Error('Every multiple-choice option must have text.');
+      }
+
+      const options = optionTexts.map((options_text, index) => ({
+        options_id: selectedQ.optionIds?.[index],
+        options_text,
+        is_correct: correctIndices.includes(index),
+      }));
+
+      if (selectedQ.id.startsWith('new-')) {
+        const questionId = await questionService.create({
+          question_text: selectedQ.question.trim(),
+          question_difficulties: selectedQ.difficulty ?? 'medium',
+          question_type: questionType,
+          chapter_id: selectedQ.chapterId,
+          question_status: 'draft',
+        });
+        await questionService.addToExam(Number(examId), {
+          question_id: questionId,
+          question_point: selectedQ.points,
+          options,
+        });
+        await loadQuestions(String(questionId));
+      } else {
+        if (questionType === 'MCQ' && options.some((option) => option.options_id === undefined)) {
+          throw new Error('Reload this question before updating its answer options.');
+        }
+        await questionService.updateInExam(Number(examId), Number(selectedQ.id), {
+          question_point: selectedQ.points,
+          options,
+        });
+      }
+      toast.success('Question saved successfully.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save the question.';
+      setSaveError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleAddQuestionsFromPool = (newQuestions: Question[]) => {
@@ -255,7 +359,7 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
         <div className="p-4 border-b border-gray-200 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm text-gray-700">
-              {isPoolMode ? 'Pool Configuration' : `Questions (${questions.length})`}
+              {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length})`}
             </h3>
           </div>
 
@@ -478,9 +582,9 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
                   <X className="size-4 mr-2" />
                   Cancel
                 </Button>
-                <Button size="sm" className="bg-gradient-to-r from-teal-500 to-blue-600">
+                <Button size="sm" onClick={saveQuestion} disabled={isSaving} className="bg-gradient-to-r from-teal-500 to-blue-600">
                   <Save className="size-4 mr-2" />
-                  Save Question
+                  {isSaving ? 'Saving...' : 'Save Question'}
                 </Button>
               </div>
             </div>
@@ -538,8 +642,20 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
                         updateQuestion(selectedQ.id, { points: parseInt(e.target.value) })
                       }
                       min="1"
-                    />
-                  </div>
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="chapter-id">Chapter ID</Label>
+                  <Input
+                    id="chapter-id"
+                    type="number"
+                    min="1"
+                    value={selectedQ.chapterId ?? ''}
+                    onChange={(event) => updateQuestion(selectedQ.id, { chapterId: Number(event.target.value) || undefined })}
+                    placeholder="Enter the existing chapter ID"
+                  />
+                </div>
+                {saveError && <p className="text-sm text-red-600">{saveError}</p>}
                 </div>
 
                 {/* MCQ Options with Multiple Correct Answers */}

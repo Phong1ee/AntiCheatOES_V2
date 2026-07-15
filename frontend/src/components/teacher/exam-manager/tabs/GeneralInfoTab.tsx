@@ -12,9 +12,12 @@ import {
 } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
 import { AlertCircle, Calendar, Clock, Hash, Upload } from 'lucide-react';
+import type { TeacherSubject } from '../../../../types/teacher-exam';
 
 interface GeneralInfoTabProps {
   subject: string;
+  subjectId: string;
+  subjects: TeacherSubject[];
   classGroup: string;
   examCode: string;
   duration: number;
@@ -26,6 +29,8 @@ interface GeneralInfoTabProps {
 
 export function GeneralInfoTab({
   subject,
+  subjectId,
+  subjects,
   classGroup,
   examCode,
   duration,
@@ -44,21 +49,6 @@ export function GeneralInfoTab({
   const [passingScore, setPassingScore] = useState('60');
   const [tags, setTags] = useState('');
 
-  // Subject mapping
-  const subjectMap: Record<string, string> = {
-    'Database Systems': 'database',
-    'Web Development': 'web',
-    'Data Structures': 'datastructures',
-    'Algorithms': 'algorithms',
-  };
-
-  const reverseSubjectMap: Record<string, string> = {
-    'database': 'Database Systems',
-    'web': 'Web Development',
-    'datastructures': 'Data Structures',
-    'algorithms': 'Algorithms',
-  };
-
   // Class mapping
   const classMap: Record<string, string> = {
     'CS301': 'cs301',
@@ -73,13 +63,8 @@ export function GeneralInfoTab({
   };
 
   // Get select values
-  const subjectSelectValue = subjectMap[subject] || '';
+  const subjectSelectValue = subjectId;
   const classSelectValue = classMap[classGroup] || '';
-
-  // Handle changes with reverse mapping
-  const handleSubjectChange = (value: string) => {
-    onSubjectChange(reverseSubjectMap[value] || value);
-  };
 
   const handleClassChange = (value: string) => {
     onClassGroupChange(reverseClassMap[value] || value);
@@ -88,7 +73,6 @@ export function GeneralInfoTab({
   // Validation
   const errors: string[] = [];
   if (!subject) errors.push('Subject is required');
-  if (!classGroup) errors.push('Class/Group is required');
   if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
     errors.push('End date must be after start date');
   }
@@ -123,15 +107,14 @@ export function GeneralInfoTab({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="subject">Subject *</Label>
-              <Select value={subjectSelectValue} onValueChange={handleSubjectChange}>
+              <Select value={subjectSelectValue} onValueChange={onSubjectChange}>
                 <SelectTrigger id="subject" className={!subject ? 'border-red-300' : ''}>
                   <SelectValue placeholder="Select subject" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="database">Database Systems</SelectItem>
-                  <SelectItem value="web">Web Development</SelectItem>
-                  <SelectItem value="datastructures">Data Structures</SelectItem>
-                  <SelectItem value="algorithms">Algorithms</SelectItem>
+                  {subjects.map((item) => (
+                    <SelectItem key={item.subject_id} value={item.subject_id}>{item.subject_name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -139,7 +122,7 @@ export function GeneralInfoTab({
             <div className="space-y-2">
               <Label htmlFor="class">Class/Group *</Label>
               <Select value={classSelectValue} onValueChange={handleClassChange}>
-                <SelectTrigger id="class" className={!classGroup ? 'border-red-300' : ''}>
+                <SelectTrigger id="class">
                   <SelectValue placeholder="Select class" />
                 </SelectTrigger>
                 <SelectContent>
@@ -213,7 +196,6 @@ export function GeneralInfoTab({
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="pl-10"
                   className={
                     startDate && endDate && new Date(endDate) < new Date(startDate)
                       ? 'pl-10 border-red-300'

@@ -182,7 +182,7 @@ class StudentClass(Base):
 class Question(Base):
     __tablename__ = "question"
 
-    question_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     question_text: Mapped[str] = mapped_column(String(255), nullable=False)
     question_difficulties: Mapped[QuestionDifficulty] = mapped_column(
         Enum(QuestionDifficulty), nullable=False

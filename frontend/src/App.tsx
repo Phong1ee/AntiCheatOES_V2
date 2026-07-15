@@ -7,6 +7,8 @@ import { TeacherDashboard } from "./components/teacher/TeacherDashboard";
 import { AdminDashboard } from "./components/admin/AdminDashboard";
 import { Toaster } from "./components/ui/sonner";
 import { UserRoleProvider } from "./contexts/UserRoleContext";
+import { authService } from "./services/auth.service";
+import { authStorage } from "./services/auth.storage";
 
 type Page =
   | "login"
@@ -27,14 +29,24 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const handleLogout = () => {
+  const clearLocalSession = () => {
     setIsAuthenticated(false);
     setUserRole(null);
     setCurrentPage("login");
 
-    localStorage.removeItem("token");
+    authStorage.clearToken();
     localStorage.removeItem("role");
     localStorage.removeItem("loginTime");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+    } catch {
+      // The backend logout is stateless; local cleanup is still sufficient.
+    } finally {
+      clearLocalSession();
+    }
   };
 
   // Restore session on app load
@@ -47,7 +59,7 @@ export default function App() {
       const elapsed = Date.now() - Number(loginTime);
 
       if (elapsed >= SESSION_DURATION) {
-        handleLogout();
+        clearLocalSession();
       } else {
         setIsAuthenticated(true);
         setUserRole(storedRole as UserRole);
@@ -113,6 +125,12 @@ useEffect(() => {
     );
   };
 }, [isAuthenticated]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => clearLocalSession();
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+  }, []);
 
   const handleLogin = (role: UserRole = "student") => {
     setIsAuthenticated(true);

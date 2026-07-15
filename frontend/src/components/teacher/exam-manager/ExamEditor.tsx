@@ -18,80 +18,46 @@ import { AssignmentTab } from './tabs/AssignmentTab';
 import { PreviewTab } from './tabs/PreviewTab';
 import { Save, ChevronDown, Eye, Calendar, Send, FileText, BookOpen, Users, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
+import type { TeacherSubject } from '../../../types/teacher-exam';
 
 interface ExamEditorProps {
   examId: string | null;
+  exam: {
+    id: string;
+    title: string;
+    description?: string;
+    subject: string;
+    subjectId: string;
+    class: string;
+    status: 'draft' | 'scheduled' | 'published' | 'archived';
+    duration?: number;
+    examCode?: string;
+  } | null;
+  subjects: TeacherSubject[];
   onClose: () => void;
   onSave: (examData: {
     id: string;
     title: string;
     description: string;
-    subject: string;
-    class: string;
+    subjectId: string;
     duration: number;
     examCode: string;
-    status: 'draft' | 'scheduled' | 'published' | 'archived';
-  }) => void;
+  }) => Promise<void>;
 }
 
-// Mock exam data matching the sidebar
-const mockExamData: Record<string, any> = {
-  '1': {
-    title: 'Midterm Exam',
-    description: 'Comprehensive assessment covering chapters 1-5 including SQL queries, database design, and normalization.',
-    subject: 'Database Systems',
-    class: 'CS301',
-    status: 'scheduled',
-    date: '2025-11-20',
-    questionCount: 45,
-    duration: 90,
-    examCode: 'EXAM-DB301M',
-  },
-  '2': {
-    title: 'Quiz 3 - Normalization',
-    description: 'Quick assessment on database normalization forms (1NF, 2NF, 3NF, BCNF).',
-    subject: 'Database Systems',
-    class: 'CS301',
-    status: 'published',
-    date: '2025-11-15',
-    questionCount: 15,
-    duration: 30,
-    examCode: 'EXAM-DB301Q3',
-  },
-  '3': {
-    title: 'Final Exam',
-    description: 'Comprehensive final examination covering all course material.',
-    subject: 'Data Structures',
-    class: 'CS201',
-    status: 'draft',
-    date: '2025-12-10',
-    questionCount: 60,
-    duration: 120,
-    examCode: 'EXAM-DS201F',
-  },
-  '4': {
-    title: 'HTML & CSS Basics',
-    description: 'Fundamentals of HTML5 and CSS3 including responsive design.',
-    subject: 'Web Development',
-    class: 'CS102',
-    status: 'archived',
-    date: '2025-11-01',
-    questionCount: 20,
-    duration: 45,
-    examCode: 'EXAM-WEB102',
-  },
-};
-
-export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
+  const [subjectId, setSubjectId] = useState('');
   const [classGroup, setClassGroup] = useState('');
   const [duration, setDuration] = useState(60);
   const [examCode, setExamCode] = useState('');
   const [status, setStatus] = useState<'draft' | 'scheduled' | 'published' | 'archived'>('draft');
   const [lastSaved, setLastSaved] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState('general');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Generate unique exam code for new exams
   const generateExamCode = () => {
@@ -111,6 +77,7 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
       setTitle('');
       setDescription('');
       setSubject('');
+      setSubjectId('');
       setClassGroup('');
       setDuration(60);
       setExamCode('');
@@ -124,26 +91,26 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
       setTitle('');
       setDescription('');
       setSubject('');
+      setSubjectId('');
       setClassGroup('');
       setDuration(60);
       setExamCode(generateExamCode());
       setStatus('draft');
       setActiveTab('general');
     } else {
-      // Editing existing exam - load data
-      const examData = mockExamData[examId];
-      if (examData) {
-        setTitle(examData.title);
-        setDescription(examData.description || '');
-        setSubject(examData.subject || '');
-        setClassGroup(examData.class || '');
-        setDuration(examData.duration || 60);
-        setExamCode(examData.examCode || generateExamCode());
-        setStatus(examData.status);
+      if (exam) {
+        setTitle(exam.title);
+        setDescription(exam.description || '');
+        setSubject(exam.subject || '');
+        setSubjectId(exam.subjectId || '');
+        setClassGroup(exam.class || '');
+        setDuration(exam.duration || 60);
+        setExamCode(exam.examCode || generateExamCode());
+        setStatus(exam.status);
         setActiveTab('general');
       }
     }
-  }, [examId]);
+  }, [examId, exam]);
 
   // Auto-save simulation
   useEffect(() => {
@@ -199,23 +166,23 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
   } as const;
 
   // Handle Save
-  const handleSave = () => {
-    onSave({
-      id: examId,
-      title,
-      description,
-      subject,
-      class: classGroup,
-      duration,
-      examCode,
-      status,
-    });
-    setLastSaved(new Date());
-    toast.success('Exam saved successfully!');
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+      setSaveError(null);
+      await onSave({ id: examId, title, description, subjectId, duration, examCode });
+      setLastSaved(new Date());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save the exam.';
+      setSaveError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Check if has unsaved changes
-  const hasRequiredData = title.trim() !== '' && subject !== '' && classGroup !== '';
+  const hasRequiredData = title.trim() !== '' && subjectId !== '' && examCode.trim() !== '';
 
   return (
     <div className="h-full flex flex-col bg-white relative exam-editor-container">
@@ -382,10 +349,15 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
           <TabsContent value="general" className="m-0 p-6">
             <GeneralInfoTab
               subject={subject}
+              subjectId={subjectId}
+              subjects={subjects}
               classGroup={classGroup}
               examCode={examCode}
               duration={duration}
-              onSubjectChange={setSubject}
+              onSubjectChange={(nextSubjectId) => {
+                setSubjectId(nextSubjectId);
+                setSubject(subjects.find((item) => item.subject_id === nextSubjectId)?.subject_name ?? '');
+              }}
               onClassGroupChange={setClassGroup}
               onExamCodeChange={setExamCode}
               onDurationChange={setDuration}
@@ -420,7 +392,7 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
 
       {/* Sticky Save Button */}
       <div className="sticky bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg">
-        <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
           <div className="text-sm text-gray-600">
             {hasRequiredData ? (
               <span className="flex items-center gap-2">
@@ -434,17 +406,18 @@ export function ExamEditor({ examId, onClose, onSave }: ExamEditorProps) {
               </span>
             )}
           </div>
+          {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
             <Button
               onClick={handleSave}
-              disabled={!hasRequiredData}
+              disabled={!hasRequiredData || isSaving}
               className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="size-4 mr-2" />
-              {isNewExam ? 'Create Exam' : 'Save Changes'}
+              {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
             </Button>
           </div>
         </div>

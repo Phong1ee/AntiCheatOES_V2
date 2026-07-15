@@ -78,7 +78,7 @@ async def get_exam(
     exam = session.query(Exam).filter_by(exam_id=exam_id, manage_by=managed.school_id).first()
     return exam
 
-@router.get("/get_exam_questions/{exam_id}")
+@router.get("/{exam_id}/get_exam_questions/")
 async def get_exam_questions(
     exam_id: str,
     current_user: dict = Depends(verify_token),
@@ -93,7 +93,7 @@ async def get_exam_questions(
     questions = session.query(ExamQuestion).filter_by(exam_id=exam.exam_id).all()
     return questions
 
-@router.get("/get_exam_question/{exam_id}/{question_id}")
+@router.get("/{exam_id}/get_exam_question//{question_id}")
 async def get_exam_question(
     exam_id: str,
     question_id: str,

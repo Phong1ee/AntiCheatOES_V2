@@ -18,19 +18,13 @@ import {
   SelectValue,
 } from "./ui/select";
 import { GraduationCap, Mail, Lock, User, Eye, EyeOff } from "lucide-react";
+import { authService } from "../services/auth.service";
 
 interface RegisterProps {
   onNavigate: (page: "login" | "register" | "forgot-password") => void;
 }
 
 type Role = "student" | "teacher" | "admin";
-
-interface RegisterResponse {
-  success?: boolean;
-  message: string;
-}
-
-const API_BASE_URL = "http://localhost:8000";
 
 // ===== Password rules =====
 const passwordRules = [
@@ -105,33 +99,16 @@ export function Register({ onNavigate }: RegisterProps) {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fullname: formData.fullName,
-          email: formData.email,
-          password: formData.password,
-          role: formData.role.toLowerCase(),
-        }),
+      await authService.register({
+        fullname: formData.fullName,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
       });
-
-      const data: RegisterResponse | { message?: string; detail?: string } = await res.json();
-
-      if (!res.ok) {
-        setError((data as any).detail || "Can't register");
-        setIsLoading(false);
-        return;
-      }
-
-      console.log(data.message);
       onNavigate("login");
-      setIsLoading(false);
     } catch (err) {
-      console.error(err);
-      setError("Can't connect to server");
+      setError(err instanceof Error ? err.message : "Can't connect to server");
+    } finally {
       setIsLoading(false);
     }
   };

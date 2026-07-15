@@ -23,7 +23,6 @@ async def add_question_to_database(
     """Add question to database."""
     creator = session.query(User).filter_by(school_id=current_user["school_id"]).first()
     question_add = Question(
-        question_id=request.question_id,
         question_text=request.question_text,
         question_difficulties=request.question_difficulties,
         question_type=request.question_type,
@@ -33,6 +32,8 @@ async def add_question_to_database(
     )
     session.add(question_add)
     session.commit()
+    session.refresh(question_add)
+    return {"success": True, "question_id": question_add.question_id}
 
 
 @router.post("/{exam_id}/add-question")
@@ -58,6 +59,15 @@ async def add_question_to_exam(
         session.add(option_add)
     session.add(question_add)
     session.commit()
+    session.refresh(question_add)
+    return {
+        "success": True,
+        "question_id": question_add.question_id,
+        "options": [
+            {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
+            for option in session.query(Option).filter_by(question_id=request.question_id).all()
+        ],
+    }
 
 @router.put("/{exam_id}/update-question/{question_id}")
 async def update_question_in_exam(
@@ -72,7 +82,7 @@ async def update_question_in_exam(
     if not question_update:
         raise HTTPException(status_code=404, detail="Question not found in the exam")
     options_update = session.query(Option).filter_by(question_id=question_id).all()
-    if not options_update:
+    if request.options and not options_update:
         raise HTTPException(status_code=404, detail="Options not found for the question")
     for option in request.options:
         option_update = next((opt for opt in options_update if opt.options_id == option.options_id), None)
@@ -81,6 +91,7 @@ async def update_question_in_exam(
             option_update.is_correct = option.is_correct
     question_update.question_point = request.question_point
     session.commit()
+    return {"success": True, "message": "Question updated successfully"}
     
 @router.delete("/{exam_id}/delete-question/{question_id}")
 async def delete_question_from_exam(

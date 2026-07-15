@@ -11,14 +11,13 @@ import {
   CardTitle,
 } from "./ui/card";
 import { GraduationCap, Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { authAPI } from "../services/api";
+import { authService } from "../services/auth.service";
+import type { UserRole } from "../types/auth";
 
 interface LoginProps {
   onNavigate: (page: "login" | "register" | "forgot-password") => void;
   onLogin: (role?: "student" | "teacher" | "admin") => void;
 }
-
-type Role = "student" | "teacher" | "admin";
 
 export function Login({ onNavigate, onLogin }: LoginProps) {
   const [email, setEmail] = useState("");
@@ -33,7 +32,7 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
     setError(null);
 
     try {
-      const response = await authAPI.login({ email, password });
+      const response = await authService.login({ email, password });
 
       if (!response.success) {
         setError(response.message || "Login failed");
@@ -41,10 +40,7 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
         return;
       }
 
-      // Save token and user info to localStorage
-      if (response.token) {
-        localStorage.setItem("token", response.token);
-      }
+      // The shared auth service persists the JWT. Keep existing user display data.
       if (response.user) {
         localStorage.setItem("user", JSON.stringify(response.user));
 
@@ -55,9 +51,8 @@ export function Login({ onNavigate, onLogin }: LoginProps) {
         }
       }
 
-      console.log(response.message);
       // Call callback with user role
-      onLogin((response.user?.role as Role) || "student");
+      onLogin((response.user?.role as UserRole) || "student");
       setIsLoading(false);
     } catch (err) {
       console.error("Login error:", err);

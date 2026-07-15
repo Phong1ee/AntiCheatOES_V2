@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react';
-import { ExamListSidebar } from './ExamListSidebar';
-import { ExamEditor } from './ExamEditor';
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { ExamEditor } from "./ExamEditor";
+import { ExamListSidebar } from "./ExamListSidebar";
+import { teacherExamService } from "../../../services/teacher-exam.service";
+import type { TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
 
 interface Exam {
   id: string;
   title: string;
   subject: string;
+  subjectId: string;
   class: string;
-  status: 'draft' | 'scheduled' | 'published' | 'archived';
+  status: "draft" | "scheduled" | "published" | "archived";
   date: string;
   questionCount: number;
   assignedStudents: number;
@@ -17,135 +21,104 @@ interface Exam {
   description?: string;
 }
 
-const initialExams: Exam[] = [
-  {
-    id: '1',
-    title: 'Midterm Exam',
-    subject: 'Database Systems',
-    class: 'CS301',
-    status: 'scheduled',
-    date: '2025-11-20',
-    questionCount: 45,
-    assignedStudents: 52,
-    averageScore: null,
-    duration: 90,
-    examCode: 'EXAM-DB301M',
-    description: 'Comprehensive assessment covering chapters 1-5',
-  },
-  {
-    id: '2',
-    title: 'Quiz 3 - Normalization',
-    subject: 'Database Systems',
-    class: 'CS301',
-    status: 'published',
-    date: '2025-11-15',
-    questionCount: 15,
-    assignedStudents: 52,
-    averageScore: 82.5,
-    duration: 30,
-    examCode: 'EXAM-DB301Q3',
-    description: 'Quick assessment on database normalization',
-  },
-  {
-    id: '3',
-    title: 'Final Exam',
-    subject: 'Data Structures',
-    class: 'CS201',
-    status: 'draft',
-    date: '2025-12-10',
-    questionCount: 60,
-    assignedStudents: 0,
-    averageScore: null,
-    duration: 120,
-    examCode: 'EXAM-DS201F',
-    description: 'Comprehensive final examination',
-  },
-  {
-    id: '4',
-    title: 'HTML & CSS Basics',
-    subject: 'Web Development',
-    class: 'CS102',
-    status: 'archived',
-    date: '2025-11-01',
-    questionCount: 20,
-    assignedStudents: 38,
-    averageScore: 88.3,
-    duration: 45,
-    examCode: 'EXAM-WEB102',
-    description: 'Fundamentals of HTML5 and CSS3',
-  },
-];
+const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam => ({
+  id: String(exam.exam_id),
+  title: exam.title,
+  subject: exam.subject ?? "No subject",
+  subjectId: subjects.find((subject) => subject.subject_name === exam.subject)?.subject_id ?? "",
+  class: "Unassigned",
+  status: exam.status === "upcoming" ? "scheduled" : exam.status === "ongoing" ? "published" : "archived",
+  date: exam.start_time ?? new Date().toISOString(),
+  questionCount: 0,
+  assignedStudents: exam.totalStudents,
+  averageScore: null,
+  duration: exam.duration_minutes ?? 0,
+  examCode: exam.examcode,
+  description: exam.description ?? "",
+});
 
 interface ExamManagerPageProps {
   initialExamId?: string | null;
 }
 
 export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
-  const [exams, setExams] = useState<Exam[]>(initialExams);
-  const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId || '1');
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [subjects, setSubjects] = useState<TeacherSubject[]>([]);
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Update selectedExamId when initialExamId changes
-  useEffect(() => {
-    if (initialExamId) {
-      setSelectedExamId(initialExamId);
+  const loadManagerData = async () => {
+    try {
+      setLoading(true);
+      setLoadError(null);
+      const [apiExams, apiSubjects] = await Promise.all([
+        teacherExamService.list(),
+        teacherExamService.listSubjects(),
+      ]);
+      const mappedExams = apiExams.map((exam) => toManagerExam(exam, apiSubjects));
+      setSubjects(apiSubjects);
+      setExams(mappedExams);
+      setSelectedExamId((current) => current ?? mappedExams[0]?.id ?? null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Failed to load exams.");
+    } finally {
+      setLoading(false);
     }
-  }, [initialExamId]);
-
-  const handleCreateNew = () => {
-    const newId = `new-${Date.now()}`;
-    setSelectedExamId(newId);
   };
 
-  const handleSaveExam = (examData: {
+  useEffect(() => {
+    void loadManagerData();
+  }, []);
+
+  useEffect(() => {
+    if (initialExamId) setSelectedExamId(initialExamId);
+  }, [initialExamId]);
+
+  const handleCreateNew = () => setSelectedExamId(`new-${Date.now()}`);
+
+  const handleSaveExam = async (examData: {
     id: string;
     title: string;
     description: string;
-    subject: string;
-    class: string;
+    subjectId: string;
     duration: number;
     examCode: string;
-    status: 'draft' | 'scheduled' | 'published' | 'archived';
   }) => {
-    // If it's a new exam (id starts with 'new-')
-    if (examData.id.startsWith('new-')) {
-      const newExam: Exam = {
-        id: Date.now().toString(), // Generate permanent ID
-        title: examData.title,
-        subject: examData.subject,
-        class: examData.class,
-        status: examData.status,
-        date: new Date().toISOString().split('T')[0],
-        questionCount: 0,
-        assignedStudents: 0,
-        averageScore: null,
-        duration: examData.duration,
-        examCode: examData.examCode,
-        description: examData.description,
-      };
-      setExams([newExam, ...exams]);
-      setSelectedExamId(newExam.id); // Switch to the new permanent ID
+    const payload = {
+      title: examData.title.trim(),
+      examcode: examData.examCode.trim(),
+      max_attemmpt: 1,
+      description: examData.description.trim(),
+      duration_minutes: examData.duration,
+      result_visibility: "full" as const,
+      subject_id: examData.subjectId,
+    };
+
+    if (examData.id.startsWith("new-")) {
+      await teacherExamService.create(payload);
     } else {
-      // Update existing exam
-      setExams(exams.map(exam =>
-        exam.id === examData.id
-          ? {
-              ...exam,
-              title: examData.title,
-              subject: examData.subject,
-              class: examData.class,
-              status: examData.status,
-              duration: examData.duration,
-              examCode: examData.examCode,
-              description: examData.description,
-            }
-          : exam
-      ));
+      await teacherExamService.update(Number(examData.id), payload);
     }
+
+    await loadManagerData();
+    const savedExam = (await teacherExamService.list()).find((exam) => exam.examcode === payload.examcode);
+    setSelectedExamId(savedExam ? String(savedExam.exam_id) : null);
+    toast.success(examData.id.startsWith("new-") ? "Exam created successfully." : "Exam updated successfully.");
   };
+
+  if (loading) {
+    return <div className="h-[calc(100vh-64px)] flex items-center justify-center text-gray-600">Loading exams...</div>;
+  }
+
+  if (loadError) {
+    return <div className="h-[calc(100vh-64px)] flex items-center justify-center text-red-600">{loadError}</div>;
+  }
+
+  const selectedExam = exams.find((exam) => exam.id === selectedExamId) ?? null;
 
   return (
     <div className="h-[calc(100vh-64px)] flex">
-      {/* Left Sidebar - 35% */}
       <div className="w-[35%] min-w-[320px] max-w-[500px]">
         <ExamListSidebar
           exams={exams}
@@ -154,11 +127,11 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
           onCreateNew={handleCreateNew}
         />
       </div>
-
-      {/* Right Editor - 65% */}
       <div className="flex-1">
         <ExamEditor
           examId={selectedExamId}
+          exam={selectedExam}
+          subjects={subjects}
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
         />

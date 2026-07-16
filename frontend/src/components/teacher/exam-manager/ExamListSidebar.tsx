@@ -18,6 +18,17 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../ui/alert-dialog';
+import { toast } from 'sonner';
+import {
   Search,
   Plus,
   Filter,
@@ -61,12 +72,28 @@ interface ExamListSidebarProps {
   selectedExamId: string | null;
   onSelectExam: (id: string | null) => void;
   onCreateNew: () => void;
+  onDeleteExam: (id: string) => Promise<void>;
 }
 
-export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateNew }: ExamListSidebarProps) {
+export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateNew, onDeleteExam }: ExamListSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterSubject, setFilterSubject] = useState<string>('all');
+  const [examToDelete, setExamToDelete] = useState<Exam | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!examToDelete) return;
+    try {
+      setIsDeleting(true);
+      await onDeleteExam(examToDelete.id);
+      setExamToDelete(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete the exam.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const filteredExams = exams
     .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
@@ -187,7 +214,7 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                             <Archive className="size-4 mr-2" />
                             Archive
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-600">
+                          <DropdownMenuItem className="text-red-600" onClick={(event) => { event.stopPropagation(); setExamToDelete(exam); }}>
                             <Trash2 className="size-4 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -237,6 +264,22 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
           </div>
         )}
       </div>
+      <AlertDialog open={examToDelete !== null} onOpenChange={(open) => { if (!open && !isDeleting) setExamToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this exam?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the exam and its attempts, but keeps reusable question-bank questions.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={isDeleting} onClick={(event) => { event.preventDefault(); void confirmDelete(); }} className="bg-red-600 hover:bg-red-700">
+              {isDeleting ? 'Deleting...' : 'Delete exam'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

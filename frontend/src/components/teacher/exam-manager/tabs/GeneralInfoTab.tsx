@@ -21,10 +21,12 @@ interface GeneralInfoTabProps {
   classGroup: string;
   examCode: string;
   duration: number;
+  maxAttempt: number;
   onSubjectChange: (value: string) => void;
   onClassGroupChange: (value: string) => void;
   onExamCodeChange: (value: string) => void;
   onDurationChange: (value: number) => void;
+  onMaxAttemptChange: (value: number) => void;
 }
 
 export function GeneralInfoTab({
@@ -34,17 +36,17 @@ export function GeneralInfoTab({
   classGroup,
   examCode,
   duration,
+  maxAttempt,
   onSubjectChange,
   onClassGroupChange,
   onExamCodeChange,
   onDurationChange,
+  onMaxAttemptChange,
 }: GeneralInfoTabProps) {
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [attempts, setAttempts] = useState('1');
-  const [unlimitedAttempts, setUnlimitedAttempts] = useState(false);
   const [totalPoints, setTotalPoints] = useState('100');
   const [passingScore, setPassingScore] = useState('60');
   const [tags, setTags] = useState('');
@@ -242,19 +244,19 @@ export function GeneralInfoTab({
               </div>
               <Switch
                 id="unlimited-attempts"
-                checked={unlimitedAttempts}
-                onCheckedChange={setUnlimitedAttempts}
+                checked={maxAttempt === 0}
+                onCheckedChange={(checked) => onMaxAttemptChange(checked ? 0 : 1)}
               />
             </div>
 
-            {!unlimitedAttempts && (
+            {maxAttempt !== 0 && (
               <div className="space-y-2">
                 {/* <Label htmlFor="attempts">Number of Attempts</Label> */}
                 <Input
                   id="attempts"
                   type="number"
-                  value={attempts}
-                  onChange={(e) => setAttempts(e.target.value)}
+                  value={maxAttempt}
+                  onChange={(e) => onMaxAttemptChange(Math.max(1, Number(e.target.value) || 1))}
                   min="1"
                   step="1"
                   inputMode="numeric"

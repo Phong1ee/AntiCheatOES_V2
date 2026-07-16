@@ -18,12 +18,14 @@ export interface TeacherExamApi {
   manage_by: string;
   status: "upcoming" | "ongoing" | "completed";
   subject: string | null;
+  subject_id: string | null;
+  result_visibility: "hidden" | "score-only" | "full" | null;
 }
 
 export interface TeacherExamRequest {
   title: string;
   examcode: string;
-  max_attemmpt: number;
+  max_attempt: number;
   description: string;
   duration_minutes: number;
   result_visibility: "hidden" | "score-only" | "full";

@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 interface Question {
   id: number;
   text: string;
-  type: 'multiple-choice' | 'essay';
+  type: 'multiple-choice' | 'true-false' | 'essay';
   options?: string[];
 }
 

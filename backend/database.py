@@ -18,3 +18,12 @@ URL_DATABASE = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
 engine = create_engine(URL_DATABASE, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+def get_db():
+    """Provide one SQLAlchemy session per request and always close it."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

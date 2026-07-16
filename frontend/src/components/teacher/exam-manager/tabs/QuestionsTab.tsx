@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
@@ -30,6 +30,16 @@ import { QuestionPoolModal } from '../QuestionPoolModal';
 import { StudentQuestionPreview } from '../StudentQuestionPreview';
 import { toast } from 'sonner';
 import { questionService } from '../../../../services/question.service';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../../ui/alert-dialog';
 
 interface Question {
   id: string;
@@ -42,6 +52,9 @@ interface Question {
   hasMultipleCorrect?: boolean; // Flag to indicate if MCQ has multiple correct answers
   chapterId?: number;
   optionIds?: number[];
+  chapterIds?: number[];
+  loIds?: number[];
+  status?: 'draft' | 'pending' | 'approved' | 'rejected';
 }
 
 interface PoolConfig {
@@ -57,6 +70,7 @@ interface PoolConfig {
 
 interface QuestionsTabProps {
   examId: string | null;
+  subjectId: string;
 }
 
 // Mock questions data per exam
@@ -185,7 +199,7 @@ const mockQuestionsData: Record<string, Question[]> = {
   ],
 };
 
-export function QuestionsTab({ examId }: QuestionsTabProps) {
+export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
   // Load questions based on examId
   const initialQuestions: Question[] = [];
 
@@ -198,8 +212,11 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadQuestions = async (questionToSelect?: string) => {
+  const loadQuestions = useCallback(async (questionToSelect?: string) => {
     if (!examId || examId.startsWith('new-')) {
       setQuestions([]);
       setSelectedQuestion(null);
@@ -208,7 +225,7 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
 
     try {
       setLoadingQuestions(true);
-      setSaveError(null);
+      setLoadError(null);
       const persistedQuestions = await questionService.getExamQuestions(Number(examId));
       const mappedQuestions: Question[] = persistedQuestions.map((question) => {
         const correctIndexes = question.options
@@ -216,32 +233,35 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
           .filter((index) => index >= 0);
         return {
           id: String(question.question_id),
-          type: question.question_type === 'essay' ? 'essay' : 'mcq',
+          type: question.question_type === 'MCQ' ? 'mcq' : question.question_type,
           question: question.question_text,
           points: question.question_point,
           difficulty: question.question_difficulties,
           options: question.options.map((option) => option.options_text),
           optionIds: question.options.map((option) => option.options_id),
-          correctAnswer: correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
+          correctAnswer: question.question_type === 'true-false'
+            ? (question.options[correctIndexes[0]]?.options_text.toLowerCase() ?? 'true')
+            : correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
           hasMultipleCorrect: correctIndexes.length > 1,
-          chapterId: question.chapter_id,
+          chapterId: question.chapter_ids[0],
+          chapterIds: question.chapter_ids,
+          loIds: question.lo_ids,
+          status: question.question_status,
         };
       });
       setQuestions(mappedQuestions);
       setSelectedQuestion(questionToSelect ?? mappedQuestions[0]?.id ?? null);
     } catch (error) {
-      setQuestions([]);
-      setSelectedQuestion(null);
-      setSaveError(error instanceof Error ? error.message : 'Unable to load exam questions.');
+      setLoadError(error instanceof Error ? error.message : 'Unable to load exam questions.');
     } finally {
       setLoadingQuestions(false);
     }
-  };
+  }, [examId]);
 
   // Update questions when examId changes
   useEffect(() => {
     void loadQuestions();
-  }, [examId]);
+  }, [loadQuestions]);
 
   const selectedQ = questions.find((q) => q.id === selectedQuestion);
 
@@ -252,17 +272,35 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
       question: '',
       points: 5,
       difficulty: 'medium',
-      options: type === 'mcq' ? ['', '', '', ''] : undefined,
+      options: type === 'mcq' ? ['', ''] : undefined,
       chapterId: undefined,
+      chapterIds: [],
+      loIds: [],
+      status: 'draft',
+      correctAnswer: type === 'true-false' ? 'true' : 0,
     };
     setQuestions([...questions, newQuestion]);
     setSelectedQuestion(newQuestion.id);
   };
 
-  const deleteQuestion = (id: string) => {
-    setQuestions(questions.filter((q) => q.id !== id));
-    if (selectedQuestion === id) {
-      setSelectedQuestion(questions[0]?.id || null);
+  const deleteQuestion = (id: string) => setQuestionToDelete(questions.find((question) => question.id === id) ?? null);
+
+  const confirmDeleteQuestion = async () => {
+    if (!questionToDelete) return;
+    try {
+      setIsDeleting(true);
+      if (!questionToDelete.id.startsWith('new-') && examId) {
+        await questionService.removeFromExam(Number(examId), Number(questionToDelete.id));
+      }
+      const remaining = questions.filter((question) => question.id !== questionToDelete.id);
+      setQuestions(remaining);
+      if (selectedQuestion === questionToDelete.id) setSelectedQuestion(remaining[0]?.id ?? null);
+      setQuestionToDelete(null);
+      toast.success('Question removed from the exam.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to remove the question.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -278,13 +316,33 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
     setQuestions(questions.map((q) => (q.id === id ? { ...q, ...updates } : q)));
   };
 
+  const addOption = () => {
+    if (!selectedQ) return;
+    updateQuestion(selectedQ.id, { options: [...(selectedQ.options ?? []), ''] });
+  };
+
+  const removeOption = (index: number) => {
+    if (!selectedQ?.options || selectedQ.options.length <= 2) return;
+    const options = selectedQ.options.filter((_, optionIndex) => optionIndex !== index);
+    const optionIds = selectedQ.optionIds?.filter((_, optionIndex) => optionIndex !== index);
+    const current = Array.isArray(selectedQ.correctAnswer)
+      ? selectedQ.correctAnswer
+      : typeof selectedQ.correctAnswer === 'number' ? [selectedQ.correctAnswer] : [];
+    const adjusted = current.filter((answer) => answer !== index).map((answer) => answer > index ? answer - 1 : answer);
+    updateQuestion(selectedQ.id, {
+      options,
+      optionIds,
+      correctAnswer: adjusted.length > 1 ? adjusted : adjusted[0] ?? 0,
+    });
+  };
+
   const saveQuestion = async () => {
     if (!selectedQ || !examId || examId.startsWith('new-')) {
       setSaveError('Save the exam before adding questions.');
       return;
     }
-    if (!selectedQ.question.trim() || !selectedQ.chapterId) {
-      setSaveError('Question text and a numeric chapter ID are required.');
+    if (!selectedQ.question.trim() || !subjectId) {
+      setSaveError('Question text and subject are required.');
       return;
     }
 
@@ -292,14 +350,15 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
       setIsSaving(true);
       setSaveError(null);
       const isTrueFalse = selectedQ.type === 'true-false';
-      const questionType = selectedQ.type === 'essay' ? 'essay' : 'MCQ';
+      if (selectedQ.type === 'matching') throw new Error('Matching questions are not supported by the API.');
+      const questionType = selectedQ.type === 'mcq' ? 'MCQ' : selectedQ.type;
       const optionTexts = isTrueFalse ? ['True', 'False'] : selectedQ.options ?? [];
       const correctIndices: number[] = isTrueFalse
         ? [selectedQ.correctAnswer === 'false' ? 1 : 0]
         : Array.isArray(selectedQ.correctAnswer) ? selectedQ.correctAnswer : [Number(selectedQ.correctAnswer ?? 0)];
 
-      if (questionType === 'MCQ' && optionTexts.some((option) => !option.trim())) {
-        throw new Error('Every multiple-choice option must have text.');
+      if (questionType === 'MCQ' && (optionTexts.length < 2 || optionTexts.some((option) => !option.trim()))) {
+        throw new Error('Multiple-choice questions require at least two non-empty options.');
       }
 
       const options = optionTexts.map((options_text, index) => ({
@@ -313,23 +372,28 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
           question_text: selectedQ.question.trim(),
           question_difficulties: selectedQ.difficulty ?? 'medium',
           question_type: questionType,
-          chapter_id: selectedQ.chapterId,
-          question_status: 'draft',
-        });
-        await questionService.addToExam(Number(examId), {
-          question_id: questionId,
-          question_point: selectedQ.points,
+          subject_id: subjectId,
+          chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
+          lo_ids: selectedQ.loIds ?? [],
+          question_status: selectedQ.status ?? 'draft',
           options,
+          exam_id: Number(examId),
+          question_point: selectedQ.points,
         });
         await loadQuestions(String(questionId));
       } else {
-        if (questionType === 'MCQ' && options.some((option) => option.options_id === undefined)) {
-          throw new Error('Reload this question before updating its answer options.');
-        }
         await questionService.updateInExam(Number(examId), Number(selectedQ.id), {
+          question_text: selectedQ.question.trim(),
+          question_difficulties: selectedQ.difficulty ?? 'medium',
+          question_type: questionType,
+          subject_id: subjectId,
+          chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
+          lo_ids: selectedQ.loIds ?? [],
+          question_status: selectedQ.status ?? 'draft',
           question_point: selectedQ.points,
           options,
         });
+        await loadQuestions(selectedQ.id);
       }
       toast.success('Question saved successfully.');
     } catch (error) {
@@ -362,6 +426,12 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
               {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length})`}
             </h3>
           </div>
+          {loadError && (
+            <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              <p>{loadError}</p>
+              <Button variant="link" size="sm" className="h-auto p-0 text-red-700" onClick={() => void loadQuestions()}>Retry</Button>
+            </div>
+          )}
 
           {isPoolMode && poolConfig && (
             <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
@@ -617,9 +687,12 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
                     <Label>Question Type</Label>
                     <Select
                       value={selectedQ.type}
-                      onValueChange={(value: Question['type']) =>
-                        updateQuestion(selectedQ.id, { type: value })
-                      }
+                      onValueChange={(value: Question['type']) => updateQuestion(selectedQ.id, {
+                        type: value,
+                        options: value === 'mcq' ? (selectedQ.options?.length ? selectedQ.options : ['', '']) : undefined,
+                        optionIds: value === 'mcq' ? selectedQ.optionIds : undefined,
+                        correctAnswer: value === 'true-false' ? 'true' : value === 'mcq' ? 0 : undefined,
+                      })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -728,9 +801,22 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
                             placeholder={`Option ${index + 1}`}
                             className="flex-1"
                           />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={selectedQ.options!.length <= 2}
+                            onClick={() => removeOption(index)}
+                            aria-label={`Remove option ${index + 1}`}
+                          >
+                            <Trash2 className="size-4 text-red-500" />
+                          </Button>
                         </div>
                       );
                     })}
+                    <Button type="button" variant="outline" size="sm" onClick={addOption}>
+                      <Plus className="size-4 mr-1" /> Add option
+                    </Button>
                     <p className="text-xs text-gray-500">
                       {selectedQ.hasMultipleCorrect
                         ? 'Check all correct answers'
@@ -859,6 +945,22 @@ export function QuestionsTab({ examId }: QuestionsTabProps) {
           onClose={() => setShowStudentPreview(false)}
         />
       )}
+      <AlertDialog open={questionToDelete !== null} onOpenChange={(open) => { if (!open && !isDeleting) setQuestionToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this question from the exam?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The reusable question, options, chapters, and learning outcomes will remain in the question bank.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={isDeleting} onClick={(event) => { event.preventDefault(); void confirmDeleteQuestion(); }} className="bg-red-600 hover:bg-red-700">
+              {isDeleting ? 'Removing...' : 'Remove question'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

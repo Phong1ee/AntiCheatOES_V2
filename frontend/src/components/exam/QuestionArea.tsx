@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 interface Question {
   id: number;
   text: string;
-  type: 'multiple-choice' | 'essay';
+  type: 'multiple-choice' | 'true-false' | 'essay';
   options?: string[];
   answer?: string;
 }
@@ -43,7 +43,7 @@ export function QuestionArea({
             <p className="text-lg text-gray-800 leading-relaxed">{question.text}</p>
           </div>
 
-          {question.type === 'multiple-choice' && question.options && (
+      {(question.type === 'multiple-choice' || question.type === 'true-false') && question.options && (
             <div className="space-y-3">
               {question.options.map((option, index) => {
                 const optionLabel = String.fromCharCode(65 + index); // A, B, C, D

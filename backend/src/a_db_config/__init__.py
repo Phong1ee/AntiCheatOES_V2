@@ -55,6 +55,13 @@ class QuestionDifficulty(str, enum.Enum):
 class QuestionType(str, enum.Enum):
     MCQ = "MCQ"
     essay = "essay"
+    true_false = "true-false"
+
+
+question_type_enum = Enum(
+    QuestionType,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+)
 
 
 class QuestionStatus(str, enum.Enum):
@@ -106,6 +113,7 @@ class Subject(Base):
     chapters: Mapped[list["Chapter"]] = relationship(back_populates="subject")
     classes: Mapped[list["CourseClass"]] = relationship(back_populates="subject")
     exams: Mapped[list["Exam"]] = relationship(back_populates="subject")
+    questions: Mapped[list["Question"]] = relationship(back_populates="subject")
 
 
 class Chapter(Base):
@@ -119,7 +127,12 @@ class Chapter(Base):
     )
 
     subject: Mapped[Optional["Subject"]] = relationship(back_populates="chapters")
-    questions: Mapped[list["Question"]] = relationship(back_populates="chapter")
+    chapter_questions: Mapped[list["ChapterQuestion"]] = relationship(
+        back_populates="chapter", cascade="all, delete-orphan"
+    )
+    questions: Mapped[list["Question"]] = relationship(
+        secondary="chapter_question", back_populates="chapters", viewonly=True
+    )
     chapter_los: Mapped[list["ChapterLO"]] = relationship(back_populates="chapter")
 
 
@@ -187,16 +200,22 @@ class Question(Base):
     question_difficulties: Mapped[QuestionDifficulty] = mapped_column(
         Enum(QuestionDifficulty), nullable=False
     )
-    question_type: Mapped[Optional[QuestionType]] = mapped_column(Enum(QuestionType))
-    chapter_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("chapter.chapter_id", ondelete="CASCADE")
+    question_type: Mapped[Optional[QuestionType]] = mapped_column(question_type_enum)
+    subject_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("subject.subject_id", ondelete="RESTRICT"), nullable=False
     )
     created_by: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("user.id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
 
-    chapter: Mapped[Optional["Chapter"]] = relationship(back_populates="questions")
+    subject: Mapped["Subject"] = relationship(back_populates="questions")
+    chapter_questions: Mapped[list["ChapterQuestion"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
+    chapters: Mapped[list["Chapter"]] = relationship(
+        secondary="chapter_question", back_populates="questions", viewonly=True
+    )
     creator: Mapped[Optional["User"]] = relationship(back_populates="questions_created")
     options: Mapped[list["Option"]] = relationship(back_populates="question")
     lo_questions: Mapped[list["LOQuestion"]] = relationship(back_populates="question")
@@ -204,6 +223,20 @@ class Question(Base):
     attempt_questions: Mapped[list["AttemptQuestion"]] = relationship(
         back_populates="question"
     )
+
+
+class ChapterQuestion(Base):
+    __tablename__ = "chapter_question"
+
+    chapter_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chapter.chapter_id", ondelete="CASCADE"), primary_key=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("question.question_id", ondelete="CASCADE"), primary_key=True
+    )
+
+    chapter: Mapped["Chapter"] = relationship(back_populates="chapter_questions")
+    question: Mapped["Question"] = relationship(back_populates="chapter_questions")
 
 
 class Option(Base):

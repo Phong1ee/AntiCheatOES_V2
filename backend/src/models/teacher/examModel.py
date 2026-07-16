@@ -177,10 +177,12 @@ def getExamQuestions(exam_id: int):
         questions = []
 
         for row in question_rows:
-            question_type = "multiple-choice" if row["question_type"] == "MCQ" else "essay"
+            question_type = (
+                "multiple-choice" if row["question_type"] == "MCQ" else row["question_type"]
+            )
             options = []
 
-            if question_type == "multiple-choice":
+            if question_type in {"multiple-choice", "true-false"}:
                 cursor.execute(options_query, (row["question_id"],))
                 option_rows = cursor.fetchall()
                 options = [
@@ -400,7 +402,7 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
 
             cursor.execute(insert_attempt_question_query, (attempt_id, question_id, index))
 
-            if question_info["question_type"] != "MCQ":
+            if question_info["question_type"] == "essay":
                 if not answer_text:
                     raise Exception(f"Missing essay answer for question {question_id}")
 
@@ -507,8 +509,7 @@ def returnSubject():
         s.subject_description,
         COALESCE(COUNT(q.question_id), 0) as question_count
     FROM subject s
-    LEFT JOIN chapter c ON s.subject_id = c.subject_id
-    LEFT JOIN question q ON c.chapter_id = q.chapter_id
+    LEFT JOIN question q ON s.subject_id = q.subject_id
     GROUP BY s.subject_id, s.subject_name, s.subject_description
     ORDER BY s.subject_name
     LIMIT 5

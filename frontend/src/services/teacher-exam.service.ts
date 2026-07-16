@@ -16,11 +16,17 @@ export const teacherExamService = {
     return data.subjects ?? [];
   },
 
-  async create(payload: TeacherExamRequest): Promise<void> {
-    await apiClient.post("/api/teacher/add_exam", payload);
+  async create(payload: TeacherExamRequest): Promise<TeacherExamApi> {
+    const { data } = await apiClient.post<TeacherExamApi>("/api/teacher/add_exam", payload);
+    return data;
   },
 
-  async update(examId: number, payload: TeacherExamRequest): Promise<void> {
-    await apiClient.put(`/api/teacher/update_exam/${examId}`, payload);
+  async update(examId: number, payload: TeacherExamRequest): Promise<TeacherExamApi> {
+    const { data } = await apiClient.put<TeacherExamApi>(`/api/teacher/update_exam/${examId}`, payload);
+    return data;
+  },
+
+  async delete(examId: number): Promise<void> {
+    await apiClient.delete(`/api/teacher/delete_exam/${examId}`);
   },
 };

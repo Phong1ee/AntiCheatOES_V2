@@ -13,7 +13,7 @@ const API_BASE_URL = 'http://localhost:8000';
 interface Question {
   id: number;
   text: string;
-  type: 'multiple-choice' | 'essay';
+  type: 'multiple-choice' | 'true-false' | 'essay';
   options?: string[];
   answer?: string;
 }
@@ -26,7 +26,7 @@ interface ApiQuestionOption {
 interface ApiQuestion {
   id: number;
   text: string;
-  type: 'multiple-choice' | 'essay';
+  type: 'multiple-choice' | 'true-false' | 'essay';
   options?: ApiQuestionOption[];
   answer?: string;
 }

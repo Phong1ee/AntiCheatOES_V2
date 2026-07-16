@@ -98,17 +98,17 @@ CREATE TABLE exam(
 );
 
 CREATE TABLE question(
-    question_id INT PRIMARY KEY,
+    question_id INT AUTO_INCREMENT PRIMARY KEY,
     question_text VARCHAR(255) NOT NULL,
     question_difficulties ENUM('easy', 'medium', 'hard') NOT NULL,
-    question_type ENUM('MCQ', 'essay'),
-    chapter_id INT,
+    question_type ENUM('MCQ', 'essay', 'true-false'),
+    subject_id VARCHAR(20) NOT NULL,
     created_by INT NULL,
     question_status ENUM('draft', 'pending', 'approved', 'rejected'),
 
-    FOREIGN KEY (chapter_id)
-        REFERENCES chapter(chapter_id)
-        ON DELETE CASCADE,
+    FOREIGN KEY (subject_id)
+        REFERENCES subject(subject_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (created_by)
         REFERENCES user(id)
@@ -239,4 +239,19 @@ CREATE TABLE exam_event(
 
     FOREIGN KEY (attempt_id)
         REFERENCES attempt(attempt_id)
+);
+
+CREATE TABLE chapter_question(
+    chapter_id INT,
+    question_id INT,
+
+    PRIMARY KEY (chapter_id, question_id),
+
+    FOREIGN KEY (chapter_id)
+        REFERENCES chapter(chapter_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (question_id)
+        REFERENCES question(question_id)
+        ON DELETE CASCADE
 );

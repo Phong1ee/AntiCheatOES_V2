@@ -19,13 +19,14 @@ interface Exam {
   duration?: number;
   examCode?: string;
   description?: string;
+  maxAttempt: number;
 }
 
 const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam => ({
   id: String(exam.exam_id),
   title: exam.title,
   subject: exam.subject ?? "No subject",
-  subjectId: subjects.find((subject) => subject.subject_name === exam.subject)?.subject_id ?? "",
+  subjectId: exam.subject_id ?? subjects.find((subject) => subject.subject_name === exam.subject)?.subject_id ?? "",
   class: "Unassigned",
   status: exam.status === "upcoming" ? "scheduled" : exam.status === "ongoing" ? "published" : "archived",
   date: exam.start_time ?? new Date().toISOString(),
@@ -35,6 +36,7 @@ const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam =
   duration: exam.duration_minutes ?? 0,
   examCode: exam.examcode,
   description: exam.description ?? "",
+  maxAttempt: exam.max_attempt ?? 1,
 });
 
 interface ExamManagerPageProps {
@@ -59,7 +61,11 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
       const mappedExams = apiExams.map((exam) => toManagerExam(exam, apiSubjects));
       setSubjects(apiSubjects);
       setExams(mappedExams);
-      setSelectedExamId((current) => current ?? mappedExams[0]?.id ?? null);
+      setSelectedExamId((current) =>
+        current && (current.startsWith("new-") || mappedExams.some((exam) => exam.id === current))
+          ? current
+          : mappedExams[0]?.id ?? null,
+      );
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Failed to load exams.");
     } finally {
@@ -84,27 +90,32 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
     subjectId: string;
     duration: number;
     examCode: string;
+    maxAttempt: number;
   }) => {
     const payload = {
       title: examData.title.trim(),
       examcode: examData.examCode.trim(),
-      max_attemmpt: 1,
+      max_attempt: examData.maxAttempt,
       description: examData.description.trim(),
       duration_minutes: examData.duration,
       result_visibility: "full" as const,
       subject_id: examData.subjectId,
     };
 
-    if (examData.id.startsWith("new-")) {
-      await teacherExamService.create(payload);
-    } else {
-      await teacherExamService.update(Number(examData.id), payload);
-    }
-
+    const saved = examData.id.startsWith("new-")
+      ? await teacherExamService.create(payload)
+      : await teacherExamService.update(Number(examData.id), payload);
     await loadManagerData();
-    const savedExam = (await teacherExamService.list()).find((exam) => exam.examcode === payload.examcode);
-    setSelectedExamId(savedExam ? String(savedExam.exam_id) : null);
+    setSelectedExamId(String(saved.exam_id));
     toast.success(examData.id.startsWith("new-") ? "Exam created successfully." : "Exam updated successfully.");
+  };
+
+  const handleDeleteExam = async (examId: string) => {
+    await teacherExamService.delete(Number(examId));
+    const remaining = exams.filter((exam) => exam.id !== examId);
+    setExams(remaining);
+    setSelectedExamId((current) => current === examId ? remaining[0]?.id ?? null : current);
+    toast.success("Exam deleted successfully.");
   };
 
   if (loading) {
@@ -112,7 +123,7 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
   }
 
   if (loadError) {
-    return <div className="h-[calc(100vh-64px)] flex items-center justify-center text-red-600">{loadError}</div>;
+    return <div className="h-[calc(100vh-64px)] flex flex-col gap-3 items-center justify-center text-red-600"><p>{loadError}</p><button className="underline" onClick={() => void loadManagerData()}>Retry</button></div>;
   }
 
   const selectedExam = exams.find((exam) => exam.id === selectedExamId) ?? null;
@@ -125,6 +136,7 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
           selectedExamId={selectedExamId}
           onSelectExam={setSelectedExamId}
           onCreateNew={handleCreateNew}
+          onDeleteExam={handleDeleteExam}
         />
       </div>
       <div className="flex-1">

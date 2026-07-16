@@ -32,6 +32,7 @@ interface ExamEditorProps {
     status: 'draft' | 'scheduled' | 'published' | 'archived';
     duration?: number;
     examCode?: string;
+    maxAttempt: number;
   } | null;
   subjects: TeacherSubject[];
   onClose: () => void;
@@ -42,6 +43,7 @@ interface ExamEditorProps {
     subjectId: string;
     duration: number;
     examCode: string;
+    maxAttempt: number;
   }) => Promise<void>;
 }
 
@@ -53,6 +55,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
   const [classGroup, setClassGroup] = useState('');
   const [duration, setDuration] = useState(60);
   const [examCode, setExamCode] = useState('');
+  const [maxAttempt, setMaxAttempt] = useState(1);
   const [status, setStatus] = useState<'draft' | 'scheduled' | 'published' | 'archived'>('draft');
   const [lastSaved, setLastSaved] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState('general');
@@ -81,6 +84,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
       setClassGroup('');
       setDuration(60);
       setExamCode('');
+      setMaxAttempt(1);
       setStatus('draft');
       setActiveTab('general');
       return;
@@ -95,6 +99,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
       setClassGroup('');
       setDuration(60);
       setExamCode(generateExamCode());
+      setMaxAttempt(1);
       setStatus('draft');
       setActiveTab('general');
     } else {
@@ -106,6 +111,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
         setClassGroup(exam.class || '');
         setDuration(exam.duration || 60);
         setExamCode(exam.examCode || generateExamCode());
+        setMaxAttempt(exam.maxAttempt);
         setStatus(exam.status);
         setActiveTab('general');
       }
@@ -170,7 +176,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
     try {
       setIsSaving(true);
       setSaveError(null);
-      await onSave({ id: examId, title, description, subjectId, duration, examCode });
+      await onSave({ id: examId, title, description, subjectId, duration, examCode, maxAttempt });
       setLastSaved(new Date());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save the exam.';
@@ -354,6 +360,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
               classGroup={classGroup}
               examCode={examCode}
               duration={duration}
+              maxAttempt={maxAttempt}
               onSubjectChange={(nextSubjectId) => {
                 setSubjectId(nextSubjectId);
                 setSubject(subjects.find((item) => item.subject_id === nextSubjectId)?.subject_name ?? '');
@@ -361,11 +368,12 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
               onClassGroupChange={setClassGroup}
               onExamCodeChange={setExamCode}
               onDurationChange={setDuration}
+              onMaxAttemptChange={setMaxAttempt}
             />
           </TabsContent>
 
           <TabsContent value="questions" className="m-0 p-0">
-            <QuestionsTab examId={examId} />
+            <QuestionsTab examId={examId} subjectId={subjectId} />
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 p-6">

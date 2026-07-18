@@ -7,6 +7,8 @@ import { QuestionBankPage } from './question-bank/QuestionBankPage';
 import { ExamResultsPage } from './results/ExamResultsPage';
 import { Footer } from '../dashboard/Footer';
 import { useUserRole } from '../../contexts/UserRoleContext';
+import { ProfileSettings } from '../ProfileSettings';
+import { Preferences } from '../Preferences';
 
 interface TeacherDashboardProps {
   onLogout: () => void;
@@ -47,6 +49,14 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
         <QuestionBankPage />
       ) : activeTab === 'results' ? (
         <ExamResultsPage />
+      ) : activeTab === 'profile' ? (
+        <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
+          <ProfileSettings />
+        </main>
+      ) : activeTab === 'preferences' ? (
+        <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
+          <Preferences />
+        </main>
       ) : (
         <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
           {activeTab === 'dashboard' && (

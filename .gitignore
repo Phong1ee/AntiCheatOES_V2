@@ -2,6 +2,7 @@
 node_modules
 __pycache__
 .env
+backend/.env
 /frontend/node_modules/.vite
 frontend/node_modules/.vite/deps/chunk-MBAUDHR7.js
 /frontend/node_modules/.vite

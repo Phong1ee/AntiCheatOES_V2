@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field
-from src.controller.examController import ExamController
+from src.controller.teacherController.examController import ExamController
 #from src.controller.authController import ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 
@@ -148,4 +148,3 @@ async def get_student_exams_by_id(student_id: str, current_user: dict = Depends(
         current_user["role"]
     )
     return result
-

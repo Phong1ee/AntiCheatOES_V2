@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
@@ -12,381 +12,479 @@ import {
   SelectValue,
 } from '../../ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { X, Save, Eye, Plus, Trash2, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Checkbox } from '../../ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../../ui/dialog';
 import { Alert, AlertDescription } from '../../ui/alert';
-import { Switch } from '../../ui/switch';
+import { AlertCircle, Plus, Save, Send, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { teacherQuestionBankService } from '../../../services/teacher-question-bank.service';
+import type {
+  ChapterSummary,
+  LearningObjectiveSummary,
+  QuestionDetail,
+  QuestionDifficulty,
+  QuestionOptionPayload,
+  QuestionPayload,
+  QuestionStatus,
+  QuestionType,
+  SubjectCount,
+} from '../../../types/question-bank';
 
 interface QuestionEditorProps {
-  questionId: string | null;
+  open: boolean;
+  questionId: number | null;
   onClose: () => void;
-  onSave: () => void;
+  onSaved: () => void;
 }
 
-export function QuestionEditor({ questionId, onClose, onSave }: QuestionEditorProps) {
-  const [questionType, setQuestionType] = useState<string>('mcq');
-  const [subject, setSubject] = useState('');
-  const [chapter, setChapter] = useState('');
-  const [difficulty, setDifficulty] = useState('medium');
+const defaultOptions: QuestionOptionPayload[] = [
+  { options_text: '', is_correct: true },
+  { options_text: '', is_correct: false },
+];
+const subjectPlaceholder = '__select_subject__';
+
+function statusNeedsSubmit(status?: QuestionStatus | null) {
+  return status === 'draft' || status === 'rejected';
+}
+
+export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionEditorProps) {
+  const [detail, setDetail] = useState<QuestionDetail | null>(null);
+  const [subjects, setSubjects] = useState<SubjectCount[]>([]);
+  const [chapters, setChapters] = useState<ChapterSummary[]>([]);
+  const [learningObjectives, setLearningObjectives] = useState<LearningObjectiveSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [questionText, setQuestionText] = useState('');
-  const [tags, setTags] = useState('');
-  const [mcqOptions, setMcqOptions] = useState(['', '', '', '']);
-  const [correctAnswer, setCorrectAnswer] = useState<number[]>([0]); // Support multiple correct answers
-  const [allowMultipleCorrect, setAllowMultipleCorrect] = useState(false);
-  const [tfAnswer, setTfAnswer] = useState<string>('true');
-  const [essayGuideline, setEssayGuideline] = useState('');
+  const [questionType, setQuestionType] = useState<QuestionType>('MCQ');
+  const [difficulty, setDifficulty] = useState<QuestionDifficulty | 'none'>('none');
+  const [subjectId, setSubjectId] = useState<string>(subjectPlaceholder);
+  const [chapterIds, setChapterIds] = useState<number[]>([]);
+  const [loIds, setLoIds] = useState<number[]>([]);
+  const [options, setOptions] = useState<QuestionOptionPayload[]>(defaultOptions);
 
-  const errors: string[] = [];
-  if (!questionText.trim()) errors.push('Question text is required');
-  if (!subject) errors.push('Subject is required');
-  if (questionType === 'mcq' && mcqOptions.some((opt) => !opt.trim())) {
-    errors.push('All answer options must be filled');
-  }
+  const isApprovedEdit = detail?.question_status === 'approved';
+  const isPending = detail?.question_status === 'pending';
 
-  const addMcqOption = () => {
-    setMcqOptions([...mcqOptions, '']);
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    async function loadInitialData() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [subjectMeta, questionDetail] = await Promise.all([
+          teacherQuestionBankService.listSubjectCounts('mine'),
+          questionId ? teacherQuestionBankService.getDetail(questionId) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setSubjects(subjectMeta.subjects);
+        setDetail(questionDetail);
+        setQuestionText(questionDetail?.question_text ?? '');
+        setQuestionType(questionDetail?.question_type ?? 'MCQ');
+        setDifficulty(questionDetail?.question_difficulties ?? 'none');
+        setSubjectId(questionDetail?.subject?.subject_id ?? subjectPlaceholder);
+        setChapterIds(questionDetail?.chapters.map((chapter) => chapter.chapter_id) ?? []);
+        setLoIds(questionDetail?.learning_objectives.map((lo) => lo.lo_id) ?? []);
+        setOptions(questionDetail?.options.length ? questionDetail.options : defaultOptions);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load question editor data.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadInitialData();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, questionId]);
+
+  useEffect(() => {
+    if (!open || subjectId === subjectPlaceholder) {
+      setChapters([]);
+      return;
+    }
+
+    let cancelled = false;
+    teacherQuestionBankService
+      .listChapters(subjectId)
+      .then((items) => {
+        if (cancelled) return;
+        setChapters(items);
+        setChapterIds((current) => current.filter((id) => items.some((chapter) => chapter.chapter_id === id)));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load chapters.'));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, subjectId]);
+
+  useEffect(() => {
+    if (!open || chapterIds.length === 0) {
+      setLearningObjectives([]);
+      setLoIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(chapterIds.map((chapterId) => teacherQuestionBankService.listLearningObjectives(chapterId)))
+      .then((groups) => {
+        if (cancelled) return;
+        const merged = Array.from(
+          new Map(groups.flat().map((item) => [item.lo_id, item])).values(),
+        );
+        setLearningObjectives(merged);
+        setLoIds((current) => current.filter((id) => merged.some((lo) => lo.lo_id === id)));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load learning objectives.'));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, chapterIds]);
+
+  const hasSubject = subjectId !== subjectPlaceholder;
+
+  const submitErrors = useMemo(() => {
+    const errors: string[] = [];
+    if (!questionText.trim()) errors.push('Question text is required.');
+    if (!hasSubject) errors.push('Subject is required.');
+    if (difficulty === 'none') errors.push('Difficulty is required when submitting.');
+    const nonEmptyOptions = options.filter((option) => option.options_text.trim());
+    if (questionType === 'MCQ') {
+      if (nonEmptyOptions.length < 2) errors.push('MCQ requires at least two options.');
+      if (!nonEmptyOptions.some((option) => option.is_correct)) errors.push('MCQ requires at least one correct option.');
+    }
+    if (questionType === 'true-false') {
+      const labels = nonEmptyOptions.map((option) => option.options_text.trim().toLowerCase()).sort().join(',');
+      if (labels !== 'false,true') errors.push('True/False must contain True and False.');
+      if (nonEmptyOptions.filter((option) => option.is_correct).length !== 1) errors.push('True/False requires exactly one correct answer.');
+    }
+    if (questionType === 'essay' && nonEmptyOptions.length > 0) errors.push('Essay questions cannot include MCQ options.');
+    return errors;
+  }, [difficulty, hasSubject, options, questionText, questionType]);
+
+  const draftDisabled = !questionText.trim() || !hasSubject || isPending || saving;
+  const submitDisabled = submitErrors.length > 0 || isPending || saving;
+
+  const payload = (): QuestionPayload => ({
+    question_text: questionText,
+    question_type: questionType,
+    question_difficulties: difficulty === 'none' ? null : difficulty,
+    subject_id: hasSubject ? subjectId : '',
+    chapter_ids: chapterIds,
+    lo_ids: chapterIds.length > 0 ? loIds : [],
+    options: questionType === 'essay' ? [] : options,
+  });
+
+  const closeAfterSave = () => {
+    onSaved();
+    onClose();
   };
 
-  const removeMcqOption = (index: number) => {
-    if (mcqOptions.length > 2) {
-      setMcqOptions(mcqOptions.filter((_, i) => i !== index));
-      // Remove this index from correct answers and adjust others
-      setCorrectAnswer(correctAnswer.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)));
+  const saveDraft = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (questionId) {
+        await teacherQuestionBankService.update(questionId, payload());
+      } else {
+        await teacherQuestionBankService.create(payload());
+      }
+      toast.success('Draft saved.');
+      closeAfterSave();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save draft.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const updateMcqOption = (index: number, value: string) => {
-    const newOptions = [...mcqOptions];
-    newOptions[index] = value;
-    setMcqOptions(newOptions);
+  const submitForApproval = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (questionId) {
+        await teacherQuestionBankService.update(questionId, payload());
+        if (statusNeedsSubmit(detail?.question_status)) await teacherQuestionBankService.submit(questionId);
+      } else {
+        const created = await teacherQuestionBankService.create(payload());
+        await teacherQuestionBankService.submit(created.question_id);
+      }
+      toast.success(isApprovedEdit ? 'Changes submitted for review.' : 'Question submitted for approval.');
+      closeAfterSave();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to submit question.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleSave = () => {
-    if (errors.length === 0) {
-      onSave();
-      onClose();
-    }
+  const addOption = () => setOptions((current) => [...current, { options_text: '', is_correct: false }]);
+  const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  const updateOption = (index: number, patch: Partial<QuestionOptionPayload>) => {
+    setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  };
+
+  const setTrueFalseAnswer = (answer: 'true' | 'false') => {
+    setOptions([
+      { options_text: 'True', is_correct: answer === 'true' },
+      { options_text: 'False', is_correct: answer === 'false' },
+    ]);
+  };
+
+  const toggleChapter = (chapterId: number, checked: boolean) => {
+    setChapterIds((current) => (checked ? [...current, chapterId] : current.filter((id) => id !== chapterId)));
+  };
+
+  const toggleLo = (loId: number, checked: boolean) => {
+    setLoIds((current) => (checked ? [...current, loId] : current.filter((id) => id !== loId)));
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <div>
-            <h2 className="text-xl text-gray-800">
-              {questionId ? 'Edit Question' : 'Add New Question'}
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Fill in the details to create or update a question
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="size-5" />
-          </Button>
-        </div>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent className="question-editor-modal flex min-h-0 max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 shadow-2xl">
+        <DialogHeader className="shrink-0 border-b border-gray-200 px-6 py-4 pr-14">
+          <DialogTitle>{questionId ? 'Edit Question' : 'New Question'}</DialogTitle>
+          <DialogDescription>Save a reusable draft or submit it for admin review.</DialogDescription>
+        </DialogHeader>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Validation Errors */}
-          {errors.length > 0 && (
-            <Alert className="border-red-200 bg-red-50">
-              <AlertCircle className="size-4 text-red-600" />
-              <AlertDescription className="text-red-800">
-                <ul className="list-disc list-inside space-y-1">
-                  {errors.map((error, idx) => (
-                    <li key={idx}>{error}</li>
-                  ))}
-                </ul>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-5">
+          {loading && <div className="h-48 rounded-lg bg-gray-100 animate-pulse" />}
+          {isApprovedEdit && (
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertCircle className="size-4 text-amber-700" />
+              <AlertDescription className="text-amber-800">
+                Editing this approved question will submit it for admin review again.
               </AlertDescription>
             </Alert>
           )}
+          {isPending && (
+            <Alert className="border-sky-200 bg-sky-50">
+              <AlertCircle className="size-4 text-sky-700" />
+              <AlertDescription className="text-sky-800">Pending questions are read-only for teachers.</AlertDescription>
+            </Alert>
+          )}
+          {error && (
+            <Alert className="border-red-200 bg-red-50">
+              <AlertCircle className="size-4 text-red-700" />
+              <AlertDescription className="text-red-800">{error}</AlertDescription>
+            </Alert>
+          )}
 
-          {/* General Information */}
-          <Card className="shadow-md rounded-2xl border-0">
-            <CardHeader>
-              <CardTitle className="text-gray-800">General Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="type">Question Type *</Label>
-                  <Select value={questionType} onValueChange={setQuestionType}>
-                    <SelectTrigger id="type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mcq">Multiple Choice</SelectItem>
-                      <SelectItem value="true-false">True/False</SelectItem>
-                      <SelectItem value="essay">Essay</SelectItem>
-                      <SelectItem value="matching">Matching</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="subject">Subject *</Label>
-                  <Select value={subject} onValueChange={setSubject}>
-                    <SelectTrigger
-                      id="subject"
-                      className={!subject ? 'border-red-300' : ''}
-                    >
-                      <SelectValue placeholder="Select subject" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="database">Database Systems</SelectItem>
-                      <SelectItem value="web">Web Development</SelectItem>
-                      <SelectItem value="datastructures">Data Structures</SelectItem>
-                      <SelectItem value="algorithms">Algorithms</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="chapter">Chapter/Topic</Label>
-                  <Input
-                    id="chapter"
-                    value={chapter}
-                    onChange={(e) => setChapter(e.target.value)}
-                    placeholder="e.g., Chapter 3: Database Design"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="difficulty">Difficulty</Label>
-                  <Select value={difficulty} onValueChange={setDifficulty}>
-                    <SelectTrigger id="difficulty">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="easy">Easy</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="hard">Hard</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="tags">Tags</Label>
-                <Input
-                  id="tags"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  placeholder="Enter tags separated by commas (e.g., normalization, sql)"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Question Content */}
-          <Card className="shadow-md rounded-2xl border-0">
-            <CardHeader>
-              <CardTitle className="text-gray-800">Question Content</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="question">Question Text *</Label>
-                <Textarea
-                  id="question"
-                  value={questionText}
-                  onChange={(e) => setQuestionText(e.target.value)}
-                  placeholder="Enter your question here..."
-                  rows={4}
-                  className={`resize-none ${!questionText.trim() ? 'border-red-300' : ''}`}
-                />
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm">
-                    <ImageIcon className="size-4 mr-2" />
-                    Add Image
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Answer Options - MCQ */}
-          {questionType === 'mcq' && (
-            <Card className="shadow-md rounded-2xl border-0">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-gray-800">Answer Options</CardTitle>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="multiple-correct"
-                        checked={allowMultipleCorrect}
-                        onCheckedChange={(checked) => {
-                          setAllowMultipleCorrect(checked);
-                          // Reset to single answer if switching to single mode
-                          if (!checked && correctAnswer.length > 1) {
-                            setCorrectAnswer([correctAnswer[0]]);
-                          }
-                        }}
-                      />
-                      <Label htmlFor="multiple-correct" className="text-xs cursor-pointer">
-                        Allow Multiple Correct Answers
-                      </Label>
+          {!loading && (
+            <>
+              <Card className="rounded-lg">
+                <CardHeader>
+                  <CardTitle className="text-base">Basic Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Question Type *</Label>
+                      <Select value={questionType} onValueChange={(value) => setQuestionType(value as QuestionType)} disabled={isPending}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="MCQ">Multiple Choice</SelectItem>
+                          <SelectItem value="true-false">True/False</SelectItem>
+                          <SelectItem value="essay">Essay</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <Button variant="outline" size="sm" onClick={addMcqOption}>
-                      <Plus className="size-4 mr-2" />
-                      Add Option
-                    </Button>
+                    <div className="space-y-2">
+                      <Label>Difficulty</Label>
+                      <Select value={difficulty} onValueChange={(value) => setDifficulty(value as QuestionDifficulty | 'none')} disabled={isPending}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Optional for drafts" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No difficulty</SelectItem>
+                          <SelectItem value="easy">Easy</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="hard">Hard</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {mcqOptions.map((option, index) => {
-                  const isChecked = correctAnswer.includes(index);
-                  return (
-                    <div key={index} className="flex items-center gap-3">
-                      {allowMultipleCorrect ? (
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {
-                            if (isChecked) {
-                              setCorrectAnswer(correctAnswer.filter((i) => i !== index));
-                            } else {
-                              setCorrectAnswer([...correctAnswer, index]);
-                            }
-                          }}
-                          className="size-4 text-teal-600 rounded cursor-pointer"
+                  <div className="space-y-2">
+                    <Label>Question Text *</Label>
+                    <Textarea value={questionText} onChange={(event) => setQuestionText(event.target.value)} rows={4} disabled={isPending} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-lg">
+                <CardHeader>
+                  <CardTitle className="text-base">Classification</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Subject *</Label>
+                    <Select
+                      value={subjectId}
+                      onValueChange={(value) => {
+                        setSubjectId(value);
+                        setChapterIds([]);
+                        setLoIds([]);
+                      }}
+                      disabled={isPending}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select subject" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={subjectPlaceholder} disabled>
+                          Select subject
+                        </SelectItem>
+                        {subjects.map((subject) => (
+                          <SelectItem key={subject.subject_id} value={subject.subject_id}>
+                            {subject.subject_id} - {subject.subject_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!hasSubject && (
+                      <p className="text-xs text-red-600">Subject is required before saving or submitting.</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Chapter (Optional)</Label>
+                      <div className="rounded-lg border border-gray-200 p-3 space-y-2 min-h-24">
+                        {!hasSubject && <p className="text-sm text-gray-500">Select a subject to load chapters.</p>}
+                        {hasSubject && chapters.length === 0 && <p className="text-sm text-gray-500">No chapters are available for this subject.</p>}
+                        {chapters.map((chapter) => (
+                          <label key={chapter.chapter_id} className="flex items-center gap-2 text-sm text-gray-700">
+                            <Checkbox
+                              checked={chapterIds.includes(chapter.chapter_id)}
+                              onCheckedChange={(checked) => toggleChapter(chapter.chapter_id, checked === true)}
+                              disabled={isPending}
+                            />
+                            {chapter.chapter_name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Learning Objective (Optional)</Label>
+                      <div className="rounded-lg border border-gray-200 p-3 space-y-2 min-h-24">
+                        {chapterIds.length === 0 && <p className="text-sm text-gray-500">Select at least one chapter to load learning objectives.</p>}
+                        {chapterIds.length > 0 && learningObjectives.length === 0 && (
+                          <p className="text-sm text-gray-500">No learning objectives are available for selected chapters.</p>
+                        )}
+                        {learningObjectives.map((lo) => (
+                          <label key={lo.lo_id} className="flex items-center gap-2 text-sm text-gray-700">
+                            <Checkbox
+                              checked={loIds.includes(lo.lo_id)}
+                              onCheckedChange={(checked) => toggleLo(lo.lo_id, checked === true)}
+                              disabled={isPending || chapterIds.length === 0}
+                            />
+                            {lo.lo_name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-lg">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="text-base">Answers</CardTitle>
+                    {questionType === 'MCQ' && (
+                      <Button variant="outline" size="sm" onClick={addOption} disabled={isPending} className="gap-2">
+                        <Plus className="size-4" />
+                        Add Option
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {questionType === 'MCQ' &&
+                    options.map((option, index) => (
+                      <div key={index} className="flex items-center gap-3">
+                        <Checkbox checked={option.is_correct} onCheckedChange={(checked) => updateOption(index, { is_correct: checked === true })} disabled={isPending} />
+                        <Input
+                          value={option.options_text}
+                          onChange={(event) => updateOption(index, { options_text: event.target.value })}
+                          placeholder={`Option ${index + 1}`}
+                          disabled={isPending}
                         />
-                      ) : (
-                        <input
-                          type="radio"
-                          name="correct"
-                          checked={isChecked}
-                          onChange={() => setCorrectAnswer([index])}
-                          className="size-4 text-teal-600 cursor-pointer"
-                        />
-                      )}
-                      <Input
-                        value={option}
-                        onChange={(e) => updateMcqOption(index, e.target.value)}
-                        placeholder={`Option ${index + 1}`}
-                        className="flex-1"
-                      />
-                      {mcqOptions.length > 2 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeMcqOption(index)}
-                          className="text-red-600 hover:text-red-700"
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => removeOption(index)} disabled={isPending || options.length <= 2} className="text-red-700">
                           <Trash2 className="size-4" />
                         </Button>
-                      )}
+                      </div>
+                    ))}
+
+                  {questionType === 'true-false' && (
+                    <div className="flex gap-3">
+                      {(['true', 'false'] as const).map((answer) => {
+                        const isCorrect = options.some((option) => option.options_text.toLowerCase() === answer && option.is_correct);
+                        return (
+                          <Button
+                            key={answer}
+                            variant={isCorrect ? 'default' : 'outline'}
+                            onClick={() => setTrueFalseAnswer(answer)}
+                            disabled={isPending}
+                          >
+                            {answer === 'true' ? 'True' : 'False'}
+                          </Button>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-                <p className="text-xs text-gray-500">
-                  {allowMultipleCorrect
-                    ? 'Check all correct answers'
-                    : 'Select the correct answer by clicking the radio button'}
-                </p>
-              </CardContent>
-            </Card>
-          )}
+                  )}
 
-          {/* Answer - True/False */}
-          {questionType === 'true-false' && (
-            <Card className="shadow-md rounded-2xl border-0">
-              <CardHeader>
-                <CardTitle className="text-gray-800">Correct Answer</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="tf-answer"
-                      checked={tfAnswer === 'true'}
-                      onChange={() => setTfAnswer('true')}
-                      className="size-4 text-teal-600"
-                    />
-                    <span className="text-gray-700">True</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="tf-answer"
-                      checked={tfAnswer === 'false'}
-                      onChange={() => setTfAnswer('false')}
-                      className="size-4 text-teal-600"
-                    />
-                    <span className="text-gray-700">False</span>
-                  </label>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                  {questionType === 'essay' && <p className="text-sm text-gray-500">No suggested answer field exists in the current schema.</p>}
+                </CardContent>
+              </Card>
 
-          {/* Answer - Essay */}
-          {questionType === 'essay' && (
-            <Card className="shadow-md rounded-2xl border-0">
-              <CardHeader>
-                <CardTitle className="text-gray-800">Answer Guidelines</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="guideline">Expected Answer / Grading Rubric</Label>
-                  <Textarea
-                    id="guideline"
-                    value={essayGuideline}
-                    onChange={(e) => setEssayGuideline(e.target.value)}
-                    placeholder="Enter the expected answer or grading guidelines..."
-                    rows={5}
-                    className="resize-none"
-                  />
+              {submitErrors.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm text-gray-700 mb-2">Submit validation</p>
+                  <div className="flex flex-wrap gap-2">
+                    {submitErrors.map((item) => (
+                      <Badge key={item} variant="outline" className="bg-white text-gray-600">
+                        {item}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-sm text-blue-800">
-                    Essay questions will be manually graded. Provide clear guidelines for grading.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
 
-          {/* Answer - Matching */}
-          {questionType === 'matching' && (
-            <Card className="shadow-md rounded-2xl border-0">
-              <CardHeader>
-                <CardTitle className="text-gray-800">Matching Pairs</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-                  <p className="text-sm text-amber-800">
-                    Matching question editor is under development. Please use MCQ or other types for now.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+            </>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-200">
+        <div className="flex shrink-0 flex-col-reverse gap-3 border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <div className="flex gap-2">
-            <Button variant="outline">
-              <Eye className="size-4 mr-2" />
-              Preview
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={errors.length > 0}
-              className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
-            >
-              <Save className="size-4 mr-2" />
-              Save Question
+          <div className="flex flex-wrap justify-end gap-2">
+            {!isApprovedEdit && (
+              <Button variant="outline" onClick={saveDraft} disabled={draftDisabled || loading} className="gap-2">
+                <Save className="size-4" />
+                Save Draft
+              </Button>
+            )}
+            <Button onClick={submitForApproval} disabled={submitDisabled || loading} className="gap-2 bg-teal-600 hover:bg-teal-700">
+              <Send className="size-4" />
+              {isApprovedEdit ? 'Save Changes & Submit for Approval' : 'Submit for Approval'}
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -35,7 +35,6 @@ def verifyUser(email, password):
         result = cursor.fetchone()
 
         if result and check_password_hash(result[4], password):
-            print("User authenticated successfully")
             return result
         return None
 

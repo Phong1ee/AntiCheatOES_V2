@@ -139,7 +139,7 @@ def add_question_to_database(
             question_type=request.question_type,
             subject_id=request.subject_id,
             created_by=creator.id,
-            question_status=request.question_status,
+            question_status="draft",
         )
         db.add(question)
         db.flush()
@@ -232,8 +232,8 @@ def update_question_in_exam(
         if request.question_type is not None:
             question.question_type = request.question_type
         question.subject_id = target_subject
-        if request.question_status is not None:
-            question.question_status = request.question_status
+        # Status is server-controlled for reusable questions. Teacher exam edits
+        # may change content/points, but cannot directly approve a question.
         link.question_point = request.question_point
 
         if request.chapter_ids is not None:

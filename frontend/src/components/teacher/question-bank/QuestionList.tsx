@@ -1,356 +1,238 @@
-import { useState } from 'react';
 import { Card, CardContent } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
-
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
-import {
-  CheckSquare,
-  Circle,
-  FileText,
-  Link2,
-  MoreVertical,
-  Download,
-  Eye,
-  Calendar,
-  User,
-  Tag,
-  BookOpen,
-} from 'lucide-react';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '../../ui/alert-dialog';
+import { CheckSquare, Circle, FileText, Eye, Pencil, Send, Trash2, MessageSquareWarning } from 'lucide-react';
+import type { QuestionBankItem, QuestionBankTab, QuestionStatus, QuestionType } from '../../../types/question-bank';
 
-interface Question {
-  id: string;
-  type: 'mcq' | 'true-false' | 'essay' | 'matching';
-  question: string;
-  subject: string;
-  chapter: string;
-  difficulty: 'easy' | 'medium' | 'hard';
-  tags: string[];
-  answerCount?: number;
-  createdAt: string;
-  createdBy: string;
-  usageCount: number;
+interface QuestionListProps {
+  activeTab: QuestionBankTab;
+  questions: QuestionBankItem[];
+  loading: boolean;
+  error: string | null;
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onView: (questionId: number) => void;
+  onEdit: (questionId: number) => void;
+  onSubmit: (questionId: number) => void;
+  onDelete: (questionId: number) => void;
 }
 
-const mockQuestions: Question[] = [
-  {
-    id: '1',
-    type: 'mcq',
-    question: 'What is normalization in database design?',
-    subject: 'Database Systems',
-    chapter: 'Chapter 3: Database Design',
-    difficulty: 'medium',
-    tags: ['normalization', 'design'],
-    answerCount: 4,
-    createdAt: '2025-11-10',
-    createdBy: 'Prof. Anderson',
-    usageCount: 5,
-  },
-  {
-    id: '2',
-    type: 'true-false',
-    question: 'A primary key can contain NULL values.',
-    subject: 'Database Systems',
-    chapter: 'Chapter 2: SQL Basics',
-    difficulty: 'easy',
-    tags: ['sql', 'primary-key'],
-    createdAt: '2025-11-12',
-    createdBy: 'Prof. Anderson',
-    usageCount: 8,
-  },
-  {
-    id: '3',
-    type: 'essay',
-    question: 'Explain the ACID properties of database transactions with examples.',
-    subject: 'Database Systems',
-    chapter: 'Chapter 5: Transactions',
-    difficulty: 'hard',
-    tags: ['transactions', 'acid'],
-    createdAt: '2025-11-08',
-    createdBy: 'Prof. Anderson',
-    usageCount: 3,
-  },
-  {
-    id: '4',
-    type: 'matching',
-    question: 'Match the SQL commands with their categories.',
-    subject: 'Database Systems',
-    chapter: 'Chapter 2: SQL Basics',
-    difficulty: 'medium',
-    tags: ['sql', 'commands'],
-    answerCount: 6,
-    createdAt: '2025-11-14',
-    createdBy: 'Prof. Anderson',
-    usageCount: 2,
-  },
-  {
-    id: '5',
-    type: 'mcq',
-    question: 'Which HTML tag is used to define a hyperlink?',
-    subject: 'Web Development',
-    chapter: 'Chapter 1: HTML Basics',
-    difficulty: 'easy',
-    tags: ['html', 'basics'],
-    answerCount: 4,
-    createdAt: '2025-11-09',
-    createdBy: 'Prof. Anderson',
-    usageCount: 12,
-  },
-  {
-    id: '6',
-    type: 'mcq',
-    question: 'What does CSS stand for?',
-    subject: 'Web Development',
-    chapter: 'Chapter 2: CSS Basics',
-    difficulty: 'easy',
-    tags: ['css', 'basics'],
-    answerCount: 4,
-    createdAt: '2025-11-11',
-    createdBy: 'Prof. Anderson',
-    usageCount: 15,
-  },
-  {
-    id: '7',
-    type: 'essay',
-    question: 'Explain the box model in CSS with examples.',
-    subject: 'Web Development',
-    chapter: 'Chapter 2: CSS Basics',
-    difficulty: 'medium',
-    tags: ['css', 'box-model'],
-    createdAt: '2025-11-13',
-    createdBy: 'Prof. Anderson',
-    usageCount: 6,
-  },
-  {
-    id: '8',
-    type: 'mcq',
-    question: 'What is the time complexity of binary search?',
-    subject: 'Data Structures',
-    chapter: 'Chapter 4: Searching',
-    difficulty: 'medium',
-    tags: ['algorithms', 'search'],
-    answerCount: 4,
-    createdAt: '2025-11-07',
-    createdBy: 'Prof. Anderson',
-    usageCount: 9,
-  },
-  {
-    id: '9',
-    type: 'true-false',
-    question: 'A stack follows FIFO (First In First Out) principle.',
-    subject: 'Data Structures',
-    chapter: 'Chapter 2: Stacks',
-    difficulty: 'easy',
-    tags: ['stack', 'basics'],
-    createdAt: '2025-11-14',
-    createdBy: 'Prof. Anderson',
-    usageCount: 11,
-  },
-  {
-    id: '10',
-    type: 'mcq',
-    question: 'Which sorting algorithm has the best average time complexity?',
-    subject: 'Algorithms',
-    chapter: 'Chapter 3: Sorting',
-    difficulty: 'hard',
-    tags: ['sorting', 'complexity'],
-    answerCount: 4,
-    createdAt: '2025-11-06',
-    createdBy: 'Prof. Anderson',
-    usageCount: 4,
-  },
-];
-
-const typeConfig = {
-  mcq: { icon: CheckSquare, label: 'MCQ', color: 'bg-blue-100 text-blue-700' },
-  'true-false': { icon: Circle, label: 'T/F', color: 'bg-purple-100 text-purple-700' },
-  essay: { icon: FileText, label: 'Essay', color: 'bg-amber-100 text-amber-700' },
-  matching: { icon: Link2, label: 'Match', color: 'bg-green-100 text-green-700' },
+const typeConfig: Record<QuestionType, { icon: typeof CheckSquare; label: string; color: string }> = {
+  MCQ: { icon: CheckSquare, label: 'MCQ', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  'true-false': { icon: Circle, label: 'True/False', color: 'bg-violet-50 text-violet-700 border-violet-200' },
+  essay: { icon: FileText, label: 'Essay', color: 'bg-amber-50 text-amber-700 border-amber-200' },
 };
 
 const difficultyConfig = {
-  easy: { label: 'Easy', color: 'bg-green-100 text-green-700' },
-  medium: { label: 'Medium', color: 'bg-amber-100 text-amber-700' },
-  hard: { label: 'Hard', color: 'bg-red-100 text-red-700' },
+  easy: 'bg-green-50 text-green-700 border-green-200',
+  medium: 'bg-amber-50 text-amber-700 border-amber-200',
+  hard: 'bg-red-50 text-red-700 border-red-200',
 };
 
-interface QuestionListProps {
-  selectedSubject: string;
-  searchQuery: string;
-  filters: any;
-  readOnly?: boolean;
+const statusConfig: Record<QuestionStatus, string> = {
+  draft: 'bg-gray-50 text-gray-700 border-gray-200',
+  pending: 'bg-sky-50 text-sky-700 border-sky-200',
+  approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  rejected: 'bg-red-50 text-red-700 border-red-200',
+};
+
+function formatDate(value?: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function QuestionList({ selectedSubject, searchQuery, filters, readOnly = false }: QuestionListProps) {
+function TaxonomyChips({ label, values }: { label: string; values: string[] }) {
+  const shown = values.slice(0, 2);
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">{label}</p>
+      {values.length === 0 ? (
+        <p className="text-sm text-gray-500">None</p>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {shown.map((item) => (
+            <Badge key={item} variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 max-w-full truncate">
+              {item}
+            </Badge>
+          ))}
+          {values.length > 2 && (
+            <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">
+              +{values.length - 2}
+            </Badge>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  // Filter questions based on subject, search query, and filters
-  const filteredQuestions = mockQuestions.filter((question) => {
-    // Filter by selected subject
-    if (selectedSubject !== 'all' && question.subject !== getSubjectName(selectedSubject)) {
-      return false;
-    }
+export function QuestionList({
+  activeTab,
+  questions,
+  loading,
+  error,
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onView,
+  onEdit,
+  onSubmit,
+  onDelete,
+}: QuestionListProps) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-    // Filter by search query
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      if (
-        !question.question.toLowerCase().includes(query) &&
-        !question.subject.toLowerCase().includes(query) &&
-        !question.chapter.toLowerCase().includes(query) &&
-        !question.tags.some((tag) => tag.toLowerCase().includes(query))
-      ) {
-        return false;
-      }
-    }
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[0, 1, 2].map((item) => (
+          <div key={item} className="h-44 rounded-lg bg-white border border-gray-200 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
 
-    // Filter by question types
-    if (filters.questionTypes?.length > 0 && !filters.questionTypes.includes(question.type)) {
-      return false;
-    }
-
-    // Filter by difficulty
-    if (filters.difficulty?.length > 0 && !filters.difficulty.includes(question.difficulty)) {
-      return false;
-    }
-
-    // Filter by tags
-    if (filters.tags?.length > 0) {
-      const hasMatchingTag = filters.tags.some((tag: string) =>
-        question.tags.some((qTag) => qTag.toLowerCase().includes(tag.toLowerCase()))
-      );
-      if (!hasMatchingTag) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-
-  function getSubjectName(subjectId: string): string {
-    const subjectMap: Record<string, string> = {
-      database: 'Database Systems',
-      web: 'Web Development',
-      datastructures: 'Data Structures',
-      algorithms: 'Algorithms',
-    };
-    return subjectMap[subjectId] || '';
+  if (error) {
+    return (
+      <Card className="rounded-lg border-red-200 bg-red-50">
+        <CardContent className="p-6">
+          <p className="text-red-800">{error}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
     <div className="space-y-4">
-      {/* Results Count */}
-      <div className="px-2">
+      <div className="px-1 flex items-center justify-between gap-3">
         <p className="text-sm text-gray-600">
-          Showing {filteredQuestions.length} question{filteredQuestions.length !== 1 ? 's' : ''}
+          Showing {questions.length} of {total} question{total === 1 ? '' : 's'}
         </p>
+        <p className="text-sm text-gray-500">Page {page} of {totalPages}</p>
       </div>
 
-      {/* Question Cards */}
       <div className="space-y-3">
-        {filteredQuestions.map((question) => {
-          const typeInfo = typeConfig[question.type];
+        {questions.map((question) => {
+          const typeInfo = typeConfig[question.question_type];
           const TypeIcon = typeInfo.icon;
-          const difficultyInfo = difficultyConfig[question.difficulty];
+          const date = formatDate(question.updated_at ?? question.created_at);
+          const showOptionCount = question.question_type === 'MCQ' && typeof question.option_count === 'number';
 
           return (
-            <Card
-              key={question.id}
-              className="shadow-md rounded-2xl border-0 transition-all hover:shadow-lg"
-            >
+            <Card key={question.question_id} className="rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
               <CardContent className="p-5">
-                <div className="flex items-start gap-4">
-                  {/* Content */}
-                  <div className="flex-1 space-y-3">
-                    {/* Question Text */}
-                    <div className="flex items-start justify-between gap-4">
-                      <p className="text-gray-800 flex-1 line-clamp-2">{question.question}</p>
-                      {!readOnly && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="size-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Eye className="size-4 mr-2" />
-                              View Details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Download className="size-4 mr-2" />
-                              Export
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="text-gray-900 line-clamp-3 flex-1">{question.question_text}</p>
+                    <Button variant="outline" size="sm" onClick={() => onView(question.question_id)} className="shrink-0 gap-2">
+                      <Eye className="size-4" />
+                      View
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className={typeInfo.color}>
+                      <TypeIcon className="size-3 mr-1" />
+                      {typeInfo.label}
+                    </Badge>
+                    {question.question_difficulties && (
+                      <Badge variant="outline" className={difficultyConfig[question.question_difficulties]}>
+                        {question.question_difficulties}
+                      </Badge>
+                    )}
+                    {activeTab === 'mine' && (
+                      <Badge variant="outline" className={statusConfig[question.question_status]}>
+                        {question.question_status}
+                      </Badge>
+                    )}
+                    {showOptionCount && <span className="text-xs text-gray-500">{question.option_count} options</span>}
+                    {date && activeTab === 'mine' && <span className="text-xs text-gray-500">Updated {date}</span>}
+                    {typeof question.usage_count === 'number' && question.usage_count > 0 && (
+                      <span className="text-xs text-gray-500">Used in {question.usage_count} exams</span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Subject</p>
+                      {question.subject ? (
+                        <p className="text-sm text-gray-800">
+                          <span className="font-medium">{question.subject.subject_id}</span> - {question.subject.subject_name}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-gray-500">No Subject</p>
                       )}
-                      {readOnly && (
-                        <Button variant="ghost" size="sm">
-                          <Eye className="size-4" />
+                    </div>
+                    <TaxonomyChips label="Chapters" values={question.chapters.map((chapter) => chapter.chapter_name)} />
+                    <TaxonomyChips label="Learning Objectives" values={question.learning_objectives.map((lo) => lo.lo_name)} />
+                  </div>
+
+                  {activeTab === 'mine' && question.question_status === 'pending' && (
+                    <div className="flex items-center gap-2 rounded-md bg-sky-50 border border-sky-200 px-3 py-2 text-sm text-sky-800">
+                      <MessageSquareWarning className="size-4" />
+                      Pending admin review
+                    </div>
+                  )}
+
+                  {activeTab === 'mine' && (
+                    <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-4">
+                      {question.permissions.can_edit && (
+                        <Button variant="outline" size="sm" onClick={() => onEdit(question.question_id)} className="gap-2">
+                          <Pencil className="size-4" />
+                          Edit
                         </Button>
                       )}
-                    </div>
-
-                    {/* Badges & Metadata */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={typeInfo.color}>
-                        <TypeIcon className="size-3 mr-1" />
-                        {typeInfo.label}
-                      </Badge>
-                      <Badge variant="outline" className={difficultyInfo.color}>
-                        {difficultyInfo.label}
-                      </Badge>
-                      {question.answerCount && (
-                        <span className="text-xs text-gray-500">
-                          {question.answerCount} options
-                        </span>
+                      {question.permissions.can_submit && (
+                        <Button variant="outline" size="sm" onClick={() => onSubmit(question.question_id)} className="gap-2">
+                          <Send className="size-4" />
+                          Submit for Approval
+                        </Button>
                       )}
-                      <span className="text-xs text-gray-400">•</span>
-                      <span className="text-xs text-gray-500">Used {question.usageCount}x</span>
+                      {question.permissions.can_resubmit && (
+                        <Button variant="outline" size="sm" onClick={() => onSubmit(question.question_id)} className="gap-2">
+                          <Send className="size-4" />
+                          Resubmit
+                        </Button>
+                      )}
+                      {question.permissions.can_delete && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" className="gap-2 text-red-700 border-red-200 hover:bg-red-50">
+                              <Trash2 className="size-4" />
+                              Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete question?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This removes the question from your question list when it is not used by an exam.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => onDelete(question.question_id)} className="bg-red-600 hover:bg-red-700">
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
                     </div>
-
-                    {/* Tags */}
-                    {question.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {question.tags.map((tag) => (
-                          <Badge
-                            key={tag}
-                            variant="outline"
-                            className="text-xs bg-gray-50 text-gray-600"
-                          >
-                            #{tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Bottom Info */}
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                      <div className="flex items-center gap-1">
-                        <BookOpen className="size-3" />
-                        {question.chapter}
-                      </div>
-                      <span>•</span>
-                      <div className="flex items-center gap-1">
-                        <User className="size-3" />
-                        {question.createdBy}
-                      </div>
-                      <span>•</span>
-                      <div className="flex items-center gap-1">
-                        <Calendar className="size-3" />
-                        {new Date(question.createdAt).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -358,12 +240,23 @@ export function QuestionList({ selectedSubject, searchQuery, filters, readOnly =
         })}
       </div>
 
-      {filteredQuestions.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500">No questions found</p>
-          <p className="text-sm text-gray-400 mt-2">Try adjusting your filters or add new questions</p>
-        </div>
+      {questions.length === 0 && (
+        <Card className="rounded-lg border border-gray-200 bg-white">
+          <CardContent className="py-12 text-center">
+            <p className="text-gray-600">No questions found</p>
+            <p className="text-sm text-gray-400 mt-2">Adjust the filters or create a draft in Your Questions.</p>
+          </CardContent>
+        </Card>
       )}
+
+      <div className="flex items-center justify-end gap-2 pt-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          Previous
+        </Button>
+        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+          Next
+        </Button>
+      </div>
     </div>
   );
 }

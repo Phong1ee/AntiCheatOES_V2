@@ -17,16 +17,12 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
     Column,
+    JSON
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
-
-class QuestionStatus(str, enum.Enum):
-    pending = "pending"
-    approved = "approved"
-    draft = "draft"
 
 class UserRole(str, enum.Enum):
     student = "student"
@@ -103,6 +99,21 @@ class User(Base):
         back_populates="student",
         foreign_keys="StudentExam.student_id",
     )
+    subject_assignments: Mapped[list["TeacherSubject"]] = relationship(
+    foreign_keys="TeacherSubject.teacher_id",
+    back_populates="teacher",
+    cascade="all, delete-orphan",
+    )
+
+    subject_assignments_granted: Mapped[list["TeacherSubject"]] = relationship(
+        foreign_keys="TeacherSubject.assigned_by",
+        back_populates="assigner",
+    )
+
+    question_revisions: Mapped[list["QuestionRevision"]] = relationship(
+        foreign_keys="QuestionRevision.edited_by",
+        back_populates="editor",
+    )
 class Subject(Base):
     __tablename__ = "subject"
 
@@ -114,6 +125,10 @@ class Subject(Base):
     classes: Mapped[list["CourseClass"]] = relationship(back_populates="subject")
     exams: Mapped[list["Exam"]] = relationship(back_populates="subject")
     questions: Mapped[list["Question"]] = relationship(back_populates="subject")
+    teacher_assignments: Mapped[list["TeacherSubject"]] = relationship(
+    back_populates="subject",
+    cascade="all, delete-orphan",
+)
 
 
 class Chapter(Base):
@@ -197,19 +212,26 @@ class Question(Base):
 
     question_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     question_text: Mapped[str] = mapped_column(String(255), nullable=False)
-    question_difficulties: Mapped[QuestionDifficulty] = mapped_column(
-        Enum(QuestionDifficulty), nullable=False
+    question_difficulties: Mapped[
+        Optional[QuestionDifficulty]
+    ] = mapped_column(
+        Enum(QuestionDifficulty),
+        nullable=True,
     )
     question_type: Mapped[Optional[QuestionType]] = mapped_column(question_type_enum)
-    subject_id: Mapped[str] = mapped_column(
-        String(20), ForeignKey("subject.subject_id", ondelete="RESTRICT"), nullable=False
+    subject_id: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        ForeignKey("subject.subject_id", ondelete="RESTRICT"),
+        nullable=True,
     )
     created_by: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("user.id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
 
-    subject: Mapped["Subject"] = relationship(back_populates="questions")
+    subject: Mapped[Optional["Subject"]] = relationship(
+        back_populates="questions"
+    )
     chapter_questions: Mapped[list["ChapterQuestion"]] = relationship(
         back_populates="question", cascade="all, delete-orphan"
     )
@@ -222,6 +244,10 @@ class Question(Base):
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="question")
     attempt_questions: Mapped[list["AttemptQuestion"]] = relationship(
         back_populates="question"
+    )
+    revisions: Mapped[list["QuestionRevision"]] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
     )
 
 
@@ -434,3 +460,133 @@ class ExamEvent(Base):
     details: Mapped[Optional[str]] = mapped_column(Text)
 
     attempt: Mapped[Optional["Attempt"]] = relationship(back_populates="exam_events")
+
+
+class TeacherSubject(Base):
+    __tablename__ = "teacher_subject"
+
+    teacher_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    subject_id: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("subject.subject_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    assigned_by: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("1"),
+    )
+
+    teacher: Mapped["User"] = relationship(
+        foreign_keys=[teacher_id],
+        back_populates="subject_assignments",
+    )
+
+    subject: Mapped["Subject"] = relationship(
+        back_populates="teacher_assignments",
+    )
+
+    assigner: Mapped[Optional["User"]] = relationship(
+        foreign_keys=[assigned_by],
+        back_populates="subject_assignments_granted",
+    )
+    
+class QuestionRevision(Base):
+    __tablename__ = "question_revision"
+
+    revision_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    question_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("question.question_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    question_text: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    question_difficulties: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    question_type: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    subject_id: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    question_status: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    options_snapshot: Mapped[
+        Optional[list[dict[str, object]]]
+    ] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    chapter_ids_snapshot: Mapped[
+        Optional[list[int]]
+    ] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    lo_ids_snapshot: Mapped[
+        Optional[list[int]]
+    ] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    edited_by: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    question: Mapped["Question"] = relationship(
+        back_populates="revisions"
+    )
+
+    editor: Mapped[Optional["User"]] = relationship(
+        foreign_keys=[edited_by],
+        back_populates="question_revisions",
+    )

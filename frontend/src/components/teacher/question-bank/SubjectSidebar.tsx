@@ -1,53 +1,40 @@
 import { Card, CardContent } from '../../ui/card';
 import { Badge } from '../../ui/badge';
-import { BookOpen, ChevronRight } from 'lucide-react';
-
-interface Subject {
-  id: string;
-  name: string;
-  questionCount: number;
-  color: string;
-}
-
-const subjects: Subject[] = [
-  {
-    id: 'all',
-    name: 'All Subjects',
-    questionCount: 245,
-    color: 'bg-gradient-to-r from-teal-500 to-blue-600',
-  },
-  {
-    id: 'database',
-    name: 'Database Systems',
-    questionCount: 87,
-    color: 'bg-gradient-to-r from-blue-500 to-indigo-600',
-  },
-  {
-    id: 'web',
-    name: 'Web Development',
-    questionCount: 65,
-    color: 'bg-gradient-to-r from-purple-500 to-pink-600',
-  },
-  {
-    id: 'datastructures',
-    name: 'Data Structures',
-    questionCount: 52,
-    color: 'bg-gradient-to-r from-green-500 to-teal-600',
-  },
-  {
-    id: 'algorithms',
-    name: 'Algorithms',
-    questionCount: 41,
-    color: 'bg-gradient-to-r from-amber-500 to-orange-600',
-  },
-];
+import { BookOpen, ChevronRight, Layers } from 'lucide-react';
+import type { QuestionBankTab, SubjectCount } from '../../../types/question-bank';
 
 interface SubjectSidebarProps {
+  activeTab: QuestionBankTab;
   selectedSubject: string;
+  subjects: SubjectCount[];
+  totalCount: number;
+  noSubjectCount: number;
+  loading: boolean;
   onSubjectSelect: (subjectId: string) => void;
 }
 
-export function SubjectSidebar({ selectedSubject, onSubjectSelect }: SubjectSidebarProps) {
+export function SubjectSidebar({
+  activeTab,
+  selectedSubject,
+  subjects,
+  totalCount,
+  noSubjectCount,
+  loading,
+  onSubjectSelect,
+}: SubjectSidebarProps) {
+  const items = [
+    { id: 'all', name: 'All Subjects', count: totalCount, description: 'Every subject' },
+    ...(activeTab === 'mine'
+      ? [{ id: '__none__', name: 'No Subject', count: noSubjectCount, description: 'Drafts without a subject' }]
+      : []),
+    ...subjects.map((subject) => ({
+      id: subject.subject_id,
+      name: subject.subject_name,
+      count: subject.question_count,
+      description: subject.subject_id,
+    })),
+  ];
+
   return (
     <div className="h-full bg-white border-r border-gray-200 overflow-y-auto">
       <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
@@ -58,47 +45,47 @@ export function SubjectSidebar({ selectedSubject, onSubjectSelect }: SubjectSide
       </div>
 
       <div className="p-3 space-y-2">
-        {subjects.map((subject) => (
-          <Card
-            key={subject.id}
-            onClick={() => onSubjectSelect(subject.id)}
-            className={`cursor-pointer transition-all hover:shadow-md ${
-              selectedSubject === subject.id
-                ? 'ring-2 ring-teal-500 shadow-md'
-                : 'hover:ring-1 hover:ring-gray-300'
-            }`}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-1 h-12 rounded-full ${subject.color}`} />
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm truncate ${
-                    selectedSubject === subject.id
-                      ? 'text-teal-700 font-medium'
-                      : 'text-gray-800'
-                  }`}>
-                    {subject.name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
+        {loading && (
+          <div className="space-y-2">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {!loading &&
+          items.map((subject) => (
+            <Card
+              key={subject.id}
+              onClick={() => onSubjectSelect(subject.id)}
+              className={`cursor-pointer rounded-lg transition-all hover:shadow-sm ${
+                selectedSubject === subject.id ? 'ring-2 ring-teal-500 shadow-sm' : 'hover:ring-1 hover:ring-gray-300'
+              }`}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-md bg-teal-50 text-teal-700 flex items-center justify-center">
+                    <Layers className="size-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm truncate ${selectedSubject === subject.id ? 'text-teal-700 font-medium' : 'text-gray-800'}`}>
+                      {subject.name}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{subject.description}</p>
                     <Badge
                       variant="outline"
-                      className={`text-xs ${
-                        selectedSubject === subject.id
-                          ? 'bg-teal-100 text-teal-700 border-teal-300'
-                          : 'bg-gray-100 text-gray-600'
+                      className={`mt-2 text-xs ${
+                        selectedSubject === subject.id ? 'bg-teal-100 text-teal-700 border-teal-300' : 'bg-gray-50 text-gray-600'
                       }`}
                     >
-                      {subject.questionCount} questions
+                      {subject.count} question{subject.count === 1 ? '' : 's'}
                     </Badge>
                   </div>
+                  {selectedSubject === subject.id && <ChevronRight className="size-5 text-teal-600 flex-shrink-0" />}
                 </div>
-                {selectedSubject === subject.id && (
-                  <ChevronRight className="size-5 text-teal-600 flex-shrink-0" />
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ interface ProfileData {
   email: string;
   phone: string;
   studentId: string;
+  role: 'student' | 'teacher' | 'admin' | '';
   dateOfBirth: string; // yyyy-mm-dd
 }
 
@@ -34,6 +35,7 @@ export function ProfileSettings() {
     email: '',
     phone: '',
     studentId: '',
+    role: '',
     dateOfBirth: '',
   });
 
@@ -93,6 +95,7 @@ export function ProfileSettings() {
           email: profileData.email || '',
           phone: profileData.phone || '',
           studentId: profileData.studentId || profileData.school_id || '',
+          role: profileData.role || '',
           dateOfBirth: profileData.dateOfBirth || '',
         });
       } catch (err: any) {
@@ -234,6 +237,9 @@ export function ProfileSettings() {
       .map((p) => p[0])
       .join('')
       .slice(0, 2) || 'U';
+  const roleLabel =
+    profile.role === 'teacher' ? 'Teacher' : profile.role === 'admin' ? 'Admin' : 'Student';
+  const idLabel = `${roleLabel} ID`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -247,7 +253,7 @@ export function ProfileSettings() {
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative">
               <Avatar className="size-24">
-                <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=Student" />
+                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${roleLabel}`} />
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <button
@@ -258,10 +264,10 @@ export function ProfileSettings() {
               </button>
             </div>
             <div className="text-center sm:text-left">
-              <h2 className="text-xl text-gray-800">{profile.fullName || 'Student'}</h2>
+              <h2 className="text-xl text-gray-800">{profile.fullName || roleLabel}</h2>
               <p className="text-gray-600">{profile.email}</p>
               {profile.studentId && (
-                <p className="text-sm text-gray-500 mt-1">Student ID: {profile.studentId}</p>
+                <p className="text-sm text-gray-500 mt-1">{idLabel}: {profile.studentId}</p>
               )}
             </div>
           </div>
@@ -300,7 +306,7 @@ export function ProfileSettings() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="studentId">Student ID</Label>
+              <Label htmlFor="studentId">{idLabel}</Label>
               <Input id="studentId" value={profile.studentId} disabled className="bg-gray-50" />
             </div>
             <div className="space-y-2">

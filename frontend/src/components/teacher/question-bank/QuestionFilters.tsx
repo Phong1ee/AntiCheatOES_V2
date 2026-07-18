@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Button } from '../../ui/button';
-import { Checkbox } from '../../ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -10,75 +8,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/select';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '../../ui/collapsible';
 import { Badge } from '../../ui/badge';
-import { Filter, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Filter, X } from 'lucide-react';
+import type {
+  ChapterSummary,
+  LearningObjectiveSummary,
+  QuestionBankFilters,
+  QuestionBankTab,
+  QuestionDifficulty,
+  QuestionStatus,
+  QuestionType,
+} from '../../../types/question-bank';
 
 interface QuestionFiltersProps {
-  onFilterChange: (filters: any) => void;
-  selectedSubject: string;
+  activeTab: QuestionBankTab;
+  filters: QuestionBankFilters;
+  chapters: ChapterSummary[];
+  learningObjectives: LearningObjectiveSummary[];
+  onFilterChange: (filters: QuestionBankFilters) => void;
 }
 
-export function QuestionFilters({ onFilterChange, selectedSubject }: QuestionFiltersProps) {
-  const [subject, setSubject] = useState(selectedSubject);
-  const [questionTypes, setQuestionTypes] = useState<string[]>([]);
-  const [difficulty, setDifficulty] = useState<string[]>([]);
-  const [tags, setTags] = useState<string[]>([]);
-  const [source, setSource] = useState<string[]>([]);
-  const [expandedSections, setExpandedSections] = useState({
-    type: true,
-    difficulty: true,
-    tags: true,
-    source: false,
-  });
+const questionTypes: Array<{ value: QuestionType; label: string }> = [
+  { value: 'MCQ', label: 'Multiple Choice' },
+  { value: 'true-false', label: 'True/False' },
+  { value: 'essay', label: 'Essay' },
+];
 
-  const toggleQuestionType = (type: string) => {
-    setQuestionTypes((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    );
-  };
+const difficulties: Array<{ value: QuestionDifficulty; label: string }> = [
+  { value: 'easy', label: 'Easy' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'hard', label: 'Hard' },
+];
 
-  const toggleDifficulty = (level: string) => {
-    setDifficulty((prev) =>
-      prev.includes(level) ? prev.filter((d) => d !== level) : [...prev, level]
-    );
-  };
+const statuses: Array<{ value: QuestionStatus; label: string }> = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
+];
 
-  const toggleTag = (tag: string) => {
-    setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
-  };
+export function QuestionFilters({
+  activeTab,
+  filters,
+  chapters,
+  learningObjectives,
+  onFilterChange,
+}: QuestionFiltersProps) {
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
-  const toggleSource = (src: string) => {
-    setSource((prev) => (prev.includes(src) ? prev.filter((s) => s !== src) : [...prev, src]));
+  const update = (patch: Partial<QuestionBankFilters>) => {
+    onFilterChange({ ...filters, ...patch });
   };
 
   const clearAllFilters = () => {
-    setSubject('all');
-    setQuestionTypes([]);
-    setDifficulty([]);
-    setTags([]);
-    setSource([]);
+    onFilterChange({});
   };
-
-  const applyFilters = () => {
-    onFilterChange({ subject, questionTypes, difficulty, tags, source });
-  };
-
-  const activeFilterCount =
-    (subject !== 'all' ? 1 : 0) +
-    questionTypes.length +
-    difficulty.length +
-    tags.length +
-    source.length;
 
   return (
-    <div className="h-full bg-white border-r border-gray-200 overflow-y-auto">
+    <div className="h-full bg-white border-l border-gray-200 overflow-y-auto">
       <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Filter className="size-5 text-teal-600" />
             <h3 className="text-gray-800">Filters</h3>
@@ -98,164 +87,118 @@ export function QuestionFilters({ onFilterChange, selectedSubject }: QuestionFil
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Subject */}
-        <div className="space-y-2">
-          <Label>Subject</Label>
-          <Select value={subject} onValueChange={setSubject}>
-            <SelectTrigger>
-              <SelectValue placeholder="All Subjects" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Subjects</SelectItem>
-              <SelectItem value="database">Database Systems</SelectItem>
-              <SelectItem value="web">Web Development</SelectItem>
-              <SelectItem value="datastructures">Data Structures</SelectItem>
-              <SelectItem value="algorithms">Algorithms</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {activeTab === 'mine' && (
+          <Card className="rounded-lg">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Select value={filters.status ?? 'all'} onValueChange={(value) => update({ status: value === 'all' ? undefined : (value as QuestionStatus) })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {statuses.map((status) => (
+                    <SelectItem key={status.value} value={status.value}>
+                      {status.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Question Type */}
-        <Collapsible
-          open={expandedSections.type}
-          onOpenChange={(open) => setExpandedSections({ ...expandedSections, type: open })}
-        >
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-            <Label className="cursor-pointer">Question Type</Label>
-            {expandedSections.type ? (
-              <ChevronDown className="size-4 text-gray-500" />
-            ) : (
-              <ChevronRight className="size-4 text-gray-500" />
-            )}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-2">
-            {[
-              { id: 'mcq', label: 'Multiple Choice' },
-              { id: 'true-false', label: 'True/False' },
-              { id: 'essay', label: 'Essay' },
-              { id: 'matching', label: 'Matching' },
-            ].map((type) => (
-              <div key={type.id} className="flex items-center gap-2">
-                <Checkbox
-                  id={type.id}
-                  checked={questionTypes.includes(type.id)}
-                  onCheckedChange={() => toggleQuestionType(type.id)}
-                />
-                <Label htmlFor={type.id} className="text-sm cursor-pointer">
-                  {type.label}
-                </Label>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
+        <Card className="rounded-lg">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Question</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={filters.question_type ?? 'all'} onValueChange={(value) => update({ question_type: value === 'all' ? undefined : (value as QuestionType) })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {questionTypes.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        {/* Difficulty */}
-        <Collapsible
-          open={expandedSections.difficulty}
-          onOpenChange={(open) => setExpandedSections({ ...expandedSections, difficulty: open })}
-        >
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-            <Label className="cursor-pointer">Difficulty</Label>
-            {expandedSections.difficulty ? (
-              <ChevronDown className="size-4 text-gray-500" />
-            ) : (
-              <ChevronRight className="size-4 text-gray-500" />
-            )}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-2">
-            {[
-              { id: 'easy', label: 'Easy', color: 'text-green-600' },
-              { id: 'medium', label: 'Medium', color: 'text-amber-600' },
-              { id: 'hard', label: 'Hard', color: 'text-red-600' },
-            ].map((level) => (
-              <div key={level.id} className="flex items-center gap-2">
-                <Checkbox
-                  id={level.id}
-                  checked={difficulty.includes(level.id)}
-                  onCheckedChange={() => toggleDifficulty(level.id)}
-                />
-                <Label htmlFor={level.id} className={`text-sm cursor-pointer ${level.color}`}>
-                  {level.label}
-                </Label>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
+            <div className="space-y-2">
+              <Label>Difficulty</Label>
+              <Select value={filters.difficulty ?? 'all'} onValueChange={(value) => update({ difficulty: value === 'all' ? undefined : (value as QuestionDifficulty) })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All levels" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Levels</SelectItem>
+                  {difficulties.map((level) => (
+                    <SelectItem key={level.value} value={level.value}>
+                      {level.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Tags */}
-        <Collapsible
-          open={expandedSections.tags}
-          onOpenChange={(open) => setExpandedSections({ ...expandedSections, tags: open })}
-        >
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-            <Label className="cursor-pointer">Tags</Label>
-            {expandedSections.tags ? (
-              <ChevronDown className="size-4 text-gray-500" />
-            ) : (
-              <ChevronRight className="size-4 text-gray-500" />
-            )}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-2">
-            {[
-              { id: 'normalization', label: 'Normalization' },
-              { id: 'sql', label: 'SQL' },
-              { id: 'indexing', label: 'Indexing' },
-              { id: 'transactions', label: 'Transactions' },
-            ].map((tag) => (
-              <div key={tag.id} className="flex items-center gap-2">
-                <Checkbox
-                  id={tag.id}
-                  checked={tags.includes(tag.id)}
-                  onCheckedChange={() => toggleTag(tag.id)}
-                />
-                <Label htmlFor={tag.id} className="text-sm cursor-pointer">
-                  {tag.label}
-                </Label>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
+        <Card className="rounded-lg">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Taxonomy</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Chapter</Label>
+              <Select
+                value={filters.chapter_id ? String(filters.chapter_id) : 'all'}
+                onValueChange={(value) => update({ chapter_id: value === 'all' ? undefined : Number(value), lo_id: undefined })}
+                disabled={chapters.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All chapters" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Chapters</SelectItem>
+                  {chapters.map((chapter) => (
+                    <SelectItem key={chapter.chapter_id} value={String(chapter.chapter_id)}>
+                      {chapter.chapter_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        {/* Source */}
-        <Collapsible
-          open={expandedSections.source}
-          onOpenChange={(open) => setExpandedSections({ ...expandedSections, source: open })}
-        >
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-            <Label className="cursor-pointer">Source</Label>
-            {expandedSections.source ? (
-              <ChevronDown className="size-4 text-gray-500" />
-            ) : (
-              <ChevronRight className="size-4 text-gray-500" />
-            )}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-2">
-            {[
-              { id: 'created', label: 'Created by me' },
-              { id: 'imported', label: 'Imported' },
-              { id: 'shared', label: 'Shared' },
-            ].map((src) => (
-              <div key={src.id} className="flex items-center gap-2">
-                <Checkbox
-                  id={src.id}
-                  checked={source.includes(src.id)}
-                  onCheckedChange={() => toggleSource(src.id)}
-                />
-                <Label htmlFor={src.id} className="text-sm cursor-pointer">
-                  {src.label}
-                </Label>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Apply Button */}
-        <Button
-          onClick={applyFilters}
-          className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
-        >
-          Apply Filters
-        </Button>
+            <div className="space-y-2">
+              <Label>Learning Objective</Label>
+              <Select
+                value={filters.lo_id ? String(filters.lo_id) : 'all'}
+                onValueChange={(value) => update({ lo_id: value === 'all' ? undefined : Number(value) })}
+                disabled={learningObjectives.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All objectives" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Objectives</SelectItem>
+                  {learningObjectives.map((lo) => (
+                    <SelectItem key={lo.lo_id} value={String(lo.lo_id)}>
+                      {lo.lo_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

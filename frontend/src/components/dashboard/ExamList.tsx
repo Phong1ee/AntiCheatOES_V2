@@ -229,7 +229,7 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
           return (
             <Card
               key={exam.id}
-              className="shadow-lg hover:shadow-xl transition-shadow rounded-2xl border-0"
+              className="rounded-2xl border border-gray-200 shadow-lg transition-shadow hover:shadow-xl"
             >
               <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">

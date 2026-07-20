@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import './QuestionEditorReplica.css';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
@@ -11,17 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Checkbox } from '../../ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '../../ui/dialog';
 import { Alert, AlertDescription } from '../../ui/alert';
-import { AlertCircle, Plus, Save, Send, Trash2 } from 'lucide-react';
+import { AlertCircle, Loader2, Plus, Save, Send, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { teacherQuestionBankService } from '../../../services/teacher-question-bank.service';
 import type {
@@ -48,6 +42,7 @@ const defaultOptions: QuestionOptionPayload[] = [
   { options_text: '', is_correct: false },
 ];
 const subjectPlaceholder = '__select_subject__';
+const optionLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
 function statusNeedsSubmit(status?: QuestionStatus | null) {
   return status === 'draft' || status === 'rejected';
@@ -69,6 +64,7 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
   const [chapterIds, setChapterIds] = useState<number[]>([]);
   const [loIds, setLoIds] = useState<number[]>([]);
   const [options, setOptions] = useState<QuestionOptionPayload[]>(defaultOptions);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const isApprovedEdit = detail?.question_status === 'approved';
   const isPending = detail?.question_status === 'pending';
@@ -95,6 +91,7 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
         setChapterIds(questionDetail?.chapters.map((chapter) => chapter.chapter_id) ?? []);
         setLoIds(questionDetail?.learning_objectives.map((lo) => lo.lo_id) ?? []);
         setOptions(questionDetail?.options.length ? questionDetail.options : defaultOptions);
+        setSubmitAttempted(false);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load question editor data.');
       } finally {
@@ -159,9 +156,12 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
     if (!hasSubject) errors.push('Subject is required.');
     if (difficulty === 'none') errors.push('Difficulty is required when submitting.');
     const nonEmptyOptions = options.filter((option) => option.options_text.trim());
+    const normalizedOptions = nonEmptyOptions.map((option) => option.options_text.trim().toLowerCase());
+    const hasDuplicateOptions = new Set(normalizedOptions).size !== normalizedOptions.length;
     if (questionType === 'MCQ') {
       if (nonEmptyOptions.length < 2) errors.push('MCQ requires at least two options.');
       if (!nonEmptyOptions.some((option) => option.is_correct)) errors.push('MCQ requires at least one correct option.');
+      if (hasDuplicateOptions) errors.push('Answer options must be unique.');
     }
     if (questionType === 'true-false') {
       const labels = nonEmptyOptions.map((option) => option.options_text.trim().toLowerCase()).sort().join(',');
@@ -172,8 +172,8 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
     return errors;
   }, [difficulty, hasSubject, options, questionText, questionType]);
 
-  const draftDisabled = !questionText.trim() || !hasSubject || isPending || saving;
-  const submitDisabled = submitErrors.length > 0 || isPending || saving;
+  const draftDisabled = !questionText.trim() || !hasSubject || isPending || saving || loading;
+  const submitActionDisabled = isPending || saving || loading;
 
   const payload = (): QuestionPayload => ({
     question_text: questionText,
@@ -191,6 +191,7 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
   };
 
   const saveDraft = async () => {
+    if (draftDisabled || loading) return;
     setSaving(true);
     setError(null);
     try {
@@ -209,6 +210,8 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
   };
 
   const submitForApproval = async () => {
+    setSubmitAttempted(true);
+    if (submitErrors.length > 0 || submitActionDisabled) return;
     setSaving(true);
     setError(null);
     try {
@@ -228,7 +231,25 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
     }
   };
 
-  const addOption = () => setOptions((current) => [...current, { options_text: '', is_correct: false }]);
+  const handleQuestionTypeChange = (value: QuestionType) => {
+    setQuestionType(value);
+    if (value === 'true-false') {
+      setOptions([
+        { options_text: 'True', is_correct: false },
+        { options_text: 'False', is_correct: false },
+      ]);
+      return;
+    }
+    if (value === 'essay') {
+      setOptions([]);
+      return;
+    }
+    setOptions((current) => (questionType === 'MCQ' && current.length >= 2 ? current : defaultOptions));
+  };
+
+  const addOption = () => setOptions((current) => (
+    current.length >= optionLetters.length ? current : [...current, { options_text: '', is_correct: false }]
+  ));
   const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index));
   const updateOption = (index: number, patch: Partial<QuestionOptionPayload>) => {
     setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
@@ -242,25 +263,73 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
   };
 
   const toggleChapter = (chapterId: number, checked: boolean) => {
-    setChapterIds((current) => (checked ? [...current, chapterId] : current.filter((id) => id !== chapterId)));
+    setChapterIds((current) => {
+      const next = checked ? [...current, chapterId] : current.filter((id) => id !== chapterId);
+      if (next.length === 0) setLoIds([]);
+      return next;
+    });
   };
 
   const toggleLo = (loId: number, checked: boolean) => {
     setLoIds((current) => (checked ? [...current, loId] : current.filter((id) => id !== loId)));
   };
 
-  return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="question-editor-modal flex min-h-0 max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 shadow-2xl">
-        <DialogHeader className="shrink-0 border-b border-gray-200 px-6 py-4 pr-14">
-          <DialogTitle>{questionId ? 'Edit Question' : 'New Question'}</DialogTitle>
-          <DialogDescription>Save a reusable draft or submit it for admin review.</DialogDescription>
-        </DialogHeader>
+  useEffect(() => {
+    if (!open) return undefined;
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-5">
-          {loading && <div className="h-48 rounded-lg bg-gray-100 animate-pulse" />}
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose, open]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="qb-editor-backdrop"
+      role="dialog"
+      aria-modal="true"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="qb-editor-modal">
+        <div className="qb-editor-header">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">{questionId ? 'Edit Question' : 'New Question'}</h2>
+            <p className="mt-0.5 text-sm text-gray-400">Save a reusable draft or submit it for admin review.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="qb-editor-close"
+            aria-label="Close question editor"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="qb-editor-body">
+          {loading && (
+            <div className="flex min-h-64 items-center justify-center rounded-xl border border-gray-200 bg-gray-50">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <Loader2 className="size-8 animate-spin text-teal-600" />
+                <p className="text-sm font-medium text-gray-700">Loading question editor...</p>
+              </div>
+            </div>
+          )}
+
           {isApprovedEdit && (
-            <Alert className="border-amber-200 bg-amber-50">
+            <Alert className="rounded-xl border-amber-200 bg-amber-50">
               <AlertCircle className="size-4 text-amber-700" />
               <AlertDescription className="text-amber-800">
                 Editing this approved question will submit it for admin review again.
@@ -268,13 +337,13 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
             </Alert>
           )}
           {isPending && (
-            <Alert className="border-sky-200 bg-sky-50">
+            <Alert className="rounded-xl border-sky-200 bg-sky-50">
               <AlertCircle className="size-4 text-sky-700" />
               <AlertDescription className="text-sky-800">Pending questions are read-only for teachers.</AlertDescription>
             </Alert>
           )}
           {error && (
-            <Alert className="border-red-200 bg-red-50">
+            <Alert className="rounded-xl border-red-200 bg-red-50">
               <AlertCircle className="size-4 text-red-700" />
               <AlertDescription className="text-red-800">{error}</AlertDescription>
             </Alert>
@@ -282,209 +351,281 @@ export function QuestionEditor({ open, questionId, onClose, onSaved }: QuestionE
 
           {!loading && (
             <>
-              <Card className="rounded-lg">
-                <CardHeader>
-                  <CardTitle className="text-base">Basic Information</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Question Type *</Label>
-                      <Select value={questionType} onValueChange={(value) => setQuestionType(value as QuestionType)} disabled={isPending}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="MCQ">Multiple Choice</SelectItem>
-                          <SelectItem value="true-false">True/False</SelectItem>
-                          <SelectItem value="essay">Essay</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Difficulty</Label>
-                      <Select value={difficulty} onValueChange={(value) => setDifficulty(value as QuestionDifficulty | 'none')} disabled={isPending}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Optional for drafts" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No difficulty</SelectItem>
-                          <SelectItem value="easy">Easy</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="hard">Hard</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Question Text *</Label>
-                    <Textarea value={questionText} onChange={(event) => setQuestionText(event.target.value)} rows={4} disabled={isPending} />
-                  </div>
-                </CardContent>
-              </Card>
+              <section className="space-y-4 rounded-xl border border-gray-200 p-5">
+                <h3 className="text-sm font-semibold text-gray-800">Basic Information</h3>
 
-              <Card className="rounded-lg">
-                <CardHeader>
-                  <CardTitle className="text-base">Classification</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Subject *</Label>
-                    <Select
-                      value={subjectId}
-                      onValueChange={(value) => {
-                        setSubjectId(value);
-                        setChapterIds([]);
-                        setLoIds([]);
-                      }}
-                      disabled={isPending}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select subject" />
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-gray-700">Question Type *</Label>
+                    <Select value={questionType} onValueChange={(value) => handleQuestionTypeChange(value as QuestionType)} disabled={isPending}>
+                      <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={subjectPlaceholder} disabled>
-                          Select subject
-                        </SelectItem>
-                        {subjects.map((subject) => (
-                          <SelectItem key={subject.subject_id} value={subject.subject_id}>
-                            {subject.subject_id} - {subject.subject_name}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="MCQ">Multiple Choice</SelectItem>
+                        <SelectItem value="true-false">True/False</SelectItem>
+                        <SelectItem value="essay">Essay</SelectItem>
                       </SelectContent>
                     </Select>
-                    {!hasSubject && (
-                      <p className="text-xs text-red-600">Subject is required before saving or submitting.</p>
-                    )}
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Chapter (Optional)</Label>
-                      <div className="rounded-lg border border-gray-200 p-3 space-y-2 min-h-24">
-                        {!hasSubject && <p className="text-sm text-gray-500">Select a subject to load chapters.</p>}
-                        {hasSubject && chapters.length === 0 && <p className="text-sm text-gray-500">No chapters are available for this subject.</p>}
-                        {chapters.map((chapter) => (
-                          <label key={chapter.chapter_id} className="flex items-center gap-2 text-sm text-gray-700">
-                            <Checkbox
-                              checked={chapterIds.includes(chapter.chapter_id)}
-                              onCheckedChange={(checked) => toggleChapter(chapter.chapter_id, checked === true)}
-                              disabled={isPending}
-                            />
-                            {chapter.chapter_name}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Learning Objective (Optional)</Label>
-                      <div className="rounded-lg border border-gray-200 p-3 space-y-2 min-h-24">
-                        {chapterIds.length === 0 && <p className="text-sm text-gray-500">Select at least one chapter to load learning objectives.</p>}
-                        {chapterIds.length > 0 && learningObjectives.length === 0 && (
-                          <p className="text-sm text-gray-500">No learning objectives are available for selected chapters.</p>
-                        )}
-                        {learningObjectives.map((lo) => (
-                          <label key={lo.lo_id} className="flex items-center gap-2 text-sm text-gray-700">
-                            <Checkbox
-                              checked={loIds.includes(lo.lo_id)}
-                              onCheckedChange={(checked) => toggleLo(lo.lo_id, checked === true)}
-                              disabled={isPending || chapterIds.length === 0}
-                            />
-                            {lo.lo_name}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-gray-700">Difficulty</Label>
+                    <Select value={difficulty} onValueChange={(value) => setDifficulty(value as QuestionDifficulty | 'none')} disabled={isPending}>
+                      <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
+                        <SelectValue placeholder="Optional for drafts" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No difficulty</SelectItem>
+                        <SelectItem value="easy">Easy</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="hard">Hard</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
 
-              <Card className="rounded-lg">
-                <CardHeader>
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle className="text-base">Answers</CardTitle>
-                    {questionType === 'MCQ' && (
-                      <Button variant="outline" size="sm" onClick={addOption} disabled={isPending} className="gap-2">
-                        <Plus className="size-4" />
-                        Add Option
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {questionType === 'MCQ' &&
-                    options.map((option, index) => (
-                      <div key={index} className="flex items-center gap-3">
-                        <Checkbox checked={option.is_correct} onCheckedChange={(checked) => updateOption(index, { is_correct: checked === true })} disabled={isPending} />
-                        <Input
-                          value={option.options_text}
-                          onChange={(event) => updateOption(index, { options_text: event.target.value })}
-                          placeholder={`Option ${index + 1}`}
-                          disabled={isPending}
-                        />
-                        <Button variant="ghost" size="sm" onClick={() => removeOption(index)} disabled={isPending || options.length <= 2} className="text-red-700">
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium text-gray-700">Question Text *</Label>
+                  <Textarea
+                    value={questionText}
+                    onChange={(event) => setQuestionText(event.target.value)}
+                    rows={4}
+                    disabled={isPending}
+                    placeholder="Enter your question here..."
+                    className={`resize-none rounded-lg bg-gray-50 text-sm placeholder:text-gray-400 focus-visible:border-teal-300 focus-visible:ring-teal-300 ${
+                      !questionText.trim() ? 'border-red-300' : 'border-gray-200'
+                    }`}
+                  />
+                  {!questionText.trim() && <p className="text-xs text-red-500">Question text is required.</p>}
+                </div>
+              </section>
 
-                  {questionType === 'true-false' && (
-                    <div className="flex gap-3">
-                      {(['true', 'false'] as const).map((answer) => {
-                        const isCorrect = options.some((option) => option.options_text.toLowerCase() === answer && option.is_correct);
-                        return (
-                          <Button
-                            key={answer}
-                            variant={isCorrect ? 'default' : 'outline'}
-                            onClick={() => setTrueFalseAnswer(answer)}
-                            disabled={isPending}
-                          >
-                            {answer === 'true' ? 'True' : 'False'}
-                          </Button>
-                        );
-                      })}
-                    </div>
+              <section className="space-y-4 rounded-xl border border-gray-200 p-5">
+                <h3 className="text-sm font-semibold text-gray-800">Classification</h3>
+
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium text-gray-700">Subject *</Label>
+                  <Select
+                    value={subjectId}
+                    onValueChange={(value) => {
+                      setSubjectId(value);
+                      setChapterIds([]);
+                      setLoIds([]);
+                    }}
+                    disabled={isPending}
+                  >
+                    <SelectTrigger
+                      className={`rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0 ${
+                        !hasSubject ? 'border-red-300' : 'border-gray-200'
+                      }`}
+                    >
+                      <SelectValue placeholder="Select subject" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={subjectPlaceholder} disabled>
+                        Select subject
+                      </SelectItem>
+                      {subjects.map((subject) => (
+                        <SelectItem key={subject.subject_id} value={subject.subject_id}>
+                          {subject.subject_id} - {subject.subject_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!hasSubject && (
+                    <p className="text-xs text-red-500">Subject is required before saving or submitting.</p>
                   )}
+                </div>
 
-                  {questionType === 'essay' && <p className="text-sm text-gray-500">No suggested answer field exists in the current schema.</p>}
-                </CardContent>
-              </Card>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-gray-700">
+                      Chapter <span className="font-normal text-gray-400">(Optional)</span>
+                    </Label>
+                    <div className="min-h-24 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      {!hasSubject && <p className="text-sm text-gray-500">Select a subject to load chapters.</p>}
+                      {hasSubject && chapters.length === 0 && <p className="text-sm text-gray-500">No chapters are available for this subject.</p>}
+                      {chapters.map((chapter) => (
+                        <label key={chapter.chapter_id} className="flex items-center gap-2 text-sm text-gray-700">
+                          <Checkbox
+                            checked={chapterIds.includes(chapter.chapter_id)}
+                            onCheckedChange={(checked) => toggleChapter(chapter.chapter_id, checked === true)}
+                            disabled={isPending}
+                          />
+                          {chapter.chapter_name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
 
-              {submitErrors.length > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <p className="text-sm text-gray-700 mb-2">Submit validation</p>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-gray-700">
+                      Learning Objective <span className="font-normal text-gray-400">(Optional)</span>
+                    </Label>
+                    <div className="min-h-24 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      {chapterIds.length === 0 && <p className="text-sm text-gray-500">Select at least one chapter to load learning objectives.</p>}
+                      {chapterIds.length > 0 && learningObjectives.length === 0 && (
+                        <p className="text-sm text-gray-500">No learning objectives are available for selected chapters.</p>
+                      )}
+                      {learningObjectives.map((lo) => (
+                        <label key={lo.lo_id} className="flex items-center gap-2 text-sm text-gray-700">
+                          <Checkbox
+                            checked={loIds.includes(lo.lo_id)}
+                            onCheckedChange={(checked) => toggleLo(lo.lo_id, checked === true)}
+                            disabled={isPending || chapterIds.length === 0}
+                          />
+                          {lo.lo_name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-3 rounded-xl border border-gray-200 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-gray-800">Answers</h3>
+                  {questionType === 'MCQ' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={addOption}
+                      disabled={isPending || options.length >= optionLetters.length}
+                      className="gap-1.5 rounded-lg border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Plus className="size-3.5" />
+                      Add Option
+                    </Button>
+                  )}
+                </div>
+
+                {questionType === 'MCQ' &&
+                  options.map((option, index) => (
+                    <div
+                      key={option.options_id ?? index}
+                      className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors ${
+                        option.is_correct ? 'border-teal-300 bg-teal-50' : 'border-transparent bg-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => updateOption(index, { is_correct: !option.is_correct })}
+                        disabled={isPending}
+                        className={`flex size-5 flex-shrink-0 items-center justify-center rounded border-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                          option.is_correct ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300 bg-white hover:border-teal-400'
+                        }`}
+                        title="Mark as correct"
+                      >
+                        {option.is_correct && (
+                          <svg className="size-3" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </button>
+                      <span className={`w-5 flex-shrink-0 text-center text-xs font-semibold ${option.is_correct ? 'text-teal-600' : 'text-gray-400'}`}>
+                        {optionLetters[index] ?? index + 1}
+                      </span>
+                      <Input
+                        value={option.options_text}
+                        onChange={(event) => updateOption(index, { options_text: event.target.value })}
+                        placeholder={`Option ${index + 1}`}
+                        disabled={isPending}
+                        className={`rounded-lg bg-gray-50 text-sm placeholder:text-gray-400 focus-visible:border-teal-300 focus-visible:ring-teal-300 ${
+                          option.is_correct ? 'border-teal-200 text-teal-800' : 'border-gray-200'
+                        }`}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeOption(index)}
+                        disabled={isPending || options.length <= 2}
+                        className="rounded-lg text-red-600 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+
+                {questionType === 'true-false' && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {(['true', 'false'] as const).map((answer) => {
+                      const isCorrect = options.some((option) => option.options_text.toLowerCase() === answer && option.is_correct);
+                      return (
+                        <button
+                          key={answer}
+                          type="button"
+                          onClick={() => setTrueFalseAnswer(answer)}
+                          disabled={isPending}
+                          className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                            isCorrect
+                              ? 'border-teal-300 bg-teal-50 text-teal-700'
+                              : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-teal-200 hover:bg-teal-50/50'
+                          }`}
+                        >
+                          <span className="flex items-center justify-between gap-3">
+                            {answer === 'true' ? 'True' : 'False'}
+                            {isCorrect && <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-600">Correct</span>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {questionType === 'essay' && <p className="text-sm text-gray-500">No suggested answer field exists in the current schema.</p>}
+              </section>
+
+              {submitAttempted && submitErrors.length > 0 && (
+                <section className="space-y-2 rounded-xl border border-red-100 bg-red-50 p-4">
+                  <div className="flex items-center gap-2 text-red-600">
+                    <AlertCircle className="size-4" />
+                    <p className="text-xs font-semibold">Submit validation</p>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {submitErrors.map((item) => (
-                      <Badge key={item} variant="outline" className="bg-white text-gray-600">
+                      <Badge key={item} variant="outline" className="border-red-200 bg-white text-red-600">
                         {item}
                       </Badge>
                     ))}
                   </div>
-                </div>
+                </section>
               )}
-
             </>
           )}
         </div>
-        <div className="flex shrink-0 flex-col-reverse gap-3 border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <Button variant="outline" onClick={onClose}>
+
+        <div className="qb-editor-footer">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="rounded-lg border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
             Cancel
           </Button>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="qb-editor-actions">
             {!isApprovedEdit && (
-              <Button variant="outline" onClick={saveDraft} disabled={draftDisabled || loading} className="gap-2">
-                <Save className="size-4" />
+              <Button
+                variant="outline"
+                onClick={saveDraft}
+                disabled={draftDisabled || loading}
+                className="gap-1.5 rounded-lg border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                 Save Draft
               </Button>
             )}
-            <Button onClick={submitForApproval} disabled={submitDisabled || loading} className="gap-2 bg-teal-600 hover:bg-teal-700">
-              <Send className="size-4" />
+            <Button
+              onClick={submitForApproval}
+              disabled={submitActionDisabled}
+              className="gap-1.5 rounded-lg bg-teal-500 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600"
+            >
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               {isApprovedEdit ? 'Save Changes & Submit for Approval' : 'Submit for Approval'}
             </Button>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>,
+    document.body,
   );
 }

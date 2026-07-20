@@ -1,205 +1,183 @@
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { Label } from '../../ui/label';
-import { Button } from '../../ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select';
-import { Badge } from '../../ui/badge';
-import { Filter, X } from 'lucide-react';
+import { useMemo } from 'react';
+import { ChevronDown, Filter, X } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '../../ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import type {
   ChapterSummary,
   LearningObjectiveSummary,
   QuestionBankFilters,
-  QuestionBankTab,
   QuestionDifficulty,
-  QuestionStatus,
   QuestionType,
 } from '../../../types/question-bank';
 
 interface QuestionFiltersProps {
-  activeTab: QuestionBankTab;
+  selectedSubject: string;
   filters: QuestionBankFilters;
   chapters: ChapterSummary[];
   learningObjectives: LearningObjectiveSummary[];
   onFilterChange: (filters: QuestionBankFilters) => void;
 }
 
-const questionTypes: Array<{ value: QuestionType; label: string }> = [
-  { value: 'MCQ', label: 'Multiple Choice' },
+const typeOptions: Array<{ value: QuestionType; label: string }> = [
+  { value: 'MCQ', label: 'MCQ' },
   { value: 'true-false', label: 'True/False' },
   { value: 'essay', label: 'Essay' },
 ];
 
-const difficulties: Array<{ value: QuestionDifficulty; label: string }> = [
+const difficultyOptions: Array<{ value: QuestionDifficulty; label: string }> = [
   { value: 'easy', label: 'Easy' },
   { value: 'medium', label: 'Medium' },
   { value: 'hard', label: 'Hard' },
 ];
 
-const statuses: Array<{ value: QuestionStatus; label: string }> = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
-];
-
 export function QuestionFilters({
-  activeTab,
+  selectedSubject,
   filters,
   chapters,
   learningObjectives,
   onFilterChange,
 }: QuestionFiltersProps) {
-  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const showTaxonomy = selectedSubject !== 'all' && selectedSubject !== '__none__';
+  const taxonomyActive = Boolean(filters.chapter_id || filters.lo_id);
+  const activeQuestionFilterCount = useMemo(
+    () => [filters.question_type, filters.difficulty].filter(Boolean).length,
+    [filters.question_type, filters.difficulty],
+  );
 
   const update = (patch: Partial<QuestionBankFilters>) => {
     onFilterChange({ ...filters, ...patch });
   };
 
-  const clearAllFilters = () => {
-    onFilterChange({});
-  };
-
   return (
-    <div className="h-full bg-white border-l border-gray-200 overflow-y-auto">
-      <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Filter className="size-5 text-teal-600" />
-            <h3 className="text-gray-800">Filters</h3>
-            {activeFilterCount > 0 && (
-              <Badge variant="outline" className="bg-teal-100 text-teal-700">
-                {activeFilterCount}
-              </Badge>
-            )}
-          </div>
-          {activeFilterCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearAllFilters}>
-              <X className="size-4 mr-1" />
-              Clear
-            </Button>
-          )}
+    <div className="qb-ref-filters">
+      <div className="qb-ref-filter-group">
+        <span className="qb-ref-filter-label">Type</span>
+        {typeOptions.map((option) => {
+          const active = filters.question_type === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`qb-ref-filter-pill type${active ? ' is-active' : ''}`}
+              onClick={() => update({ question_type: active ? undefined : option.value })}
+              aria-pressed={active}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <span className="qb-ref-filter-divider" aria-hidden="true" />
+
+      <div className="qb-ref-filter-group">
+        <span className="qb-ref-filter-label">Level</span>
+        {difficultyOptions.map((option) => {
+          const active = filters.difficulty === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`qb-ref-filter-pill ${option.value}${active ? ' is-active' : ''}`}
+              onClick={() => update({ difficulty: active ? undefined : option.value })}
+              aria-pressed={active}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeQuestionFilterCount > 0 && (
+        <button
+          type="button"
+          className="qb-ref-filter-clear"
+          onClick={() => update({ question_type: undefined, difficulty: undefined })}
+        >
+          <X />
+          Clear ({activeQuestionFilterCount})
+        </button>
+      )}
+
+      {showTaxonomy && (
+        <div className="qb-ref-taxonomy-wrap">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={`qb-ref-taxonomy-trigger${taxonomyActive ? ' is-active' : ''}`}
+              >
+                <Filter />
+                Taxonomy
+                <ChevronDown />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="qb-ref-taxonomy-panel">
+              <div className="qb-ref-taxonomy-head">
+                <span className="qb-ref-taxonomy-title">Taxonomy</span>
+                {taxonomyActive && (
+                  <button
+                    type="button"
+                    className="qb-ref-filter-clear"
+                    onClick={() => update({ chapter_id: undefined, lo_id: undefined })}
+                  >
+                    <X /> Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="qb-ref-taxonomy-fields">
+                <div className="qb-ref-taxonomy-field">
+                  <label>Chapter</label>
+                  <Select
+                    value={filters.chapter_id ? String(filters.chapter_id) : 'all'}
+                    onValueChange={(value) =>
+                      update({
+                        chapter_id: value === 'all' ? undefined : Number(value),
+                        lo_id: undefined,
+                      })
+                    }
+                    disabled={chapters.length === 0}
+                  >
+                    <SelectTrigger className="h-9 rounded-lg border-gray-200 bg-gray-50 text-sm shadow-none">
+                      <SelectValue placeholder="All Chapters" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Chapters</SelectItem>
+                      {chapters.map((chapter) => (
+                        <SelectItem key={chapter.chapter_id} value={String(chapter.chapter_id)}>
+                          {chapter.chapter_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="qb-ref-taxonomy-field">
+                  <label>Learning Objective</label>
+                  <Select
+                    value={filters.lo_id ? String(filters.lo_id) : 'all'}
+                    onValueChange={(value) => update({ lo_id: value === 'all' ? undefined : Number(value) })}
+                    disabled={!filters.chapter_id || learningObjectives.length === 0}
+                  >
+                    <SelectTrigger className="h-9 rounded-lg border-gray-200 bg-gray-50 text-sm shadow-none">
+                      <SelectValue placeholder="All Objectives" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Objectives</SelectItem>
+                      {learningObjectives.map((objective) => (
+                        <SelectItem key={objective.lo_id} value={String(objective.lo_id)}>
+                          {objective.lo_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
-      </div>
-
-      <div className="p-4 space-y-4">
-        {activeTab === 'mine' && (
-          <Card className="rounded-lg">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Select value={filters.status ?? 'all'} onValueChange={(value) => update({ status: value === 'all' ? undefined : (value as QuestionStatus) })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  {statuses.map((status) => (
-                    <SelectItem key={status.value} value={status.value}>
-                      {status.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-        )}
-
-        <Card className="rounded-lg">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Question</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={filters.question_type ?? 'all'} onValueChange={(value) => update({ question_type: value === 'all' ? undefined : (value as QuestionType) })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {questionTypes.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Difficulty</Label>
-              <Select value={filters.difficulty ?? 'all'} onValueChange={(value) => update({ difficulty: value === 'all' ? undefined : (value as QuestionDifficulty) })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All levels" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Levels</SelectItem>
-                  {difficulties.map((level) => (
-                    <SelectItem key={level.value} value={level.value}>
-                      {level.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-lg">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Taxonomy</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Chapter</Label>
-              <Select
-                value={filters.chapter_id ? String(filters.chapter_id) : 'all'}
-                onValueChange={(value) => update({ chapter_id: value === 'all' ? undefined : Number(value), lo_id: undefined })}
-                disabled={chapters.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All chapters" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Chapters</SelectItem>
-                  {chapters.map((chapter) => (
-                    <SelectItem key={chapter.chapter_id} value={String(chapter.chapter_id)}>
-                      {chapter.chapter_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Learning Objective</Label>
-              <Select
-                value={filters.lo_id ? String(filters.lo_id) : 'all'}
-                onValueChange={(value) => update({ lo_id: value === 'all' ? undefined : Number(value) })}
-                disabled={learningObjectives.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All objectives" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Objectives</SelectItem>
-                  {learningObjectives.map((lo) => (
-                    <SelectItem key={lo.lo_id} value={String(lo.lo_id)}>
-                      {lo.lo_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      )}
     </div>
   );
 }

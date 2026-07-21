@@ -212,7 +212,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
       <div className="grid gap-4">
         {filteredExams.map((exam) => {
           return (
-            <Card key={exam.exam_id} className="shadow-lg rounded-2xl border-0 hover:shadow-xl transition-shadow">
+            <Card key={exam.exam_id} className="shadow-lg rounded-2xl border border-gray-300 hover:shadow-xl transition-shadow">
               <CardContent className="p-6">
                 <div className="flex flex-col gap-4">
                   {/* Exam Info */}

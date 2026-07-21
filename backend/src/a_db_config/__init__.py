@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -34,6 +35,12 @@ class ResultVisibility(str, enum.Enum):
     hidden = "hidden"
     score_only = "score-only"
     full = "full"
+
+
+class ExamStatus(str, enum.Enum):
+    draft = "draft"
+    published = "published"
+    archived = "archived"
 
 
 result_visibility_enum = Enum(
@@ -307,6 +314,9 @@ class Exam(Base):
     duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, default=90)
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    status: Mapped[ExamStatus] = mapped_column(
+        Enum(ExamStatus), nullable=False, default=ExamStatus.draft, server_default="draft"
+    )
     result_visibility: Mapped[Optional[ResultVisibility]] = mapped_column(
         result_visibility_enum, default=ResultVisibility.full
     )
@@ -322,7 +332,59 @@ class Exam(Base):
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam")
     student_exams: Mapped[list["StudentExam"]] = relationship(back_populates="exam")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="exam")
+    total_points: Mapped[Optional[int]] = mapped_column(Integer, default=100)
+    passing_score: Mapped[Optional[int]] = mapped_column(Integer, default=50)
+    settings: Mapped[Optional["ExamSetting"]] = relationship(
+        back_populates="exam",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
 
+
+class ExamSetting(Base):
+    __tablename__ = "exam_setting"
+    __table_args__ = (
+        CheckConstraint("grace_period >= 0", name="ck_exam_setting_grace_period_nonnegative"),
+        CheckConstraint(
+            "force_fullscreen_thresh >= 0",
+            name="ck_exam_setting_force_fullscreen_thresh_nonnegative",
+        ),
+        CheckConstraint("tab_switch_thresh >= 0", name="ck_exam_setting_tab_switch_thresh_nonnegative"),
+        CheckConstraint("copy_paste_thresh >= 0", name="ck_exam_setting_copy_paste_thresh_nonnegative"),
+    )
+
+    exam_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exam.exam_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    shuffle_question: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    shuffle_answer_options: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    auto_submit_on_expire: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("1")
+    )
+    grace_period: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    force_fullscreen_thresh: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    tab_switch_thresh: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    copy_paste_thresh: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    auto_grade: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("1")
+    )
+
+    exam: Mapped["Exam"] = relationship(back_populates="settings")
 
 class ExamQuestion(Base):
     __tablename__ = "exam_question"

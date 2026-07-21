@@ -52,8 +52,11 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "subject_id": exam.subject_id,
         "totalStudents": db.query(StudentExam).filter_by(exam_id=exam.exam_id).count(),
         "manage_by": exam.manage_by,
-        "status": get_exam_status(exam, now_time),
+        "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
+        "schedule_status": get_exam_status(exam, now_time),
         "subject": exam.subject.subject_name if exam.subject else None,
+        "total_points": exam.total_points if exam.total_points is not None else 100,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
     }
 
 
@@ -62,7 +65,7 @@ def _serialize_question(link: ExamQuestion) -> dict:
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
-        "question_difficulties": question.question_difficulties.value,
+        "question_difficulties": question.question_difficulties.value if question.question_difficulties else None,
         "question_type": question.question_type.value,
         "subject_id": question.subject_id,
         "chapter_ids": [item.chapter_id for item in question.chapter_questions],

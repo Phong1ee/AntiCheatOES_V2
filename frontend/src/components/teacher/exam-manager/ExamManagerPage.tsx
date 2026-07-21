@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { ExamEditor } from "./ExamEditor";
 import { ExamListSidebar } from "./ExamListSidebar";
 import { teacherExamService } from "../../../services/teacher-exam.service";
-import type { TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
+import type { ExamStatus, TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
 
 interface Exam {
   id: string;
@@ -11,7 +11,9 @@ interface Exam {
   subject: string;
   subjectId: string;
   class: string;
-  status: "draft" | "scheduled" | "published" | "archived";
+  status: ExamStatus;
+  startTime: string;
+  endTime: string;
   date: string;
   questionCount: number;
   assignedStudents: number;
@@ -20,6 +22,8 @@ interface Exam {
   examCode?: string;
   description?: string;
   maxAttempt: number;
+  totalPoints: number;
+  passingScore: number;
 }
 
 const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam => ({
@@ -28,7 +32,9 @@ const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam =
   subject: exam.subject ?? "No subject",
   subjectId: exam.subject_id ?? subjects.find((subject) => subject.subject_name === exam.subject)?.subject_id ?? "",
   class: "Unassigned",
-  status: exam.status === "upcoming" ? "scheduled" : exam.status === "ongoing" ? "published" : "archived",
+  status: exam.status,
+  startTime: exam.start_time ?? "",
+  endTime: exam.end_time ?? "",
   date: exam.start_time ?? new Date().toISOString(),
   questionCount: 0,
   assignedStudents: exam.totalStudents,
@@ -37,6 +43,8 @@ const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam =
   examCode: exam.examcode,
   description: exam.description ?? "",
   maxAttempt: exam.max_attempt ?? 1,
+  totalPoints: exam.total_points,
+  passingScore: exam.passing_score,
 });
 
 interface ExamManagerPageProps {
@@ -91,6 +99,11 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
     duration: number;
     examCode: string;
     maxAttempt: number;
+    totalPoints: number;
+    passingScore: number;
+    startTime: string;
+    endTime: string;
+    status: ExamStatus;
   }) => {
     const payload = {
       title: examData.title.trim(),
@@ -98,8 +111,13 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
       max_attempt: examData.maxAttempt,
       description: examData.description.trim(),
       duration_minutes: examData.duration,
+      start_time: examData.startTime,
+      end_time: examData.endTime,
+      status: examData.status,
       result_visibility: "full" as const,
       subject_id: examData.subjectId,
+      total_points: examData.totalPoints,
+      passing_score: examData.passingScore,
     };
 
     const saved = examData.id.startsWith("new-")

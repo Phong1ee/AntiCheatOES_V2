@@ -50,7 +50,7 @@ interface Exam {
   title: string;
   subject: string;
   class: string;
-  status: 'draft' | 'scheduled' | 'published' | 'archived';
+  status: 'draft' | 'published' | 'archived';
   date: string;
   questionCount: number;
   assignedStudents: number;
@@ -62,7 +62,6 @@ interface Exam {
 
 const statusConfig = {
   draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700 border-gray-200' },
-  scheduled: { label: 'Scheduled', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   published: { label: 'Published', color: 'bg-green-100 text-green-700 border-green-200' },
   archived: { label: 'Archived', color: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
@@ -137,7 +136,6 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="scheduled">Scheduled</SelectItem>
               <SelectItem value="published">Published</SelectItem>
               <SelectItem value="archived">Archived</SelectItem>
             </SelectContent>

@@ -30,6 +30,7 @@ import { QuestionPoolModal } from '../QuestionPoolModal';
 import { StudentQuestionPreview } from '../StudentQuestionPreview';
 import { toast } from 'sonner';
 import { questionService } from '../../../../services/question.service';
+import type { QuestionDifficulty } from '../../../../types/question-bank';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,7 +47,7 @@ interface Question {
   type: 'mcq' | 'true-false' | 'essay' | 'matching';
   question: string;
   points: number;
-  difficulty?: 'easy' | 'medium' | 'hard';  // Optional, auto-imported from question bank
+  difficulty: QuestionDifficulty | null;
   options?: string[];
   correctAnswer?: number | number[] | string;  // Support multiple correct answers for MCQ
   hasMultipleCorrect?: boolean; // Flag to indicate if MCQ has multiple correct answers
@@ -341,8 +342,12 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       setSaveError('Save the exam before adding questions.');
       return;
     }
-    if (!selectedQ.question.trim() || !subjectId) {
-      setSaveError('Question text and subject are required.');
+    if (!selectedQ.question.trim() || !subjectId || !selectedQ.difficulty) {
+      setSaveError('Question text, subject, and difficulty are required.');
+      return;
+    }
+    if (!Number.isInteger(selectedQ.points) || selectedQ.points <= 0) {
+      setSaveError('Question points must be a positive integer.');
       return;
     }
 
@@ -370,7 +375,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       if (selectedQ.id.startsWith('new-')) {
         const questionId = await questionService.create({
           question_text: selectedQ.question.trim(),
-          question_difficulties: selectedQ.difficulty ?? 'medium',
+          question_difficulties: selectedQ.difficulty,
           question_type: questionType,
           subject_id: subjectId,
           chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
@@ -384,7 +389,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       } else {
         await questionService.updateInExam(Number(examId), Number(selectedQ.id), {
           question_text: selectedQ.question.trim(),
-          question_difficulties: selectedQ.difficulty ?? 'medium',
+          question_difficulties: selectedQ.difficulty,
           question_type: questionType,
           subject_id: subjectId,
           chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
@@ -403,11 +408,6 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const handleAddQuestionsFromPool = (newQuestions: Question[]) => {
-    setQuestions([...questions, ...newQuestions]);
-    setIsPoolMode(false);
   };
 
   const handleAddPoolConfig = (config: PoolConfig) => {
@@ -512,6 +512,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
             variant="outline"
             className="w-full"
             onClick={() => setShowQuestionPool(true)}
+            disabled={!examId || examId.startsWith('new-')}
           >
             <Database className="size-4 mr-2" />
             Import from Question Bank
@@ -590,9 +591,9 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                       <span className="text-sm text-gray-700">Q{index + 1}</span>
                       <Badge
                         variant="outline"
-                        className={`text-xs ${difficultyColors[question.difficulty]}`}
+                        className={`text-xs ${question.difficulty ? difficultyColors[question.difficulty] : 'bg-gray-100 text-gray-600'}`}
                       >
-                        {question.difficulty}
+                        {question.difficulty ?? 'Not set'}
                       </Badge>
                       {question.hasMultipleCorrect && (
                         <Badge variant="outline" className="text-xs bg-purple-100 text-purple-700">
@@ -707,12 +708,29 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                   </div>
 
                   <div className="space-y-2">
+                    <Label>Difficulty</Label>
+                    <Select
+                      value={selectedQ.difficulty ?? undefined}
+                      onValueChange={(value: QuestionDifficulty) => updateQuestion(selectedQ.id, { difficulty: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select difficulty" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="easy">Easy</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="hard">Hard</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label>Points</Label>
                     <Input
                       type="number"
                       value={selectedQ.points}
                       onChange={(e) =>
-                        updateQuestion(selectedQ.id, { points: parseInt(e.target.value) })
+                        updateQuestion(selectedQ.id, { points: Number(e.target.value) })
                       }
                       min="1"
                   />
@@ -871,9 +889,13 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       {/* Question Pool Modal */}
       {showQuestionPool && (
         <QuestionPoolModal
+          examId={Number(examId)}
+          existingQuestionIds={questions.filter((question) => !question.id.startsWith('new-')).map((question) => Number(question.id))}
           onClose={() => setShowQuestionPool(false)}
-          onAddQuestions={handleAddQuestionsFromPool}
-          onAddPoolConfig={handleAddPoolConfig}
+          onImported={async () => {
+            setIsPoolMode(false);
+            await loadQuestions();
+          }}
         />
       )}
 

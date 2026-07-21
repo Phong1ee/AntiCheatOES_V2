@@ -36,6 +36,7 @@ interface Exam {
   totalStudents: number;
   manage_by: string;
   status: string;
+  schedule_status: 'upcoming' | 'ongoing' | 'completed';
   subject?: string | null;
 }
 
@@ -73,7 +74,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
     totalStudents: selectedExam.totalStudents,
     completedStudents: 0,
     averageScore: null,
-    status: (selectedExam.status === 'completed' || selectedExam.status === 'ongoing' ? selectedExam.status : 'upcoming') as 'upcoming' | 'ongoing' | 'completed',
+    status: selectedExam.schedule_status,
   } : null;
 
   useEffect(() => {
@@ -139,7 +140,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
 
   const filteredExams = exams
     // Filter by status
-    .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
+    .filter((exam) => filterStatus === 'all' || exam.schedule_status === filterStatus)
     // Filter by search query
     .filter((exam) => {
       const query = searchQuery.toLowerCase();
@@ -228,8 +229,8 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                               {exam.subject}
                             </Badge>
                           )}
-                          <Badge className={`${statusConfig[exam.status as keyof typeof statusConfig]?.color || 'bg-gray-100 text-gray-700'} flex-shrink-0`}>
-                            {statusConfig[exam.status as keyof typeof statusConfig]?.label || exam.status}
+                          <Badge className={`${statusConfig[exam.schedule_status]?.color || 'bg-gray-100 text-gray-700'} flex-shrink-0`}>
+                            {statusConfig[exam.schedule_status]?.label || exam.schedule_status}
                           </Badge>
                         </div>
                         <p className="text-gray-600 mt-1">{exam.description}</p>
@@ -278,7 +279,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                         <Settings className="size-4 mr-2" />
                         Settings
                       </Button>
-                      {exam.status === 'completed' || exam.status === 'ongoing' ? (
+                      {exam.schedule_status === 'completed' || exam.schedule_status === 'ongoing' ? (
                         <Button
                           variant="outline"
                           size="sm"

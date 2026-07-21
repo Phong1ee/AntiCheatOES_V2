@@ -1,0 +1,48 @@
+.question-pool-modal-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: calc(100vh - 2rem);
+  max-height: 900px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@supports (height: 100dvh) {
+  .question-pool-modal-panel {
+    height: calc(100dvh - 2rem);
+  }
+}
+
+.question-pool-modal-header,
+.question-pool-modal-toolbar,
+.question-pool-modal-footer {
+  flex: 0 0 auto;
+}
+
+.question-pool-modal-list {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.question-pool-modal-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.question-pool-modal-list::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.question-pool-modal-list::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 9999px;
+}
+
+.question-pool-modal-list::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}

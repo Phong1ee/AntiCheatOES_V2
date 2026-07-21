@@ -1,862 +1,235 @@
-import { useState } from 'react';
-import { Button } from '../../ui/button';
-import { Input } from '../../ui/input';
-import { Label } from '../../ui/label';
+// @ts-ignore: Allow side-effect CSS import without type declarations
+import './QuestionPoolModal.css';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, Database, Loader2, Search, X } from 'lucide-react';
+import { toast } from 'sonner';
+
+import {
+  questionService,
+  type QuestionImportCandidate,
+  type QuestionImportCandidateResponse,
+} from '../../../services/question.service';
+import type { QuestionDifficulty, QuestionStatus, QuestionType } from '../../../types/question-bank';
 import { Badge } from '../../ui/badge';
-import { Card, CardContent, CardHeader } from '../../ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select';
-import { Checkbox } from '../../ui/checkbox';
-import {
-  X,
-  Shuffle,
-  Plus,
-  Settings2,
-  Info,
-  CheckCircle2,
-  AlertCircle,
-  Filter,
-  Hash,
-} from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
-import { PoolConfigurationBuilder } from './PoolConfigurationBuilder';
-
-interface Question {
-  id: string;
-  type: 'mcq' | 'true-false' | 'essay' | 'matching';
-  question: string;
-  subject: string;
-  knowledgeDomain: string;
-  difficulty: 'easy' | 'medium' | 'hard';
-  points: number;
-  options?: string[];
-  correctAnswer?: number | number[] | string;
-  hasMultipleCorrect?: boolean;
-}
-
-interface PoolConfig {
-  subject: string;
-  rules: {
-    knowledgeDomain: string;
-    difficulty: 'easy' | 'medium' | 'hard';
-    count: number;
-    available: number;
-  }[];
-  totalQuestions: number;
-}
-
-interface RandomizeRule {
-  knowledgeDomain: string;
-  difficulty: 'easy' | 'medium' | 'hard';
-  count: number;
-  available: number;
-}
+import { Button } from '../../ui/button';
+import { Card, CardContent } from '../../ui/card';
+import { Input } from '../../ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 
 interface QuestionPoolModalProps {
+  examId: number;
+  existingQuestionIds: number[];
   onClose: () => void;
-  onAddQuestions: (questions: Question[]) => void;
-  onAddPoolConfig?: (config: PoolConfig) => void;
+  onImported: () => Promise<void>;
 }
 
-// Mock question bank data
-const mockQuestionBank: Question[] = [
-  {
-    id: 'q1',
-    type: 'mcq',
-    question: 'What is normalization in database design?',
-    subject: 'Database Systems',
-    knowledgeDomain: 'Database Design',
-    difficulty: 'medium',
-    points: 5,
-    options: [
-      'Process of organizing data to reduce redundancy',
-      'Process of creating backups',
-      'Process of encrypting data',
-      'Process of indexing tables',
-    ],
-    correctAnswer: 0,
-    hasMultipleCorrect: false,
-  },
-  {
-    id: 'q2',
-    type: 'mcq',
-    question: 'Which of the following are valid SQL aggregate functions?',
-    subject: 'Database Systems',
-    knowledgeDomain: 'SQL Queries',
-    difficulty: 'easy',
-    points: 4,
-    options: ['COUNT()', 'SUM()', 'AVG()', 'CONCAT()'],
-    correctAnswer: [0, 1, 2],
-    hasMultipleCorrect: true,
-  },
-  {
-    id: 'q3',
-    type: 'mcq',
-    question: 'Which normal form removes transitive dependencies?',
-    subject: 'Database Systems',
-    knowledgeDomain: 'Normalization',
-    difficulty: 'hard',
-    points: 6,
-    options: ['1NF', '2NF', '3NF', 'BCNF'],
-    correctAnswer: 2,
-    hasMultipleCorrect: false,
-  },
-  {
-    id: 'q4',
-    type: 'essay',
-    question: 'Explain the ACID properties in database transactions.',
-    subject: 'Database Systems',
-    knowledgeDomain: 'Transactions',
-    difficulty: 'hard',
-    points: 10,
-  },
-  {
-    id: 'q5',
-    type: 'true-false',
-    question: 'A foreign key can contain NULL values.',
-    subject: 'Database Systems',
-    knowledgeDomain: 'Database Design',
-    difficulty: 'medium',
-    points: 3,
-    correctAnswer: 'true',
-  },
-  {
-    id: 'q6',
-    type: 'mcq',
-    question: 'What is the time complexity of binary search?',
-    subject: 'Data Structures',
-    knowledgeDomain: 'Search Algorithms',
-    difficulty: 'easy',
-    points: 4,
-    options: ['O(n)', 'O(log n)', 'O(n log n)', 'O(1)'],
-    correctAnswer: 1,
-    hasMultipleCorrect: false,
-  },
-  {
-    id: 'q7',
-    type: 'mcq',
-    question: 'Which data structures use LIFO principle?',
-    subject: 'Data Structures',
-    knowledgeDomain: 'Linear Structures',
-    difficulty: 'easy',
-    points: 3,
-    options: ['Stack', 'Deque (when used as stack)', 'Queue', 'Tree'],
-    correctAnswer: [0, 1],
-    hasMultipleCorrect: true,
-  },
-  {
-    id: 'q8',
-    type: 'mcq',
-    question: 'What is the worst-case time complexity of QuickSort?',
-    subject: 'Algorithms',
-    knowledgeDomain: 'Sorting',
-    difficulty: 'medium',
-    points: 5,
-    options: ['O(n)', 'O(n log n)', 'O(n²)', 'O(log n)'],
-    correctAnswer: 2,
-    hasMultipleCorrect: false,
-  },
-];
+const statusClass: Record<QuestionImportCandidate['question_status'], string> = {
+  approved: 'bg-green-100 text-green-700',
+  draft: 'bg-gray-100 text-gray-700',
+  pending: 'bg-amber-100 text-amber-700',
+  rejected: 'bg-red-100 text-red-700',
+};
 
-export function QuestionPoolModal({ onClose, onAddQuestions, onAddPoolConfig }: QuestionPoolModalProps) {
-  const [mode, setMode] = useState<'manual' | 'randomize' | 'pool-config'>('manual');
-  const [selectedSubject, setSelectedSubject] = useState<string>('all');
-  const [selectedKnowledgeDomain, setSelectedKnowledgeDomain] = useState<string>('all');
-  const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
-  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
-  
-  // Fixed Randomization settings - now with domain + difficulty matrix
-  const [randomSubject, setRandomSubject] = useState<string>('all');
-  const [randomRules, setRandomRules] = useState<RandomizeRule[]>([]);
-  
-  // Pool configuration
-  const [poolConfig, setPoolConfig] = useState<PoolConfig | null>(null);
+const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
+  subjects: [],
+  creators: [],
+  statuses: [],
+  current_teacher_id: 0,
+};
 
-  // Get available subjects
-  const subjects = ['all', ...Array.from(new Set(mockQuestionBank.map((q) => q.subject)))];
-  
-  // For manual mode - knowledge domains based on selected subject
-  const knowledgeDomains = selectedSubject === 'all'
-    ? ['all', ...Array.from(new Set(mockQuestionBank.map((q) => q.knowledgeDomain)))]
-    : [
-        'all',
-        ...Array.from(
-          new Set(
-            mockQuestionBank
-              .filter((q) => q.subject === selectedSubject)
-              .map((q) => q.knowledgeDomain)
-          )
-        ),
-      ];
+export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImported }: QuestionPoolModalProps) {
+  const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
+  const [selectedPoints, setSelectedPoints] = useState<Record<number, number>>({});
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [questionType, setQuestionType] = useState<QuestionType | 'all'>('all');
+  const [difficulty, setDifficulty] = useState<QuestionDifficulty | 'all'>('all');
+  const [subjectId, setSubjectId] = useState('all');
+  const [questionStatus, setQuestionStatus] = useState<QuestionStatus | 'all'>('all');
+  const [createdBy, setCreatedBy] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<10 | 20>(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [metadata, setMetadata] = useState(emptyMetadata);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const requestSequence = useRef(0);
+  const questionListRef = useRef<HTMLDivElement>(null);
+  const existingIds = useMemo(() => new Set(existingQuestionIds), [existingQuestionIds]);
 
-  // For randomize mode - get filtered questions and domains
-  const randomFilteredQuestions = mockQuestionBank.filter((q) =>
-    randomSubject === 'all' ? true : q.subject === randomSubject
-  );
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-  const randomKnowledgeDomains = Array.from(
-    new Set(randomFilteredQuestions.map((q) => q.knowledgeDomain))
-  ).sort();
-
-  const difficulties: ('easy' | 'medium' | 'hard')[] = ['easy', 'medium', 'hard'];
-
-  // Get available count for randomize mode
-  const getRandomAvailableCount = (domain: string, difficulty: 'easy' | 'medium' | 'hard') => {
-    return randomFilteredQuestions.filter(
-      (q) => q.knowledgeDomain === domain && q.difficulty === difficulty
-    ).length;
-  };
-
-  // Get or create rule for randomize mode
-  const getRandomRule = (domain: string, difficulty: 'easy' | 'medium' | 'hard'): RandomizeRule => {
-    const existing = randomRules.find(
-      (r) => r.knowledgeDomain === domain && r.difficulty === difficulty
-    );
-    if (existing) return existing;
-    
-    return {
-      knowledgeDomain: domain,
-      difficulty,
-      count: 0,
-      available: getRandomAvailableCount(domain, difficulty),
-    };
-  };
-
-  // Update rule count for randomize mode
-  const updateRandomRuleCount = (domain: string, difficulty: 'easy' | 'medium' | 'hard', count: number) => {
-    const available = getRandomAvailableCount(domain, difficulty);
-    const validCount = Math.max(0, Math.min(count, available));
-
-    setRandomRules((prev) => {
-      const filtered = prev.filter(
-        (r) => !(r.knowledgeDomain === domain && r.difficulty === difficulty)
-      );
-      
-      if (validCount > 0) {
-        return [
-          ...filtered,
-          {
-            knowledgeDomain: domain,
-            difficulty,
-            count: validCount,
-            available,
-          },
-        ];
-      }
-      return filtered;
-    });
-  };
-
-  // Auto-distribute for randomize mode
-  const autoDistributeRandom = () => {
-    if (randomKnowledgeDomains.length === 0) return;
-
-    const totalAvailable = randomFilteredQuestions.length;
-    const questionsPerDomain = Math.floor(totalAvailable / randomKnowledgeDomains.length / 3);
-    
-    const newRules: RandomizeRule[] = [];
-    
-    randomKnowledgeDomains.forEach((domain) => {
-      difficulties.forEach((difficulty) => {
-        const available = getRandomAvailableCount(domain, difficulty);
-        const count = Math.min(questionsPerDomain, available);
-        
-        if (count > 0) {
-          newRules.push({
-            knowledgeDomain: domain,
-            difficulty,
-            count,
-            available,
-          });
+  useEffect(() => {
+    const sequence = ++requestSequence.current;
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await questionService.listImportCandidates(examId, {
+          search: debouncedSearch || undefined,
+          question_type: questionType === 'all' ? undefined : questionType,
+          difficulty: difficulty === 'all' ? undefined : difficulty,
+          subject_id: subjectId === 'all' ? undefined : subjectId,
+          status: questionStatus === 'all' ? undefined : questionStatus,
+          created_by: createdBy === 'all' ? undefined : Number(createdBy),
+          page,
+          page_size: pageSize,
+        });
+        if (sequence !== requestSequence.current) return;
+        setQuestions(response.items);
+        setTotal(response.total);
+        setTotalPages(response.total_pages);
+        setMetadata(response.filter_options);
+        if (response.total_pages > 0 && page > response.total_pages) setPage(response.total_pages);
+      } catch (loadError) {
+        if (sequence === requestSequence.current) {
+          setQuestions([]);
+          setError(loadError instanceof Error ? loadError.message : 'Unable to load question bank.');
         }
-      });
+      } finally {
+        if (sequence === requestSequence.current) setLoading(false);
+      }
+    };
+    void load();
+  }, [examId, debouncedSearch, questionType, difficulty, subjectId, questionStatus, createdBy, page, pageSize]);
+
+  useEffect(() => {
+    questionListRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [page, pageSize, debouncedSearch, questionType, difficulty, subjectId, questionStatus, createdBy]);
+
+  const selectedIds = Object.keys(selectedPoints).map(Number);
+  const selectablePageIds = questions
+    .filter((question) => !question.already_added && !existingIds.has(question.question_id))
+    .map((question) => question.question_id);
+  const allPageSelected = selectablePageIds.length > 0
+    && selectablePageIds.every((questionId) => questionId in selectedPoints);
+  const firstShown = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastShown = total === 0 ? 0 : Math.min(page * pageSize, total);
+
+  const resetPage = () => setPage(1);
+  const toggleQuestion = (questionId: number) => {
+    setSelectedPoints((current) => {
+      const next = { ...current };
+      if (questionId in next) delete next[questionId];
+      else next[questionId] = 1;
+      return next;
     });
-    
-    setRandomRules(newRules);
   };
-
-  // Clear all rules for randomize mode
-  const clearRandomRules = () => {
-    setRandomRules([]);
-  };
-
-  // Calculate totals for randomize mode
-  const totalRandomConfigured = randomRules.reduce((sum, rule) => sum + rule.count, 0);
-
-  // Filter questions based on criteria (for manual mode)
-  const filteredQuestions = mockQuestionBank.filter((q) => {
-    if (selectedSubject !== 'all' && q.subject !== selectedSubject) return false;
-    if (selectedKnowledgeDomain !== 'all' && q.knowledgeDomain !== selectedKnowledgeDomain)
-      return false;
-    if (selectedDifficulty !== 'all' && q.difficulty !== selectedDifficulty) return false;
-    return true;
-  });
-
-  const toggleQuestionSelection = (id: string) => {
-    setSelectedQuestionIds((prev) =>
-      prev.includes(id) ? prev.filter((qid) => qid !== id) : [...prev, id]
-    );
-  };
-
-  const randomizeQuestions = () => {
-    if (randomRules.length === 0) {
-      toast.error('Please configure at least one question selection rule');
-      return [];
-    }
-
-    const selectedQuestions: Question[] = [];
-
-    // For each rule, randomly select questions
-    randomRules.forEach((rule) => {
-      const availableQuestions = randomFilteredQuestions.filter(
-        (q) => q.knowledgeDomain === rule.knowledgeDomain && q.difficulty === rule.difficulty
-      );
-      
-      // Shuffle and select the required count
-      const shuffled = [...availableQuestions].sort(() => Math.random() - 0.5);
-      selectedQuestions.push(...shuffled.slice(0, rule.count));
+  const togglePageSelection = () => {
+    setSelectedPoints((current) => {
+      const next = { ...current };
+      if (allPageSelected) selectablePageIds.forEach((id) => delete next[id]);
+      else selectablePageIds.forEach((id) => { if (!(id in next)) next[id] = 1; });
+      return next;
     });
-
-    return selectedQuestions;
+  };
+  const updatePoints = (questionId: number, rawValue: string) => {
+    const value = Number(rawValue);
+    setSelectedPoints((current) => ({
+      ...current,
+      [questionId]: rawValue.trim() !== '' && Number.isFinite(value) ? value : Number.NaN,
+    }));
   };
 
-  const handleAddQuestions = () => {
-    let questionsToAdd: Question[] = [];
-
-    if (mode === 'manual') {
-      questionsToAdd = mockQuestionBank.filter((q) => selectedQuestionIds.includes(q.id));
-      if (questionsToAdd.length === 0) {
-        toast.error('Please select at least one question');
-        return;
-      }
-      onAddQuestions(questionsToAdd);
-      toast.success(`${questionsToAdd.length} question(s) added from question pool`);
-    } else if (mode === 'randomize') {
-      questionsToAdd = randomizeQuestions();
-      if (questionsToAdd.length === 0) {
-        return; // Error already shown
-      }
-      onAddQuestions(questionsToAdd);
-      toast.success(`${questionsToAdd.length} question(s) randomly selected and added`);
-    } else if (mode === 'pool-config') {
-      if (!poolConfig || poolConfig.totalQuestions === 0) {
-        toast.error('Please configure at least one question in the pool');
-        return;
-      }
-      if (onAddPoolConfig) {
-        onAddPoolConfig(poolConfig);
-        toast.success(`Question pool configured: ${poolConfig.totalQuestions} questions will be randomized per student`);
-      }
+  const importQuestions = async () => {
+    const payload = selectedIds.map((questionId) => ({ question_id: questionId, question_point: selectedPoints[questionId] }));
+    if (payload.some((item) => !Number.isInteger(item.question_point) || item.question_point <= 0)) {
+      setError('Every selected question must have a positive integer point value.');
+      return;
     }
-
-    onClose();
-  };
-
-  const difficultyColors = {
-    easy: 'bg-green-100 text-green-700 border-green-300',
-    medium: 'bg-amber-100 text-amber-700 border-amber-300',
-    hard: 'bg-red-100 text-red-700 border-red-300',
+    try {
+      setImporting(true);
+      setError(null);
+      const result = await questionService.importFromBank(examId, payload);
+      await onImported();
+      setSelectedPoints({});
+      toast.success(`${result.imported_count} question${result.imported_count === 1 ? '' : 's'} imported.`);
+      onClose();
+    } catch (importError) {
+      const message = importError instanceof Error ? importError.message : 'Unable to import questions.';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-teal-500 to-blue-600">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl text-white">Import from Question Bank</h2>
-              <p className="text-sm text-white/90 mt-1">
-                Select questions manually, randomize fixed set, or configure per-student randomization
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="text-white hover:bg-white/20"
-            >
-              <X className="size-5" />
-            </Button>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4">
+      <div className="question-pool-modal-panel max-w-6xl rounded-xl bg-white shadow-2xl sm:rounded-2xl">
+        <div className="question-pool-modal-header flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0"><h2 className="flex items-center gap-2 text-lg text-gray-800 sm:text-xl"><Database className="size-5 shrink-0 text-teal-600" /><span className="truncate">Import from Question Bank</span></h2><p className="mt-1 hidden text-sm text-gray-500 sm:block">Approved questions and your draft or pending questions are available.</p></div>
+          <Button className="shrink-0" variant="ghost" size="sm" onClick={onClose} disabled={importing} aria-label="Close"><X className="size-5" /></Button>
         </div>
 
-        {/* Mode Selector */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-          <div className="flex gap-3">
-            <Button
-              variant={mode === 'manual' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setMode('manual')}
-              className={
-                mode === 'manual'
-                  ? 'bg-gradient-to-r from-teal-500 to-blue-600'
-                  : ''
-              }
-            >
-              <Plus className="size-4 mr-2" />
-              Manual Selection
-            </Button>
-            <Button
-              variant={mode === 'randomize' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setMode('randomize')}
-              className={
-                mode === 'randomize'
-                  ? 'bg-gradient-to-r from-teal-500 to-blue-600'
-                  : ''
-              }
-            >
-              <Shuffle className="size-4 mr-2" />
-              Fixed Randomization
-            </Button>
-            <Button
-              variant={mode === 'pool-config' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setMode('pool-config')}
-              className={
-                mode === 'pool-config'
-                  ? 'bg-gradient-to-r from-teal-500 to-blue-600'
-                  : ''
-              }
-            >
-              <Settings2 className="size-4 mr-2" />
-              Pool Configuration
-            </Button>
+        <div className="question-pool-modal-toolbar space-y-3 border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="relative">
+            {!searchFocused && !search && <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />}
+            <Input value={search} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} onChange={(event) => { setSearch(event.target.value); resetPage(); }} placeholder="Search question text" className="pl-10" />
           </div>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+            <Select value={questionType} onValueChange={(value: QuestionType | 'all') => { setQuestionType(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Question Type" /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem><SelectItem value="MCQ">MCQ</SelectItem><SelectItem value="essay">Essay</SelectItem><SelectItem value="true-false">True/False</SelectItem></SelectContent></Select>
+            <Select value={difficulty} onValueChange={(value: QuestionDifficulty | 'all') => { setDifficulty(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Difficulty" /></SelectTrigger><SelectContent><SelectItem value="all">All Difficulties</SelectItem><SelectItem value="easy">Easy</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="hard">Hard</SelectItem></SelectContent></Select>
+            <Select value={subjectId} onValueChange={(value) => { setSubjectId(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Subject" /></SelectTrigger><SelectContent><SelectItem value="all">All Subjects</SelectItem>{metadata.subjects.map((subject) => <SelectItem key={subject.subject_id} value={subject.subject_id}>{subject.subject_id} · {subject.subject_name}</SelectItem>)}</SelectContent></Select>
+            <Select value={questionStatus} onValueChange={(value: QuestionStatus | 'all') => { setQuestionStatus(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="all">All Statuses</SelectItem>{metadata.statuses.map((status) => <SelectItem key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</SelectItem>)}</SelectContent></Select>
+            <Select value={createdBy} onValueChange={(value) => { setCreatedBy(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Created By" /></SelectTrigger><SelectContent><SelectItem value="all">All Creators</SelectItem>{metadata.creators.map((creator) => <SelectItem key={creator.id} value={String(creator.id)}>{creator.id === metadata.current_teacher_id ? `Me · ${creator.full_name}` : creator.full_name}</SelectItem>)}</SelectContent></Select>
+          </div>
+          <div className="question-pool-modal-header items-center justify-between gap-2">
+            <Button variant="outline" size="sm" onClick={togglePageSelection} disabled={loading || importing || selectablePageIds.length === 0}>{allPageSelected ? 'Deselect Current Page' : 'Select All on Current Page'}</Button>
+            <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value) as 10 | 20); resetPage(); }}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="10">10 per page</SelectItem><SelectItem value="20">20 per page</SelectItem></SelectContent></Select>
+          </div>
+          {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-hidden flex">
-          {/* Left Panel - Filters (hide for pool-config mode) */}
-          {mode !== 'pool-config' && mode === 'manual' && (
-          <div className="w-80 border-r border-gray-200 bg-gray-50 p-6 overflow-y-auto">
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm text-gray-700 mb-3 flex items-center gap-2">
-                  <Settings2 className="size-4" />
-                  Filter Criteria
-                </h3>
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs">Subject</Label>
-                    <Select value={selectedSubject} onValueChange={(value) => {
-                      setSelectedSubject(value);
-                      setSelectedKnowledgeDomain('all');
-                    }}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {subjects.map((subject) => (
-                          <SelectItem key={subject} value={subject}>
-                            {subject === 'all' ? 'All Subjects' : subject}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs">Knowledge Domain</Label>
-                    <Select
-                      value={selectedKnowledgeDomain}
-                      onValueChange={setSelectedKnowledgeDomain}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {knowledgeDomains.map((domain) => (
-                          <SelectItem key={domain} value={domain}>
-                            {domain === 'all' ? 'All Domains' : domain}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs">Difficulty</Label>
-                    <Select
-                      value={selectedDifficulty}
-                      onValueChange={setSelectedDifficulty}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Difficulties</SelectItem>
-                        <SelectItem value="easy">Easy</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="hard">Hard</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          )}
-
-          {/* Right Panel - Question List or Configuration */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {mode === 'pool-config' ? (
-              <PoolConfigurationBuilder
-                questionBank={mockQuestionBank}
-                onConfigChange={setPoolConfig}
-              />
-            ) : mode === 'randomize' ? (
-              /* Fixed Randomization Matrix */
-              <div className="space-y-4">
-                {/* Subject Filter */}
-                <Card className="shadow-sm">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <Label className="text-sm text-gray-700 mb-2 block">Subject Filter</Label>
-                        <Select value={randomSubject} onValueChange={(value) => {
-                          setRandomSubject(value);
-                          setRandomRules([]);
-                        }}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {subjects.map((subject) => (
-                              <SelectItem key={subject} value={subject}>
-                                {subject === 'all' ? 'All Subjects' : subject}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={autoDistributeRandom}
-                          disabled={randomKnowledgeDomains.length === 0}
-                        >
-                          <Shuffle className="size-4 mr-2" />
-                          Auto Distribute
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={clearRandomRules}
-                          disabled={randomRules.length === 0}
-                        >
-                          Clear All
-                        </Button>
-                      </div>
+        <div
+          ref={questionListRef}
+          className="question-pool-modal-list p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-500 sm:p-6"
+          aria-label="Question list"
+          role="region"
+          tabIndex={0}
+        >
+          {loading ? <div className="flex h-48 items-center justify-center gap-2 text-gray-600"><Loader2 className="size-5 animate-spin" /> Loading questions...</div>
+            : questions.length === 0 ? <div className="flex h-48 items-center justify-center text-gray-500">No questions match the current filters.</div>
+            : <div className="space-y-3">{questions.map((question) => {
+              const alreadyAdded = question.already_added || existingIds.has(question.question_id);
+              const selected = question.question_id in selectedPoints;
+              const pointsInputId = `question-points-${question.question_id}`;
+              const subjectLabel = question.subject
+                ? `${question.subject.subject_id} · ${question.subject.subject_name}`
+                : '';
+              const creatorLabel = question.creator
+                ? `By ${question.creator.id === metadata.current_teacher_id ? 'Me' : question.creator.full_name}`
+                : '';
+              return <Card key={question.question_id} className={selected ? 'border-teal-500 bg-teal-50/30' : ''}><CardContent className="flex min-w-0 items-start gap-3 p-3 sm:gap-4 sm:p-4">
+                <input type="checkbox" checked={selected} disabled={alreadyAdded || importing} onChange={() => toggleQuestion(question.question_id)} className="mt-1 size-4 shrink-0" aria-label={`Select question ${question.question_id}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-2 flex min-w-0 items-start gap-2">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <Badge variant="outline">{question.question_type}</Badge>
+                      <Badge variant="outline">{question.question_difficulties ?? 'Difficulty not set'}</Badge>
+                      <Badge className={statusClass[question.question_status]}>{question.question_status}</Badge>
+                      {question.subject && <Badge variant="outline" className="max-w-full sm:max-w-52"><span className="truncate" title={subjectLabel}>{subjectLabel}</span></Badge>}
+                      {question.creator && <Badge variant="outline" className="max-w-full sm:max-w-44"><span className="truncate" title={creatorLabel}>{creatorLabel}</span></Badge>}
+                      {alreadyAdded && <Badge variant="secondary">Already added</Badge>}
                     </div>
-                  </CardContent>
-                </Card>
-
-                {/* Info Cards */}
-                <div className="grid grid-cols-3 gap-3">
-                  <Card className="shadow-sm border-l-4 border-l-blue-500">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 rounded-lg">
-                          <Hash className="size-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Total Available</p>
-                          <p className="text-xl text-gray-800">{randomFilteredQuestions.length}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="shadow-sm border-l-4 border-l-teal-500">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-teal-100 rounded-lg">
-                          <CheckCircle2 className="size-5 text-teal-600" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Questions to Select</p>
-                          <p className="text-xl text-gray-800">{totalRandomConfigured}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="shadow-sm border-l-4 border-l-purple-500">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-purple-100 rounded-lg">
-                          <Filter className="size-5 text-purple-600" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Knowledge Domains</p>
-                          <p className="text-xl text-gray-800">{randomKnowledgeDomains.length}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Configuration Matrix */}
-                {randomKnowledgeDomains.length === 0 ? (
-                  <Card className="shadow-sm">
-                    <CardContent className="p-12 text-center">
-                      <AlertCircle className="size-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-600">No questions available in question bank</p>
-                      <p className="text-sm text-gray-500 mt-2">
-                        Please add questions to the question bank first
-                      </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card className="shadow-sm">
-                    <CardHeader className="border-b border-gray-200 bg-gray-50 p-4">
-                      <h3 className="text-sm text-gray-700 flex items-center gap-2">
-                        <Filter className="size-4" />
-                        Question Selection Matrix
-                      </h3>
-                      <p className="text-xs text-gray-600 mt-1">
-                        Configure how many questions to randomly select from each knowledge domain and difficulty level.
-                        These questions will be fixed for all students in this exam.
-                      </p>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead>
-                            <tr className="bg-gray-50 border-b border-gray-200">
-                              <th className="px-4 py-3 text-left text-xs text-gray-700">
-                                Knowledge Domain
-                              </th>
-                              {difficulties.map((diff) => (
-                                <th
-                                  key={diff}
-                                  className={`px-4 py-3 text-center text-xs ${
-                                    diff === 'easy'
-                                      ? 'text-green-600 bg-green-50'
-                                      : diff === 'medium'
-                                      ? 'text-amber-600 bg-amber-50'
-                                      : 'text-red-600 bg-red-50'
-                                  }`}
-                                >
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="capitalize">{diff}</span>
-                                  </div>
-                                </th>
-                              ))}
-                              <th className="px-4 py-3 text-center text-xs text-gray-700 bg-gray-100">
-                                Subtotal
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {randomKnowledgeDomains.map((domain, idx) => {
-                              const domainTotal = difficulties.reduce((sum, diff) => {
-                                const rule = getRandomRule(domain, diff);
-                                return sum + rule.count;
-                              }, 0);
-
-                              return (
-                                <tr
-                                  key={domain}
-                                  className={`border-b border-gray-200 ${
-                                    idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
-                                  }`}
-                                >
-                                  <td className="px-4 py-3 text-sm text-gray-800">{domain}</td>
-                                  {difficulties.map((diff) => {
-                                    const rule = getRandomRule(domain, diff);
-                                    const hasError = rule.count > rule.available;
-
-                                    return (
-                                      <td key={diff} className="px-4 py-3">
-                                        <div className="flex flex-col items-center gap-1">
-                                          <Input
-                                            type="number"
-                                            min="0"
-                                            max={rule.available}
-                                            value={rule.count || ''}
-                                            onChange={(e) =>
-                                              updateRandomRuleCount(
-                                                domain,
-                                                diff,
-                                                parseInt(e.target.value) || 0
-                                              )
-                                            }
-                                            className={`w-20 text-center ${
-                                              hasError ? 'border-red-500' : ''
-                                            }`}
-                                            placeholder="0"
-                                          />
-                                          <span className="text-xs text-gray-500">
-                                            of {rule.available}
-                                          </span>
-                                        </div>
-                                      </td>
-                                    );
-                                  })}
-                                  <td className="px-4 py-3 text-center bg-gray-100">
-                                    <Badge variant="outline" className="bg-white">
-                                      {domainTotal}
-                                    </Badge>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            <tr className="bg-gray-100 border-t-2 border-gray-300">
-                              <td className="px-4 py-3 text-sm text-gray-800">
-                                <strong>Total</strong>
-                              </td>
-                              {difficulties.map((diff) => {
-                                const total = randomKnowledgeDomains.reduce((sum, domain) => {
-                                  const rule = getRandomRule(domain, diff);
-                                  return sum + rule.count;
-                                }, 0);
-
-                                return (
-                                  <td key={diff} className="px-4 py-3 text-center">
-                                    <Badge variant="outline" className="bg-white">
-                                      {total}
-                                    </Badge>
-                                  </td>
-                                );
-                              })}
-                              <td className="px-4 py-3 text-center">
-                                <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white">
-                                  {totalRandomConfigured}
-                                </Badge>
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Important Notice */}
-                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                  <div className="flex items-start gap-3">
-                    <Info className="size-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm text-amber-800">
-                        <strong>Fixed Randomization:</strong> Questions will be randomly selected based on this
-                        configuration when you click "Add Questions". All students will receive the same set of questions.
-                      </p>
-                    </div>
+                    {selected && <div className="ml-auto flex shrink-0 items-center gap-1.5"><label htmlFor={pointsInputId} className="text-xs text-gray-600">Points</label><Input id={pointsInputId} aria-label={`Points for question ${question.question_id}`} type="number" min="1" step="1" value={Number.isFinite(selectedPoints[question.question_id]) ? selectedPoints[question.question_id] : ''} onChange={(event) => updatePoints(question.question_id, event.target.value)} disabled={importing} className="h-8 w-16 px-2 text-center" /></div>}
                   </div>
+                  <p className="w-full whitespace-normal break-words text-sm text-gray-800">{question.question_text}</p>
+                  {question.question_type === 'MCQ' && <p className="mt-1 text-xs text-gray-500">{question.option_count} options</p>}
                 </div>
-              </div>
-            ) : (
-              /* Manual Selection Mode */
-              <>
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-700">
-                      {filteredQuestions.length} question{filteredQuestions.length !== 1 ? 's' : ''} available
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {selectedQuestionIds.length} selected
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  {filteredQuestions.length === 0 ? (
-                    <div className="text-center py-12 text-gray-500">
-                      <AlertCircle className="size-12 text-gray-300 mx-auto mb-3" />
-                      <p>No questions match the current filters</p>
-                      <p className="text-sm mt-2">Try adjusting your filter criteria</p>
-                    </div>
-                  ) : (
-                    filteredQuestions.map((question) => {
-                      const isSelected = selectedQuestionIds.includes(question.id);
-                      return (
-                        <Card
-                          key={question.id}
-                          className={`cursor-pointer transition-all ${
-                            isSelected
-                              ? 'border-teal-500 border-2 shadow-md bg-teal-50'
-                              : 'hover:shadow-md'
-                          }`}
-                          onClick={() => toggleQuestionSelection(question.id)}
-                        >
-                          <CardContent className="p-4">
-                            <div className="flex items-start gap-3">
-                              <Checkbox
-                                checked={isSelected}
-                                className="mt-1"
-                                onCheckedChange={() => toggleQuestionSelection(question.id)}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  <Badge variant="outline" className="text-xs uppercase">
-                                    {question.type}
-                                  </Badge>
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-xs ${difficultyColors[question.difficulty]}`}
-                                  >
-                                    {question.difficulty}
-                                  </Badge>
-                                  {question.hasMultipleCorrect && (
-                                    <Badge variant="outline" className="text-xs bg-purple-100 text-purple-700">
-                                      Multiple Answers
-                                    </Badge>
-                                  )}
-                                  <span className="text-xs text-gray-500 ml-auto">
-                                    {question.points} pts
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-700 mb-2">{question.question}</p>
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                  <span>{question.subject}</span>
-                                  <span>•</span>
-                                  <span>{question.knowledgeDomain}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+              </CardContent></Card>;
+            })}</div>}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleAddQuestions}
-            className="bg-gradient-to-r from-teal-500 to-blue-600"
-            disabled={
-              (mode === 'manual' && selectedQuestionIds.length === 0) ||
-              (mode === 'randomize' && totalRandomConfigured === 0) ||
-              (mode === 'pool-config' && (!poolConfig || poolConfig.totalQuestions === 0))
-            }
-          >
-            <CheckCircle2 className="size-4 mr-2" />
-            {mode === 'pool-config' 
-              ? `Configure Pool (${poolConfig?.totalQuestions || 0} questions)`
-              : mode === 'randomize'
-              ? `Add ${totalRandomConfigured} Question${totalRandomConfigured !== 1 ? 's' : ''}`
-              : `Add ${selectedQuestionIds.length} Question${selectedQuestionIds.length !== 1 ? 's' : ''}`
-            }
-          </Button>
+        <div className="question-pool-modal-footer border-t border-gray-200 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600"><span>Showing {firstShown}–{lastShown} of {total} questions</span><span>Page {totalPages === 0 ? 0 : page} of {totalPages}</span><div className="flex gap-1"><Button variant="outline" size="sm" aria-label="First page" onClick={() => setPage(1)} disabled={loading || page <= 1 || totalPages === 0}><ChevronsLeft className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Previous page" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1 || totalPages === 0}><ChevronLeft className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Next page" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={loading || totalPages === 0 || page >= totalPages}><ChevronRight className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Last page" onClick={() => setPage(totalPages)} disabled={loading || totalPages === 0 || page >= totalPages}><ChevronsRight className="size-4" /></Button></div></div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm text-gray-600">{selectedIds.length} selected across all pages</span><div className="flex justify-end gap-2 sm:gap-3"><Button variant="outline" onClick={onClose} disabled={importing}>Cancel</Button><Button onClick={() => void importQuestions()} disabled={loading || importing || selectedIds.length === 0} className="bg-gradient-to-r from-teal-500 to-blue-600">{importing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}{importing ? 'Importing...' : `Import ${selectedIds.length || ''}`.trim()}</Button></div></div>
         </div>
       </div>
     </div>

@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from src.a_db_config import (
@@ -13,6 +16,7 @@ from src.a_db_config import (
     LOQuestion,
     Option,
     Question,
+    QuestionStatus,
     Subject,
     User,
 )
@@ -21,6 +25,7 @@ from src.models.teacher.requestModel.QuestionAddToDBRequest import QuestionAddTo
 from src.models.teacher.requestModel.QuestionAddToExamRequest import QuestionAddToExamRequest
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
+from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
 
 router = APIRouter()
 
@@ -39,6 +44,72 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
     if exam.manage_by != school_id:
         raise HTTPException(status_code=403, detail="You do not manage this exam")
     return exam
+
+
+def _status_value(question: Question) -> str | None:
+    return question.question_status.value if hasattr(question.question_status, "value") else question.question_status
+
+
+def _serialize_import_candidate(question: Question, already_added: bool = False) -> dict:
+    return {
+        "question_id": question.question_id,
+        "question_text": question.question_text,
+        "question_type": question.question_type.value if hasattr(question.question_type, "value") else question.question_type,
+        "question_difficulties": (
+            question.question_difficulties.value
+            if hasattr(question.question_difficulties, "value")
+            else question.question_difficulties
+        ),
+        "question_status": _status_value(question),
+        "subject": (
+            {"subject_id": question.subject.subject_id, "subject_name": question.subject.subject_name}
+            if question.subject
+            else None
+        ),
+        "chapters": [
+            {"chapter_id": item.chapter.chapter_id, "chapter_name": item.chapter.chapter_name}
+            for item in question.chapter_questions
+            if item.chapter
+        ],
+        "learning_objectives": [
+            {"lo_id": item.lo.lo_id, "lo_name": item.lo.lo_name}
+            for item in question.lo_questions
+            if item.lo
+        ],
+        "option_count": len(question.options),
+        "already_added": already_added,
+        "creator": (
+            {
+                "id": question.creator.id,
+                "school_id": question.creator.school_id,
+                "full_name": question.creator.full_name,
+            }
+            if question.creator
+            else None
+        ),
+    }
+
+
+def _import_candidate_query(db: Session, teacher: User):
+    return (
+        db.query(Question)
+        .options(
+            selectinload(Question.subject),
+            selectinload(Question.options),
+            selectinload(Question.chapter_questions).selectinload(ChapterQuestion.chapter),
+            selectinload(Question.lo_questions).selectinload(LOQuestion.lo),
+            selectinload(Question.creator),
+        )
+        .filter(
+            or_(
+                Question.question_status == QuestionStatus.approved,
+                and_(
+                    Question.created_by == teacher.id,
+                    Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
+                ),
+            )
+        )
+    )
 
 
 def _validate_options(question_type: str, options: list[QuestionOptionsRequest]) -> None:
@@ -301,3 +372,205 @@ def delete_question_from_database(
     except HTTPException:
         db.rollback()
         raise
+
+
+@router.get("/get-questions-from-question-bank/{subject_id}",status_code=status.HTTP_200_OK)
+def get_questions_from_question_bank(
+    subject_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Retrieve all approved questions from the question bank for a specific subject."""
+    del role_check
+    try:
+        teacher = _teacher(db, current_user["school_id"])
+        if not db.query(Subject).filter(Subject.subject_id == subject_id).first():
+            raise HTTPException(status_code=404, detail="Subject not found")
+        questions = (
+            _import_candidate_query(db, teacher)
+            .filter(Question.subject_id == subject_id)
+            .filter(Question.question_status == QuestionStatus.approved)
+            .order_by(Question.question_id.desc())
+            .all()
+        )
+        return [_serialize_import_candidate(question) for question in questions]
+    except HTTPException:
+        raise
+
+
+@router.get("/exams/{exam_id}/question-import-candidates")
+def get_question_import_candidates(
+    exam_id: int,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 5,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+    search: Annotated[str | None, Query(max_length=255)] = None,
+    question_type: Annotated[Literal["MCQ", "essay", "true-false"] | None, Query()] = None,
+    difficulty: Annotated[Literal["easy", "medium", "hard"] | None, Query()] = None,
+    subject_id: Annotated[str | None, Query(max_length=20)] = None,
+    status_filter: Annotated[
+        Literal["draft", "pending", "approved", "rejected"] | None,
+        Query(alias="status"),
+    ] = None,
+    created_by: Annotated[int | None, Query(ge=1)] = None,
+):
+    """List approved questions plus the current teacher's draft/pending questions."""
+    del role_check
+    _owned_exam(db, exam_id, current_user["school_id"])
+    teacher = _teacher(db, current_user["school_id"])
+    authorized_query = _import_candidate_query(db, teacher)
+    query = authorized_query
+    if search and search.strip():
+        query = query.filter(Question.question_text.ilike(f"%{search.strip()}%"))
+    if question_type:
+        query = query.filter(Question.question_type == question_type)
+    if difficulty:
+        query = query.filter(Question.question_difficulties == difficulty)
+    if subject_id:
+        query = query.filter(Question.subject_id == subject_id)
+    if status_filter:
+        query = query.filter(Question.question_status == status_filter)
+    if created_by is not None:
+        query = query.filter(Question.created_by == created_by)
+    total = query.count()
+    questions = (
+        query.order_by(Question.question_id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    attached_ids = {
+        row[0]
+        for row in db.query(ExamQuestion.question_id)
+        .filter(ExamQuestion.exam_id == exam_id)
+        .all()
+    }
+    return {
+        "items": [
+            _serialize_import_candidate(question, question.question_id in attached_ids)
+            for question in questions
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+        "filter_options": {
+            "subjects": [
+                {"subject_id": row.subject_id, "subject_name": row.subject_name}
+                for row in (
+                    db.query(Subject.subject_id, Subject.subject_name)
+                    .join(Question, Question.subject_id == Subject.subject_id)
+                    .filter(
+                        or_(
+                            Question.question_status == QuestionStatus.approved,
+                            and_(
+                                Question.created_by == teacher.id,
+                                Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
+                            ),
+                        )
+                    )
+                    .distinct()
+                    .order_by(Subject.subject_name)
+                    .all()
+                )
+            ],
+            "creators": [
+                {"id": row.id, "school_id": row.school_id, "full_name": row.full_name}
+                for row in (
+                    db.query(User.id, User.school_id, User.full_name)
+                    .join(Question, Question.created_by == User.id)
+                    .filter(
+                        or_(
+                            Question.question_status == QuestionStatus.approved,
+                            and_(
+                                Question.created_by == teacher.id,
+                                Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
+                            ),
+                        )
+                    )
+                    .distinct()
+                    .order_by(User.full_name, User.id)
+                    .all()
+                )
+            ],
+            "statuses": ["approved", "draft", "pending"],
+            "current_teacher_id": teacher.id,
+        },
+    }
+
+
+@router.post("/add-questions-to-exam-from-question-bank/{exam_id}", status_code=status.HTTP_201_CREATED)
+def add_questions_to_exam_from_question_bank(
+    exam_id: int,
+    request: list[QuestionsSelectFromBank],
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Atomically attach authorized reusable questions to an owned exam."""
+    del role_check
+    try:
+        _owned_exam(db, exam_id, current_user["school_id"])
+        teacher = _teacher(db, current_user["school_id"])
+        if not request:
+            raise HTTPException(status_code=400, detail="Select at least one question to import")
+        question_ids = [q.question_id for q in request]
+        if len(question_ids) != len(set(question_ids)):
+            raise HTTPException(status_code=400, detail="The import request contains duplicate question IDs")
+
+        questions = db.query(Question).filter(Question.question_id.in_(question_ids)).all()
+        if len(questions) != len(question_ids):
+            raise HTTPException(status_code=404, detail="One or more questions were not found")
+        unauthorized = [
+            question.question_id
+            for question in questions
+            if not (
+                _status_value(question) == "approved"
+                or (
+                    question.created_by == teacher.id
+                    and _status_value(question) in {"draft", "pending"}
+                )
+            )
+        ]
+        if unauthorized:
+            raise HTTPException(
+                status_code=403,
+                detail="One or more questions are not authorized for import",
+            )
+        existing_ids = {
+            row[0]
+            for row in db.query(ExamQuestion.question_id)
+            .filter(
+                ExamQuestion.exam_id == exam_id,
+                ExamQuestion.question_id.in_(question_ids),
+            )
+            .all()
+        }
+        if existing_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Questions already in this exam: {sorted(existing_ids)}",
+            )
+        db.add_all(
+            ExamQuestion(
+                exam_id=exam_id,
+                question_id=item.question_id,
+                question_point=item.question_point,
+            )
+            for item in request
+        )
+        db.commit()
+        return {
+            "success": True,
+            "imported_count": len(question_ids),
+            "imported_question_ids": question_ids,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Question could not be added to the exam") from exc

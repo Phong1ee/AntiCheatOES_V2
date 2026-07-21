@@ -1,6 +1,8 @@
 import unittest
+from datetime import datetime
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from src.models.teacher.requestModel.QuestionAddToDBRequest import QuestionAddToDBRequest
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
@@ -67,10 +69,26 @@ class TeacherQuestionValidationTests(unittest.TestCase):
             max_attemmpt=2,
             description="Test",
             duration_minutes=60,
+            start_time=datetime(2026, 8, 1, 9, 0),
+            end_time=datetime(2026, 8, 1, 12, 0),
             result_visibility="full",
             subject_id="DB",
         )
         self.assertEqual(request.max_attempt, 2)
+
+    def test_exam_score_values_are_strict_positive_absolute_scores(self):
+        with self.assertRaises(ValidationError):
+            TeacherExamRequest(
+                title="Midterm",
+                examcode="MID-2",
+                max_attempt=2,
+                description="Test",
+                duration_minutes=60,
+                result_visibility="full",
+                subject_id="DB",
+                total_points=True,
+                passing_score=0,
+            )
 
 
 if __name__ == "__main__":

@@ -22,11 +22,23 @@ interface GeneralInfoTabProps {
   examCode: string;
   duration: number;
   maxAttempt: number;
+  totalPoints: number;
+  passingScore: number;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
   onSubjectChange: (value: string) => void;
   onClassGroupChange: (value: string) => void;
   onExamCodeChange: (value: string) => void;
   onDurationChange: (value: number) => void;
   onMaxAttemptChange: (value: number) => void;
+  onTotalPointsChange: (value: number) => void;
+  onPassingScoreChange: (value: number) => void;
+  onStartDateChange: (value: string) => void;
+  onStartTimeChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
 }
 
 export function GeneralInfoTab({
@@ -37,18 +49,24 @@ export function GeneralInfoTab({
   examCode,
   duration,
   maxAttempt,
+  totalPoints,
+  passingScore,
+  startDate,
+  startTime,
+  endDate,
+  endTime,
   onSubjectChange,
   onClassGroupChange,
   onExamCodeChange,
   onDurationChange,
   onMaxAttemptChange,
+  onTotalPointsChange,
+  onPassingScoreChange,
+  onStartDateChange,
+  onStartTimeChange,
+  onEndDateChange,
+  onEndTimeChange,
 }: GeneralInfoTabProps) {
-  const [startDate, setStartDate] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [totalPoints, setTotalPoints] = useState('100');
-  const [passingScore, setPassingScore] = useState('60');
   const [tags, setTags] = useState('');
 
   // Class mapping
@@ -75,8 +93,13 @@ export function GeneralInfoTab({
   // Validation
   const errors: string[] = [];
   if (!subject) errors.push('Subject is required');
-  if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
-    errors.push('End date must be after start date');
+  if (!Number.isInteger(totalPoints) || totalPoints <= 0) errors.push('Total points must be a positive integer');
+  if (!Number.isInteger(passingScore) || passingScore < 0) errors.push('Passing score must be a non-negative integer');
+  if (passingScore > totalPoints) errors.push('Passing score cannot exceed total points');
+  if (!startDate || !startTime) errors.push('Start date and time are required');
+  if (!endDate || !endTime) errors.push('End date and time are required');
+  if (startDate && startTime && endDate && endTime && `${endDate}T${endTime}` <= `${startDate}T${startTime}`) {
+    errors.push('End date and time must be later than start date and time');
   }
 
   return (
@@ -169,7 +192,7 @@ export function GeneralInfoTab({
                   id="startDate"
                   type="date"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  onChange={(e) => onStartDateChange(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -183,7 +206,7 @@ export function GeneralInfoTab({
                   id="startTime"
                   type="time"
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={(e) => onStartTimeChange(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -197,9 +220,9 @@ export function GeneralInfoTab({
                   id="endDate"
                   type="date"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={(e) => onEndDateChange(e.target.value)}
                   className={
-                    startDate && endDate && new Date(endDate) < new Date(startDate)
+                    startDate && startTime && endDate && endTime && `${endDate}T${endTime}` <= `${startDate}T${startTime}`
                       ? 'pl-10 border-red-300'
                       : 'pl-10'
                   }
@@ -215,7 +238,7 @@ export function GeneralInfoTab({
                   id="endTime"
                   type="time"
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={(e) => onEndTimeChange(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -281,8 +304,12 @@ export function GeneralInfoTab({
                 id="totalPoints"
                 type="number"
                 value={totalPoints}
-                onChange={(e) => setTotalPoints(e.target.value)}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  onTotalPointsChange(Number.isFinite(value) ? value : 0);
+                }}
                 min="1"
+                step="1"
               />
             </div>
 
@@ -292,9 +319,13 @@ export function GeneralInfoTab({
                 id="passingScore"
                 type="number"
                 value={passingScore}
-                onChange={(e) => setPassingScore(e.target.value)}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  onPassingScoreChange(Number.isFinite(value) ? value : 0);
+                }}
                 min="0"
-                max="100"
+                max={totalPoints}
+                step="1"
               />
             </div>
           </div>

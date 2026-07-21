@@ -2,23 +2,22 @@ import { useState, useEffect } from 'react';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
 import { Button } from '../../ui/button';
-import { Badge } from '../../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/select';
 import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { PreviewTab } from './tabs/PreviewTab';
-import { Save, ChevronDown, Eye, Calendar, Send, FileText, BookOpen, Users, Clock, Hash } from 'lucide-react';
+import { Save, FileText, BookOpen, Users, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
-import type { TeacherSubject } from '../../../types/teacher-exam';
+import type { ExamStatus, TeacherSubject } from '../../../types/teacher-exam';
 
 interface ExamEditorProps {
   examId: string | null;
@@ -29,10 +28,17 @@ interface ExamEditorProps {
     subject: string;
     subjectId: string;
     class: string;
-    status: 'draft' | 'scheduled' | 'published' | 'archived';
+    status: ExamStatus;
+    startTime: string;
+    endTime: string;
     duration?: number;
     examCode?: string;
     maxAttempt: number;
+    totalPoints: number;
+    passingScore: number;
+    startTime: string;
+    endTime: string;
+    status: ExamStatus;
   } | null;
   subjects: TeacherSubject[];
   onClose: () => void;
@@ -44,6 +50,8 @@ interface ExamEditorProps {
     duration: number;
     examCode: string;
     maxAttempt: number;
+    totalPoints: number;
+    passingScore: number;
   }) => Promise<void>;
 }
 
@@ -56,7 +64,13 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
   const [duration, setDuration] = useState(60);
   const [examCode, setExamCode] = useState('');
   const [maxAttempt, setMaxAttempt] = useState(1);
-  const [status, setStatus] = useState<'draft' | 'scheduled' | 'published' | 'archived'>('draft');
+  const [totalPoints, setTotalPoints] = useState(100);
+  const [passingScore, setPassingScore] = useState(50);
+  const [status, setStatus] = useState<ExamStatus>('draft');
+  const [startDate, setStartDate] = useState('');
+  const [startClock, setStartClock] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [endClock, setEndClock] = useState('');
   const [lastSaved, setLastSaved] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState('general');
   const [isSaving, setIsSaving] = useState(false);
@@ -85,7 +99,13 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
       setDuration(60);
       setExamCode('');
       setMaxAttempt(1);
+      setTotalPoints(100);
+      setPassingScore(50);
       setStatus('draft');
+      setStartDate('');
+      setStartClock('');
+      setEndDate('');
+      setEndClock('');
       setActiveTab('general');
       return;
     }
@@ -100,7 +120,13 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
       setDuration(60);
       setExamCode(generateExamCode());
       setMaxAttempt(1);
+      setTotalPoints(100);
+      setPassingScore(50);
       setStatus('draft');
+      setStartDate('');
+      setStartClock('');
+      setEndDate('');
+      setEndClock('');
       setActiveTab('general');
     } else {
       if (exam) {
@@ -112,7 +138,15 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
         setDuration(exam.duration || 60);
         setExamCode(exam.examCode || generateExamCode());
         setMaxAttempt(exam.maxAttempt);
+        setTotalPoints(exam.totalPoints);
+        setPassingScore(exam.passingScore);
         setStatus(exam.status);
+        const [savedStartDate = '', savedStartTime = ''] = exam.startTime.split('T');
+        const [savedEndDate = '', savedEndTime = ''] = exam.endTime.split('T');
+        setStartDate(savedStartDate);
+        setStartClock(savedStartTime.slice(0, 5));
+        setEndDate(savedEndDate);
+        setEndClock(savedEndTime.slice(0, 5));
         setActiveTab('general');
       }
     }
@@ -166,17 +200,47 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
 
   const statusConfig = {
     draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
-    scheduled: { label: 'Scheduled', color: 'bg-blue-100 text-blue-700' },
     published: { label: 'Published', color: 'bg-green-100 text-green-700' },
     archived: { label: 'Archived', color: 'bg-amber-100 text-amber-700' },
   } as const;
 
   // Handle Save
   const handleSave = async () => {
+    const startTime = startDate && startClock ? `${startDate}T${startClock}:00` : '';
+    const endTime = endDate && endClock ? `${endDate}T${endClock}:00` : '';
+    if (!startTime || !endTime) {
+      setSaveError('Start date/time and end date/time are required.');
+      return;
+    }
+    if (endTime <= startTime) {
+      setSaveError('End date and time must be later than start date and time.');
+      return;
+    }
+    if (!Number.isInteger(totalPoints) || totalPoints <= 0) {
+      setSaveError('Total points must be a positive integer.');
+      return;
+    }
+    if (!Number.isInteger(passingScore) || passingScore < 0 || passingScore > totalPoints) {
+      setSaveError('Passing score must be an integer between 0 and total points.');
+      return;
+    }
     try {
       setIsSaving(true);
       setSaveError(null);
-      await onSave({ id: examId, title, description, subjectId, duration, examCode, maxAttempt });
+      await onSave({
+        id: examId,
+        title,
+        description,
+        subjectId,
+        duration,
+        examCode,
+        maxAttempt,
+        totalPoints,
+        passingScore,
+        startTime,
+        endTime,
+        status,
+      });
       setLastSaved(new Date());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save the exam.';
@@ -188,7 +252,14 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
   };
 
   // Check if has unsaved changes
-  const hasRequiredData = title.trim() !== '' && subjectId !== '' && examCode.trim() !== '';
+  const scoresAreValid = Number.isInteger(totalPoints)
+    && totalPoints > 0
+    && Number.isInteger(passingScore)
+    && passingScore >= 0
+    && passingScore <= totalPoints;
+  const scheduleIsValid = Boolean(startDate && startClock && endDate && endClock)
+    && `${endDate}T${endClock}` > `${startDate}T${startClock}`;
+  const hasRequiredData = title.trim() !== '' && subjectId !== '' && examCode.trim() !== '' && scoresAreValid && scheduleIsValid;
 
   return (
     <div className="h-full flex flex-col bg-white relative exam-editor-container">
@@ -275,38 +346,16 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Badge variant="outline" className={statusConfig[status].color}>
-              {statusConfig[status].label}
-            </Badge>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700">
-                  <Save className="size-4 mr-2" />
-                  Publish
-                  <ChevronDown className="size-4 ml-2" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setStatus('draft')}>
-                  <Save className="size-4 mr-2" />
-                  Save as Draft
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Eye className="size-4 mr-2" />
-                  Save & Preview
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setStatus('scheduled')}>
-                  <Calendar className="size-4 mr-2" />
-                  Schedule
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatus('published')}>
-                  <Send className="size-4 mr-2" />
-                  Publish Now
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Select value={status} onValueChange={(value: ExamStatus) => setStatus(value)}>
+              <SelectTrigger className={`w-36 ${statusConfig[status].color}`} aria-label="Exam status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="published">Published</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -361,6 +410,12 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
               examCode={examCode}
               duration={duration}
               maxAttempt={maxAttempt}
+              totalPoints={totalPoints}
+              passingScore={passingScore}
+              startDate={startDate}
+              startTime={startClock}
+              endDate={endDate}
+              endTime={endClock}
               onSubjectChange={(nextSubjectId) => {
                 setSubjectId(nextSubjectId);
                 setSubject(subjects.find((item) => item.subject_id === nextSubjectId)?.subject_name ?? '');
@@ -369,6 +424,12 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
               onExamCodeChange={setExamCode}
               onDurationChange={setDuration}
               onMaxAttemptChange={setMaxAttempt}
+              onTotalPointsChange={setTotalPoints}
+              onPassingScoreChange={setPassingScore}
+              onStartDateChange={setStartDate}
+              onStartTimeChange={setStartClock}
+              onEndDateChange={setEndDate}
+              onEndTimeChange={setEndClock}
             />
           </TabsContent>
 
@@ -410,7 +471,7 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
             ) : (
               <span className="flex items-center gap-2 text-amber-600">
                 <div className="size-2 bg-amber-500 rounded-full" />
-                Please fill in title, subject, and class
+                Please complete the required exam details and a valid schedule
               </span>
             )}
           </div>

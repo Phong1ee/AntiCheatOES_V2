@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -46,7 +46,7 @@ def _validate_subject(db: Session, subject_id: str) -> None:
 
 def _serialize(exam: Exam) -> dict:
     now = datetime.now()
-    status_value = (
+    schedule_status = (
         "upcoming" if exam.start_time and now < exam.start_time
         else "completed" if exam.end_time and now > exam.end_time
         else "ongoing"
@@ -65,7 +65,10 @@ def _serialize(exam: Exam) -> dict:
         "manage_by": exam.manage_by,
         "subject": exam.subject.subject_name if exam.subject else None,
         "totalStudents": len(exam.student_exams),
-        "status": status_value,
+        "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
+        "schedule_status": schedule_status,
+        "total_points": exam.total_points if exam.total_points is not None else 100,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
     }
 
 
@@ -80,7 +83,6 @@ def add_exam_to_database(
     try:
         teacher = _teacher(db, current_user["school_id"])
         _validate_subject(db, request.subject_id)
-        start = datetime.now()
         exam = Exam(
             title=request.title.strip(),
             examcode=request.examcode.strip(),
@@ -88,10 +90,13 @@ def add_exam_to_database(
             manage_by=teacher.school_id,
             max_attempt=request.max_attempt,
             description=request.description,
-            start_time=start,
-            end_time=start + timedelta(minutes=request.duration_minutes),
+            start_time=request.start_time,
+            end_time=request.end_time,
+            status=request.status,
             result_visibility=request.result_visibility,
             subject_id=request.subject_id,
+            total_points=request.total_points,
+            passing_score=request.passing_score,
         )
         db.add(exam)
         db.commit()
@@ -124,10 +129,11 @@ def update_exam_in_database(
         exam.description = request.description
         exam.result_visibility = request.result_visibility
         exam.subject_id = request.subject_id
-        # Preserve scheduling fields not represented by the current form, but keep an
-        # existing derived end time aligned when duration changes.
-        if exam.start_time and exam.end_time:
-            exam.end_time = exam.start_time + timedelta(minutes=request.duration_minutes)
+        exam.start_time = request.start_time
+        exam.end_time = request.end_time
+        exam.status = request.status
+        exam.total_points = request.total_points
+        exam.passing_score = request.passing_score
         db.commit()
         db.refresh(exam)
         return _serialize(exam)

@@ -1,11 +1,28 @@
-.venv
-node_modules
-__pycache__
+# Environmental variables (Bảo mật)
 .env
+*.env
 backend/.env
-/frontend/node_modules/.vite/
-frontend/node_modules/.vite/deps/chunk-MBAUDHR7.js
-/frontend/node_modules/.vite
+frontend/.env
+.env.local
+
+# Virtual Environments (Python)
+.venv/
+venv/
+ENV/
+
+# Python Cache (Bỏ qua TẤT CẢ __pycache__ và file .pyc ở mọi folder con)
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Node / Frontend Dependecies & Cache
+**/node_modules/
+.vite/
+dist/
+build/
 *.map
-*.pyc
-backend/src/controller/__pycache__/authController.cpython-312.pyc
+
+# IDE & System
+.vscode/
+.idea/
+.DS_Store

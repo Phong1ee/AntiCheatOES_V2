@@ -18,7 +18,8 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
     Column,
-    JSON
+    JSON,
+    Index
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -120,6 +121,10 @@ class User(Base):
     question_revisions: Mapped[list["QuestionRevision"]] = relationship(
         foreign_keys="QuestionRevision.edited_by",
         back_populates="editor",
+    )
+    approved_question_revisions: Mapped[list["QuestionRevision"]] = relationship(
+        foreign_keys="QuestionRevision.approved_by",
+        back_populates="approver",
     )
 class Subject(Base):
     __tablename__ = "subject"
@@ -574,6 +579,24 @@ class TeacherSubject(Base):
 class QuestionRevision(Base):
     __tablename__ = "question_revision"
 
+    __table_args__ = (
+        CheckConstraint(
+            "question_status IN ('pending', 'approved', 'rejected')",
+            name="ck_question_revision_status",
+        ),
+        UniqueConstraint(
+            "question_id",
+            "version_number",
+            name="uq_question_revision_question_version",
+        ),
+        Index(
+            "ix_question_revision_pending_lookup",
+            "question_id",
+            "question_status",
+            "edited_by",
+        ),
+    )
+
     revision_id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
@@ -583,6 +606,11 @@ class QuestionRevision(Base):
     question_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("question.question_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    version_number: Mapped[int] = mapped_column(
+        Integer,
         nullable=False,
     )
 
@@ -606,9 +634,9 @@ class QuestionRevision(Base):
         nullable=True,
     )
 
-    question_status: Mapped[Optional[str]] = mapped_column(
+    question_status: Mapped[str] = mapped_column(
         String(20),
-        nullable=True,
+        nullable=False,
     )
 
     options_snapshot: Mapped[
@@ -638,17 +666,45 @@ class QuestionRevision(Base):
         nullable=True,
     )
 
+    approved_by: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    rejection_reason: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
 
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=datetime.utcnow,
+    )
+
     question: Mapped["Question"] = relationship(
-        back_populates="revisions"
+        back_populates="revisions",
     )
 
     editor: Mapped[Optional["User"]] = relationship(
         foreign_keys=[edited_by],
         back_populates="question_revisions",
+    )
+
+    approver: Mapped[Optional["User"]] = relationship(
+        foreign_keys=[approved_by],
+        back_populates="approved_question_revisions",
     )

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
   Database,
@@ -30,6 +31,7 @@ import {
   X,
   GitCompare,
   AlertTriangle,
+  Save,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,6 +62,7 @@ interface BankQuestion {
   subject: string;
   department: string;
   chapter: string;
+  learningObjectives?: string[];
   difficulty: Difficulty;
   options?: string[];
   correctAnswer?: string;
@@ -687,81 +690,1037 @@ function PendingCard({ q, onClick }: { q: PendingQuestion; onClick: () => void }
   );
 }
 
+// ─── Admin bank question detail modal ────────────────────────────────────────
+
+function AdminQuestionDetailModal({
+  question,
+  onClose,
+  onEdit,
+}: {
+  question: BankQuestion;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const typeInfo = TYPE_CFG[question.type];
+  const difficultyInfo = DIFF_CFG[question.difficulty];
+
+  const displayOptions = useMemo(() => {
+    if (question.type === 'true-false') {
+      return ['True', 'False'];
+    }
+
+    return question.options ?? [];
+  }, [question.options, question.type]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="oes-dialog-overlay flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-question-detail-title"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="oes-dialog-content question-detail-modal bg-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0">
+            <h2
+              id="admin-question-detail-title"
+              className="text-xl font-semibold text-slate-900"
+            >
+              Question Detail
+            </h2>
+
+            <p className="mt-0.5 text-sm text-slate-500">
+              Review the question content, classification, usage, and answer
+              details.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+            aria-label="Close question detail"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="space-y-4">
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full border border-transparent px-2.5 py-1 text-xs font-semibold ${typeInfo.pill}`}
+                >
+                  {typeInfo.label}
+                </span>
+
+                <span
+                  className={`inline-flex items-center rounded-full border border-transparent px-2.5 py-1 text-xs font-semibold ${difficultyInfo.pill}`}
+                >
+                  {difficultyInfo.label}
+                </span>
+
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-500">
+                  ID {question.id}
+                </span>
+              </div>
+
+              <p className="mt-4 text-lg font-medium leading-7 text-slate-900">
+                {question.text}
+              </p>
+            </section>
+
+            <section className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-5 md:grid-cols-3">
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Subject
+                </p>
+                <p className="text-sm font-medium text-slate-900">
+                  {question.subject}
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Creator
+                </p>
+                <p className="text-sm font-medium text-slate-900">
+                  {question.createdBy}
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Used in Exams
+                </p>
+                <p className="text-sm font-medium text-slate-900">
+                  {question.usageCount}
+                </p>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Chapter
+                </p>
+
+                <p className="text-sm font-medium text-slate-900">
+                  {question.chapter || 'None'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Learning Objectives
+                </p>
+
+                <p className="text-sm font-medium text-slate-900">
+                  {question.learningObjectives?.length
+                    ? question.learningObjectives.join(', ')
+                    : 'None'}
+                </p>
+              </div>
+            </section>
+
+            {question.type !== 'essay' && displayOptions.length > 0 && (
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="mb-3 text-sm font-semibold text-slate-900">
+                  Answers
+                </p>
+
+                <div className="space-y-2">
+                  {displayOptions.map((option, index) => {
+                    const isCorrect = option === question.correctAnswer;
+
+                    return (
+                      <div
+                        key={`${option}-${index}`}
+                        className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition ${
+                          isCorrect
+                            ? 'question-detail-option-row-correct'
+                            : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                            isCorrect
+                              ? 'bg-emerald-600 text-white'
+                              : 'border border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          {LETTER[index] ?? index + 1}
+                        </span>
+
+                        <span
+                          className={`min-w-0 flex-1 ${
+                            isCorrect
+                              ? 'font-medium text-emerald-900'
+                              : 'text-slate-700'
+                          }`}
+                        >
+                          {option}
+                        </span>
+
+                        {isCorrect && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            Correct
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {question.type !== 'essay' && displayOptions.length === 0 && (
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="mb-2 text-sm font-semibold text-slate-900">
+                  Answers
+                </p>
+
+                <p className="text-sm text-slate-500">
+                  No answer options available.
+                </p>
+              </section>
+            )}
+
+            {question.type === 'essay' && (
+              <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="mb-2 text-sm font-semibold text-slate-900">
+                  Suggested Answer / Rubric
+                </p>
+
+                <p className="text-sm text-slate-500">
+                  Essay questions do not contain predefined answers.
+                </p>
+              </section>
+            )}
+
+            <section className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-5 md:grid-cols-2">
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Department
+                </p>
+
+                <p className="text-sm font-medium text-slate-900">
+                  {question.department}
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Created At
+                </p>
+
+                <p className="text-sm font-medium text-slate-900">
+                  {question.createdAt}
+                </p>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 rounded-full border border-slate-200 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+          >
+            Close
+          </button>
+
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-teal-600 px-4 text-sm font-medium text-white transition hover:bg-teal-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+          >
+            <Edit className="size-4" />
+            Edit Question
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ─── Admin bank question editor modal ────────────────────────────────────────
+
+interface AdminEditorOption {
+  text: string;
+  isCorrect: boolean;
+}
+
+function createEditorOptions(question: BankQuestion): AdminEditorOption[] {
+  if (question.type === 'essay') {
+    return [];
+  }
+
+  if (question.type === 'true-false') {
+    return [
+      {
+        text: 'True',
+        isCorrect: question.correctAnswer?.toLowerCase() === 'true',
+      },
+      {
+        text: 'False',
+        isCorrect: question.correctAnswer?.toLowerCase() === 'false',
+      },
+    ];
+  }
+
+  const sourceOptions =
+    question.options && question.options.length >= 2
+      ? question.options
+      : ['', ''];
+
+  return sourceOptions.map((option) => ({
+    text: option,
+    isCorrect: option === question.correctAnswer,
+  }));
+}
+
+function AdminQuestionEditorModal({
+  question,
+  subjects,
+  onClose,
+  onSave,
+}: {
+  question: BankQuestion;
+  subjects: SubjectMeta[];
+  onClose: () => void;
+  onSave: (question: BankQuestion) => void;
+}) {
+  const [questionType, setQuestionType] = useState<QType>(question.type);
+  const [difficulty, setDifficulty] = useState<Difficulty>(
+    question.difficulty,
+  );
+  const [questionText, setQuestionText] = useState(question.text);
+  const [subject, setSubject] = useState(question.subject);
+  const [chapter, setChapter] = useState(question.chapter);
+  const [learningObjectivesText, setLearningObjectivesText] = useState(
+    question.learningObjectives?.join(', ') ?? '',
+  );
+  const [options, setOptions] = useState<AdminEditorOption[]>(
+    createEditorOptions(question),
+  );
+  const [saveAttempted, setSaveAttempted] = useState(false);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  const validationErrors = useMemo(() => {
+    const errors: string[] = [];
+
+    if (!questionText.trim()) {
+      errors.push('Question text is required.');
+    }
+
+    if (!subject) {
+      errors.push('Subject is required.');
+    }
+
+    if (!chapter.trim()) {
+      errors.push('Chapter is required.');
+    }
+
+    if (!difficulty) {
+      errors.push('Difficulty is required.');
+    }
+
+    if (questionType === 'mcq' || questionType === 'matching') {
+      const normalizedOptions = options.map((option) =>
+        option.text.trim().toLowerCase(),
+      );
+
+      if (options.length < 2) {
+        errors.push('At least two answer options are required.');
+      }
+
+      if (options.length > 8) {
+        errors.push('A maximum of eight answer options is allowed.');
+      }
+
+      if (options.some((option) => !option.text.trim())) {
+        errors.push('Answer options cannot be empty.');
+      }
+
+      if (
+        normalizedOptions.filter(Boolean).length !==
+        new Set(normalizedOptions.filter(Boolean)).size
+      ) {
+        errors.push('Answer options must be unique.');
+      }
+
+      if (options.filter((option) => option.isCorrect).length !== 1) {
+        errors.push('Select exactly one correct answer.');
+      }
+    }
+
+    if (questionType === 'true-false') {
+      if (options.filter((option) => option.isCorrect).length !== 1) {
+        errors.push('Select either True or False as the correct answer.');
+      }
+    }
+
+    return errors;
+  }, [
+    chapter,
+    difficulty,
+    options,
+    questionText,
+    questionType,
+    subject,
+  ]);
+
+  const handleTypeChange = (nextType: QType) => {
+    setQuestionType(nextType);
+
+    if (nextType === 'essay') {
+      setOptions([]);
+      return;
+    }
+
+    if (nextType === 'true-false') {
+      setOptions([
+        { text: 'True', isCorrect: true },
+        { text: 'False', isCorrect: false },
+      ]);
+      return;
+    }
+
+    if (options.length < 2) {
+      setOptions([
+        { text: '', isCorrect: true },
+        { text: '', isCorrect: false },
+      ]);
+    }
+  };
+
+  const updateOptionText = (index: number, value: string) => {
+    setOptions((current) =>
+      current.map((option, optionIndex) =>
+        optionIndex === index ? { ...option, text: value } : option,
+      ),
+    );
+  };
+
+  const selectCorrectOption = (index: number) => {
+    setOptions((current) =>
+      current.map((option, optionIndex) => ({
+        ...option,
+        isCorrect: optionIndex === index,
+      })),
+    );
+  };
+
+  const addOption = () => {
+    setOptions((current) => {
+      if (current.length >= 8) {
+        return current;
+      }
+
+      return [...current, { text: '', isCorrect: false }];
+    });
+  };
+
+  const removeOption = (index: number) => {
+    setOptions((current) => {
+      if (current.length <= 2) {
+        return current;
+      }
+
+      const next = current.filter((_, optionIndex) => optionIndex !== index);
+
+      if (!next.some((option) => option.isCorrect) && next.length > 0) {
+        next[0] = {
+          ...next[0],
+          isCorrect: true,
+        };
+      }
+
+      return next;
+    });
+  };
+
+  const handleSubmit = () => {
+    setSaveAttempted(true);
+
+    if (validationErrors.length > 0) {
+      return;
+    }
+
+    const cleanedLearningObjectives = learningObjectivesText
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const cleanedOptions =
+      questionType === 'essay'
+        ? []
+        : options.map((option) => ({
+            ...option,
+            text: option.text.trim(),
+          }));
+
+    const correctOption = cleanedOptions.find(
+      (option) => option.isCorrect,
+    );
+
+    onSave({
+      ...question,
+      type: questionType,
+      difficulty,
+      text: questionText.trim(),
+      subject,
+      chapter: chapter.trim(),
+      learningObjectives: cleanedLearningObjectives,
+      options:
+        questionType === 'essay'
+          ? undefined
+          : cleanedOptions.map((option) => option.text),
+      correctAnswer:
+        questionType === 'essay' ? undefined : correctOption?.text,
+    });
+  };
+
+  return createPortal(
+    <div
+      className="oes-dialog-overlay flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-question-editor-title"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="question-editor-modal bg-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0">
+            <h2
+              id="admin-question-editor-title"
+              className="text-xl font-semibold text-slate-900"
+            >
+              Edit Question
+            </h2>
+
+            <p className="mt-0.5 text-sm text-slate-500">
+              Update the question content, classification, and answer details.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+            aria-label="Close question editor"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="space-y-4">
+            <section className="space-y-4 rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-800">
+                Basic Information
+              </h3>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="block text-sm font-medium text-gray-700">
+                    Question Type *
+                  </span>
+
+                  <select
+                    value={questionType}
+                    onChange={(event) =>
+                      handleTypeChange(event.target.value as QType)
+                    }
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                  >
+                    <option value="mcq">Multiple Choice</option>
+                    <option value="true-false">True / False</option>
+                    <option value="essay">Essay</option>
+                    <option value="matching">Matching</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1.5">
+                  <span className="block text-sm font-medium text-gray-700">
+                    Difficulty *
+                  </span>
+
+                  <select
+                    value={difficulty}
+                    onChange={(event) =>
+                      setDifficulty(event.target.value as Difficulty)
+                    }
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                  </select>
+                </label>
+              </div>
+
+              <label className="block space-y-1.5">
+                <span className="block text-sm font-medium text-gray-700">
+                  Question Text *
+                </span>
+
+                <textarea
+                  value={questionText}
+                  onChange={(event) => setQuestionText(event.target.value)}
+                  rows={4}
+                  placeholder="Enter the question text..."
+                  className={`w-full resize-none rounded-lg border bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:ring-2 focus:ring-teal-200 ${
+                    saveAttempted && !questionText.trim()
+                      ? 'border-red-300'
+                      : 'border-gray-200 focus:border-teal-300'
+                  }`}
+                />
+              </label>
+            </section>
+
+            <section className="space-y-4 rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-800">
+                Classification
+              </h3>
+
+              <label className="block space-y-1.5">
+                <span className="block text-sm font-medium text-gray-700">
+                  Subject *
+                </span>
+
+                <select
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  className={`h-10 w-full rounded-lg border bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:ring-2 focus:ring-teal-200 ${
+                    saveAttempted && !subject
+                      ? 'border-red-300'
+                      : 'border-gray-200 focus:border-teal-300'
+                  }`}
+                >
+                  <option value="" disabled>
+                    Select subject
+                  </option>
+
+                  {subjects.map((subjectOption) => (
+                    <option
+                      key={subjectOption.code}
+                      value={subjectOption.name}
+                    >
+                      {subjectOption.code} - {subjectOption.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="block space-y-1.5">
+                  <span className="block text-sm font-medium text-gray-700">
+                    Chapter *
+                  </span>
+
+                  <input
+                    type="text"
+                    value={chapter}
+                    onChange={(event) => setChapter(event.target.value)}
+                    placeholder="Enter chapter"
+                    className={`h-10 w-full rounded-lg border bg-gray-50 px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:ring-2 focus:ring-teal-200 ${
+                      saveAttempted && !chapter.trim()
+                        ? 'border-red-300'
+                        : 'border-gray-200 focus:border-teal-300'
+                    }`}
+                  />
+                </label>
+
+                <label className="block space-y-1.5">
+                  <span className="block text-sm font-medium text-gray-700">
+                    Learning Objectives
+                  </span>
+
+                  <input
+                    type="text"
+                    value={learningObjectivesText}
+                    onChange={(event) =>
+                      setLearningObjectivesText(event.target.value)
+                    }
+                    placeholder="LO1, LO2, LO3"
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                  />
+
+                  <span className="block text-xs text-gray-400">
+                    Separate multiple learning objectives with commas.
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="space-y-3 rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-gray-800">
+                  Answers
+                </h3>
+
+                {(questionType === 'mcq' ||
+                  questionType === 'matching') && (
+                  <button
+                    type="button"
+                    onClick={addOption}
+                    disabled={options.length >= 8}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Plus className="size-3.5" />
+                    Add Option
+                  </button>
+                )}
+              </div>
+
+              {(questionType === 'mcq' ||
+                questionType === 'matching') && (
+                <div className="space-y-2">
+                  {options.map((option, index) => (
+                    <div
+                      key={index}
+                      className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors ${
+                        option.isCorrect
+                          ? 'border-teal-300 bg-teal-50'
+                          : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => selectCorrectOption(index)}
+                        className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                          option.isCorrect
+                            ? 'border-teal-500 bg-teal-500 text-white'
+                            : 'border-gray-300 bg-white hover:border-teal-400'
+                        }`}
+                        aria-label={`Mark option ${index + 1} as correct`}
+                      >
+                        {option.isCorrect && (
+                          <CheckCircle className="size-3" />
+                        )}
+                      </button>
+
+                      <span
+                        className={`w-5 shrink-0 text-center text-xs font-semibold ${
+                          option.isCorrect
+                            ? 'text-teal-600'
+                            : 'text-gray-400'
+                        }`}
+                      >
+                        {LETTER[index] ?? index + 1}
+                      </span>
+
+                      <input
+                        type="text"
+                        value={option.text}
+                        onChange={(event) =>
+                          updateOptionText(index, event.target.value)
+                        }
+                        placeholder={`Option ${index + 1}`}
+                        className={`h-10 min-w-0 flex-1 rounded-lg border bg-gray-50 px-3 text-sm outline-none transition placeholder:text-gray-400 focus:ring-2 focus:ring-teal-200 ${
+                          option.isCorrect
+                            ? 'border-teal-200 text-teal-800'
+                            : 'border-gray-200 text-gray-800 focus:border-teal-300'
+                        }`}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => removeOption(index)}
+                        disabled={options.length <= 2}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={`Remove option ${index + 1}`}
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {questionType === 'true-false' && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {options.map((option, index) => (
+                    <button
+                      key={option.text}
+                      type="button"
+                      onClick={() => selectCorrectOption(index)}
+                      className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${
+                        option.isCorrect
+                          ? 'border-teal-300 bg-teal-50 text-teal-700'
+                          : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-teal-200 hover:bg-teal-50/50'
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        {option.text}
+
+                        {option.isCorrect && (
+                          <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-600">
+                            Correct
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {questionType === 'essay' && (
+                <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+                  Essay questions do not require predefined answer options.
+                </p>
+              )}
+            </section>
+
+            {saveAttempted && validationErrors.length > 0 && (
+              <section className="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
+
+                  <div>
+                    <p className="text-sm font-semibold text-red-700">
+                      Please fix the following problems
+                    </p>
+
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-700">
+                      {validationErrors.map((error) => (
+                        <li key={error}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 rounded-full border border-slate-200 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSubmit}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-teal-600 px-4 text-sm font-medium text-white transition hover:bg-teal-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+          >
+            <Save className="size-4" />
+            Save Changes
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ─── Bank question card ───────────────────────────────────────────────────────
 
-function BankCard({ q, index, onDelete, onDuplicate }: {
-  q: BankQuestion; index: number;
-  onDelete: (id: string) => void; onDuplicate: (q: BankQuestion) => void;
+function BankCard({
+  q,
+  index,
+  onView,
+  onEdit,
+  onDelete,
+  onDuplicate,
+}: {
+  q: BankQuestion;
+  index: number;
+  onView: (question: BankQuestion) => void;
+  onEdit: (question: BankQuestion) => void;
+  onDelete: (id: string) => void;
+  onDuplicate: (question: BankQuestion) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const typeInfo = TYPE_CFG[q.type];
   const diff = DIFF_CFG[q.difficulty];
 
   return (
-    <div className={`bg-white rounded-xl border border-gray-100 border-l-4 ${diff.border} shadow-sm hover:shadow-md transition-all`}>
-      <div className="px-5 py-4 flex items-start gap-4">
-        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-semibold flex items-center justify-center mt-0.5">{index + 1}</span>
-        <div className={`flex-shrink-0 p-1.5 rounded-lg ${typeInfo.pill}`}><typeInfo.icon className="size-3.5" /></div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 leading-snug line-clamp-2">{q.text}</p>
+    <div
+      className={`rounded-xl border border-gray-100 border-l-4 bg-white ${diff.border} shadow-sm transition-all hover:shadow-md`}
+    >
+      <div className="flex items-start gap-4 px-5 py-4">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-500">
+          {index + 1}
+        </span>
+
+        <div
+          className={`shrink-0 rounded-lg p-1.5 ${typeInfo.pill}`}
+        >
+          <typeInfo.icon className="size-3.5" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-sm font-medium leading-snug text-gray-800">
+            {q.text}
+          </p>
+
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeInfo.pill}`}>{typeInfo.label}</span>
-            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${diff.pill}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${diff.dot}`} />{diff.label}
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeInfo.pill}`}
+            >
+              {typeInfo.label}
             </span>
+
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${diff.pill}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${diff.dot}`} />
+              {diff.label}
+            </span>
+
             <span className="text-xs text-gray-400">{q.chapter}</span>
-            <span className="text-xs text-gray-400 flex items-center gap-1"><BarChart2 className="size-3" />Used {q.usageCount}×</span>
+
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <BarChart2 className="size-3" />
+              Used {q.usageCount}×
+            </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button onClick={() => setExpanded(!expanded)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all">
-            {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onView(q)}
+            className="rounded-lg p-1.5 text-gray-400 transition-all hover:bg-teal-50 hover:text-teal-600"
+            aria-label="View question"
+            title="View question"
+          >
+            <Eye className="size-4" />
           </button>
+
           <div className="relative">
-            <button onClick={() => setMenuOpen(!menuOpen)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((current) => !current)}
+              className="rounded-lg p-1.5 text-gray-400 transition-all hover:bg-gray-50 hover:text-gray-600"
+              aria-label="Question actions"
+            >
               <MoreVertical className="size-4" />
             </button>
+
             {menuOpen && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-8 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 w-40">
-                  <button onClick={() => setMenuOpen(false)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Edit className="size-3.5" />Edit</button>
-                  <button onClick={() => { onDuplicate(q); setMenuOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Copy className="size-3.5" />Duplicate</button>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setMenuOpen(false)}
+                />
+
+                <div className="absolute right-0 top-8 z-20 w-40 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onView(q);
+                      setMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Eye className="size-3.5" />
+                    View
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onEdit(q);
+                      setMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Edit className="size-3.5" />
+                    Edit
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDuplicate(q);
+                      setMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Copy className="size-3.5" />
+                    Duplicate
+                  </button>
+
                   <div className="my-1 border-t border-gray-100" />
-                  <button onClick={() => { onDelete(q.id); setMenuOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"><Trash2 className="size-3.5" />Delete</button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDelete(q.id);
+                      setMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </button>
                 </div>
               </>
             )}
           </div>
         </div>
       </div>
-      {expanded && (
-        <div className="px-5 pb-4 pt-0">
-          <div className="pt-3 border-t border-gray-100">
-            {q.options && (
-              <div className="space-y-1.5 mb-3">
-                {q.options.map((opt, i) => (
-                  <div key={i} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border ${opt === q.correctAnswer ? 'border-teal-300 bg-teal-50 border-l-4' : 'border-gray-100 bg-gray-50'}`}>
-                    <span className={`font-semibold w-4 flex-shrink-0 ${opt === q.correctAnswer ? 'text-teal-600' : 'text-gray-400'}`}>{LETTER[i]}</span>
-                    <span className={opt === q.correctAnswer ? 'text-teal-800 font-medium' : 'text-gray-700'}>{opt}</span>
-                    {opt === q.correctAnswer && <span className="ml-auto text-xs font-medium text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">Correct</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-            {q.type === 'true-false' && q.correctAnswer && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-800 font-medium mb-3">
-                <CheckCircle className="size-3.5" />Correct: {q.correctAnswer}
-              </div>
-            )}
-            <div className="flex items-center gap-4 text-xs text-gray-400">
-              <span className="flex items-center gap-1"><User className="size-3" />{q.createdBy}</span>
-              <span className="flex items-center gap-1"><Calendar className="size-3" />{q.createdAt}</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -780,6 +1739,11 @@ export function AdminQuestionBankPage() {
   const [approvalDiff, setApprovalDiff] = useState('');
   const [approvalType, setApprovalType] = useState('');
   const [detailQuestion, setDetailQuestion] = useState<PendingQuestion | null>(null);
+  const [viewQuestion, setViewQuestion] =
+  useState<BankQuestion | null>(null);
+
+  const [editingQuestion, setEditingQuestion] =
+  useState<BankQuestion | null>(null);
 
   const subjectMeta = SUBJECTS.find((s) => s.name === selectedSubject);
   const subjectQuestions = bankQuestions.filter((q) => q.subject === selectedSubject);
@@ -820,6 +1784,19 @@ export function AdminQuestionBankPage() {
     ]);
     toast.success('Question duplicated.');
   };
+
+  const handleSaveBankQuestion = (updatedQuestion: BankQuestion) => {
+  setBankQuestions((current) =>
+    current.map((question) =>
+      question.id === updatedQuestion.id
+        ? updatedQuestion
+        : question,
+    ),
+  );
+
+  setEditingQuestion(null);
+  toast.success('Question updated successfully.');
+};
 
   const departments = Array.from(new Set(SUBJECTS.map((s) => s.dept)));
 
@@ -957,7 +1934,23 @@ export function AdminQuestionBankPage() {
               <div className="flex-1 overflow-y-auto px-6 py-5">
                 <div className="max-w-4xl mx-auto space-y-2">
                   <p className="text-sm text-gray-400 mb-4"><span className="font-semibold text-gray-700">{filteredBank.length}</span> question{filteredBank.length !== 1 ? 's' : ''}</p>
-                  {filteredBank.map((q, i) => <BankCard key={q.id} q={q} index={i} onDelete={handleDeleteBank} onDuplicate={handleDuplicate} />)}
+                  {filteredBank.map((question, index) => (
+  <BankCard
+    key={question.id}
+    q={question}
+    index={index}
+    onView={(selectedQuestion) => {
+      setEditingQuestion(null);
+      setViewQuestion(selectedQuestion);
+    }}
+    onEdit={(selectedQuestion) => {
+      setViewQuestion(null);
+      setEditingQuestion(selectedQuestion);
+    }}
+    onDelete={handleDeleteBank}
+    onDuplicate={handleDuplicate}
+  />
+))}
                   {filteredBank.length === 0 && (
                     <div className="text-center py-16">
                       <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gray-100 mb-4">
@@ -1035,13 +2028,40 @@ export function AdminQuestionBankPage() {
       )}
 
       {detailQuestion && (
-        <ApprovalDetailModal
-          q={detailQuestion}
-          onClose={() => setDetailQuestion(null)}
-          onApprove={(id) => { handleApprove(id); setDetailQuestion(null); }}
-          onReject={(id, reason) => { handleReject(id, reason); setDetailQuestion(null); }}
-        />
-      )}
+  <ApprovalDetailModal
+    q={detailQuestion}
+    onClose={() => setDetailQuestion(null)}
+    onApprove={(id) => {
+      handleApprove(id);
+      setDetailQuestion(null);
+    }}
+    onReject={(id, reason) => {
+      handleReject(id, reason);
+      setDetailQuestion(null);
+    }}
+  />
+)}
+
+{viewQuestion && (
+  <AdminQuestionDetailModal
+    question={viewQuestion}
+    onClose={() => setViewQuestion(null)}
+    onEdit={() => {
+      const questionToEdit = viewQuestion;
+      setViewQuestion(null);
+      setEditingQuestion(questionToEdit);
+    }}
+  />
+)}
+
+{editingQuestion && (
+  <AdminQuestionEditorModal
+    question={editingQuestion}
+    subjects={SUBJECTS}
+    onClose={() => setEditingQuestion(null)}
+    onSave={handleSaveBankQuestion}
+  />
+)}
     </div>
   );
 }

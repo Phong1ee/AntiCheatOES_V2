@@ -264,6 +264,23 @@
   opacity: 0.62;
 }
 
+.yq-ref-subject-tag {
+  display: inline-flex;
+  max-width: 180px;
+  min-height: 20px;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f9fafb;
+  padding: 2px 8px;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .yq-ref-pill.difficulty-easy {
   background: #ecfdf5;
   color: #059669;

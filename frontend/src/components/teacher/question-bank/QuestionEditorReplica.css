@@ -128,6 +128,15 @@
   gap: 8px;
 }
 
+/*
+ * Radix Select render menu bằng Portal trực tiếp dưới body.
+ * Editor backdrop đang có z-index: 100000 nên menu mặc định z-50
+ * sẽ bị nằm phía sau modal.
+ */
+.qb-editor-select-content {
+  z-index: 100001 !important;
+}
+
 @media (max-width: 640px) {
   .qb-editor-backdrop {
     align-items: flex-end;

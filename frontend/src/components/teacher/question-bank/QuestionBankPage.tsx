@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { SubjectSidebar } from './SubjectSidebar';
-import { QuestionFilters } from './QuestionFilters';
-import { BankQuestionList } from './BankQuestionList';
-import { YourQuestionsList } from './YourQuestionsList';
-import './QuestionBankReplica.css';
-import { QuestionEditor } from './QuestionEditor';
-import { QuestionDetailModal } from './QuestionDetailModal';
-import { Search, Library, User, Database } from 'lucide-react';
-import { toast } from 'sonner';
-import { teacherQuestionBankService } from '../../../services/teacher-question-bank.service';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SubjectSidebar } from "./SubjectSidebar";
+import { QuestionFilters } from "./QuestionFilters";
+import { BankQuestionList } from "./BankQuestionList";
+import { YourQuestionsList } from "./YourQuestionsList";
+import "./QuestionBankReplica.css";
+import { QuestionEditor } from "./QuestionEditor";
+import { QuestionDetailModal } from "./QuestionDetailModal";
+import { Search, Library, User, Database } from "lucide-react";
+import { toast } from "sonner";
+import { teacherQuestionBankService } from "../../../services/teacher-question-bank.service";
 import type {
   ChapterSummary,
   LearningObjectiveSummary,
@@ -18,7 +18,7 @@ import type {
   QuestionDetail,
   QuestionStatus,
   SubjectCount,
-} from '../../../types/question-bank';
+} from "../../../types/question-bank";
 
 const pageSize = 12;
 
@@ -32,16 +32,18 @@ function useDebouncedValue(value: string, delayMs: number) {
 }
 
 export function QuestionBankPage() {
-  const [activeTab, setActiveTab] = useState<QuestionBankTab>('bank');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<QuestionBankTab>("bank");
+  const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, 350);
-  const [selectedSubject, setSelectedSubject] = useState('all');
+  const [selectedSubject, setSelectedSubject] = useState("all");
   const [filters, setFilters] = useState<QuestionBankFilters>({});
   const [subjects, setSubjects] = useState<SubjectCount[]>([]);
   const [totalSubjectCount, setTotalSubjectCount] = useState(0);
   const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
-  const [learningObjectives, setLearningObjectives] = useState<LearningObjectiveSummary[]>([]);
+  const [learningObjectives, setLearningObjectives] = useState<
+    LearningObjectiveSummary[]
+  >([]);
   const [questions, setQuestions] = useState<QuestionBankItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -57,8 +59,9 @@ export function QuestionBankPage() {
 
   const queryParams = useMemo(() => {
     const { chapter_id, lo_id, ...questionFilters } = filters;
-    const subject_id = selectedSubject === 'all' ? undefined : selectedSubject;
-    const shouldSendTaxonomy = selectedSubject !== 'all' && selectedSubject !== '__none__';
+    const subject_id = selectedSubject === "all" ? undefined : selectedSubject;
+    const shouldSendTaxonomy =
+      selectedSubject !== "all" && selectedSubject !== "__none__";
     return {
       ...questionFilters,
       ...(shouldSendTaxonomy ? { chapter_id, lo_id } : {}),
@@ -70,14 +73,15 @@ export function QuestionBankPage() {
   }, [debouncedSearch, filters, page, selectedSubject]);
 
   const queryIdentity = useMemo(
-    () => JSON.stringify({ activeTab, debouncedSearch, filters, selectedSubject }),
+    () =>
+      JSON.stringify({ activeTab, debouncedSearch, filters, selectedSubject }),
     [activeTab, debouncedSearch, filters, selectedSubject],
   );
   const lastFetchedQueryIdentity = useRef(queryIdentity);
 
   const resetPagingAndFiltersForTab = (tab: QuestionBankTab) => {
     setActiveTab(tab);
-    setSelectedSubject('all');
+    setSelectedSubject("all");
     setFilters({});
     setPage(1);
     setQuestions([]);
@@ -86,7 +90,7 @@ export function QuestionBankPage() {
   const refresh = () => setReloadKey((current) => current + 1);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<QuestionStatus | 'all', number> = {
+    const counts: Record<QuestionStatus | "all", number> = {
       all: questions.length,
       draft: 0,
       pending: 0,
@@ -104,8 +108,8 @@ export function QuestionBankPage() {
   const mobileSubjectItems = useMemo(
     () => [
       {
-        id: 'all',
-        name: 'All Subjects',
+        id: "all",
+        name: "All Subjects",
         count: totalSubjectCount,
       },
       ...subjects.map((subject) => ({
@@ -132,7 +136,10 @@ export function QuestionBankPage() {
         setTotalSubjectCount(data.total_count);
       })
       .catch((err) => {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : 'Unable to load subjects.');
+        if (!cancelled)
+          toast.error(
+            err instanceof Error ? err.message : "Unable to load subjects.",
+          );
       })
       .finally(() => {
         if (!cancelled) setSubjectsLoading(false);
@@ -143,14 +150,14 @@ export function QuestionBankPage() {
   }, [activeTab, reloadKey]);
 
   useEffect(() => {
-    if (selectedSubject === 'all' || selectedSubject === '__none__') {
+    if (selectedSubject === "all" || selectedSubject === "__none__") {
       setChapters([]);
       setLearningObjectives([]);
-      setFilters((current) => (
+      setFilters((current) =>
         current.chapter_id || current.lo_id
           ? { ...current, chapter_id: undefined, lo_id: undefined }
-          : current
-      ));
+          : current,
+      );
       return;
     }
 
@@ -161,14 +168,21 @@ export function QuestionBankPage() {
         if (cancelled) return;
         setChapters(items);
         setFilters((current) => {
-          const chapter_id = current.chapter_id && items.some((chapter) => chapter.chapter_id === current.chapter_id)
-            ? current.chapter_id
-            : undefined;
-          if (current.chapter_id === chapter_id && current.lo_id === undefined) return current;
+          const chapter_id =
+            current.chapter_id &&
+            items.some((chapter) => chapter.chapter_id === current.chapter_id)
+              ? current.chapter_id
+              : undefined;
+          if (current.chapter_id === chapter_id && current.lo_id === undefined)
+            return current;
           return { ...current, chapter_id, lo_id: undefined };
         });
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Unable to load chapters.'));
+      .catch((err) =>
+        toast.error(
+          err instanceof Error ? err.message : "Unable to load chapters.",
+        ),
+      );
     return () => {
       cancelled = true;
     };
@@ -187,11 +201,20 @@ export function QuestionBankPage() {
         if (cancelled) return;
         setLearningObjectives(items);
         setFilters((current) => {
-          const lo_id = current.lo_id && items.some((lo) => lo.lo_id === current.lo_id) ? current.lo_id : undefined;
+          const lo_id =
+            current.lo_id && items.some((lo) => lo.lo_id === current.lo_id)
+              ? current.lo_id
+              : undefined;
           return current.lo_id === lo_id ? current : { ...current, lo_id };
         });
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Unable to load learning objectives.'));
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Unable to load learning objectives.",
+        ),
+      );
     return () => {
       cancelled = true;
     };
@@ -199,11 +222,15 @@ export function QuestionBankPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (page !== 1 && lastFetchedQueryIdentity.current !== queryIdentity) return;
+    if (page !== 1 && lastFetchedQueryIdentity.current !== queryIdentity)
+      return;
     lastFetchedQueryIdentity.current = queryIdentity;
     setLoading(true);
     setError(null);
-    const request = activeTab === 'bank' ? teacherQuestionBankService.listBank(queryParams) : teacherQuestionBankService.listMine(queryParams);
+    const request =
+      activeTab === "bank"
+        ? teacherQuestionBankService.listBank(queryParams)
+        : teacherQuestionBankService.listMine(queryParams);
     request
       .then((data) => {
         if (cancelled) return;
@@ -214,7 +241,9 @@ export function QuestionBankPage() {
         if (!cancelled) {
           setQuestions([]);
           setTotal(0);
-          setError(err instanceof Error ? err.message : 'Unable to load questions.');
+          setError(
+            err instanceof Error ? err.message : "Unable to load questions.",
+          );
         }
       })
       .finally(() => {
@@ -243,7 +272,12 @@ export function QuestionBankPage() {
         if (!cancelled) setDetail(data);
       })
       .catch((err) => {
-        if (!cancelled) setDetailError(err instanceof Error ? err.message : 'Unable to load question detail.');
+        if (!cancelled)
+          setDetailError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load question detail.",
+          );
       })
       .finally(() => {
         if (!cancelled) setDetailLoading(false);
@@ -257,27 +291,34 @@ export function QuestionBankPage() {
     setFilters(nextFilters);
   };
 
-  const setStatusFilter = (statusValue: QuestionStatus | 'all') => {
-    setFilters((current) => ({ ...current, status: statusValue === 'all' ? undefined : statusValue }));
+  const setStatusFilter = (statusValue: QuestionStatus | "all") => {
+    setFilters((current) => ({
+      ...current,
+      status: statusValue === "all" ? undefined : statusValue,
+    }));
   };
 
   const handleSubmit = async (questionId: number) => {
     try {
       await teacherQuestionBankService.submit(questionId);
-      toast.success('Question submitted for approval.');
+      toast.success("Question submitted for approval.");
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Unable to submit question.');
+      toast.error(
+        err instanceof Error ? err.message : "Unable to submit question.",
+      );
     }
   };
 
   const handleDelete = async (questionId: number) => {
     try {
       await teacherQuestionBankService.remove(questionId);
-      toast.success('Question deleted.');
+      toast.success("Question deleted.");
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Unable to delete question.');
+      toast.error(
+        err instanceof Error ? err.message : "Unable to delete question.",
+      );
     }
   };
 
@@ -290,17 +331,15 @@ export function QuestionBankPage() {
 
   return (
     <div className="qb-ref-page">
-      {activeTab === 'bank' && (
-        <div className="qb-ref-sidebar-slot">
-          <SubjectSidebar
-            selectedSubject={selectedSubject}
-            subjects={subjects}
-            totalCount={totalSubjectCount}
-            loading={subjectsLoading}
-            onSubjectSelect={setSelectedSubject}
-          />
-        </div>
-      )}
+      <div className="qb-ref-sidebar-slot">
+        <SubjectSidebar
+          selectedSubject={selectedSubject}
+          subjects={subjects}
+          totalCount={totalSubjectCount}
+          loading={subjectsLoading}
+          onSubjectSelect={setSelectedSubject}
+        />
+      </div>
 
       <main className="qb-ref-main">
         <header className="qb-ref-topbar">
@@ -312,19 +351,25 @@ export function QuestionBankPage() {
               <div>
                 <h1 className="qb-ref-title">Question Bank</h1>
                 <p className="qb-ref-subtitle">
-                  {activeTab === 'bank' ? 'Browse the central question library' : 'Questions you have created'}
+                  {activeTab === "bank"
+                    ? "Browse the central question library"
+                    : "Questions you have created"}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="qb-ref-tabs" role="tablist" aria-label="Question bank sections">
+          <div
+            className="qb-ref-tabs"
+            role="tablist"
+            aria-label="Question bank sections"
+          >
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab === 'bank'}
-              className={`qb-ref-tab${activeTab === 'bank' ? ' is-active' : ''}`}
-              onClick={() => resetPagingAndFiltersForTab('bank')}
+              aria-selected={activeTab === "bank"}
+              className={`qb-ref-tab${activeTab === "bank" ? " is-active" : ""}`}
+              onClick={() => resetPagingAndFiltersForTab("bank")}
             >
               <Library />
               Question Bank
@@ -332,9 +377,9 @@ export function QuestionBankPage() {
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab === 'mine'}
-              className={`qb-ref-tab${activeTab === 'mine' ? ' is-active' : ''}`}
-              onClick={() => resetPagingAndFiltersForTab('mine')}
+              aria-selected={activeTab === "mine"}
+              className={`qb-ref-tab${activeTab === "mine" ? " is-active" : ""}`}
+              onClick={() => resetPagingAndFiltersForTab("mine")}
             >
               <User />
               Your Questions
@@ -347,11 +392,15 @@ export function QuestionBankPage() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder={activeTab === 'bank' ? 'Search questions, topics, tags...' : 'Search your questions...'}
+                placeholder={
+                  activeTab === "bank"
+                    ? "Search questions, topics, tags..."
+                    : "Search your questions..."
+                }
               />
             </div>
 
-            {activeTab === 'bank' && (
+            {activeTab === "bank" && (
               <QuestionFilters
                 selectedSubject={selectedSubject}
                 filters={filters}
@@ -362,11 +411,15 @@ export function QuestionBankPage() {
             )}
           </div>
 
-          {activeTab === 'bank' && (
+          {activeTab === "bank" && (
             <div className="qb-ref-mobile-subjects">
               {subjectsLoading
                 ? [0, 1, 2].map((item) => (
-                    <span key={item} className="qb-ref-mobile-subject" style={{ width: 112, opacity: 0.55 }} />
+                    <span
+                      key={item}
+                      className="qb-ref-mobile-subject"
+                      style={{ width: 112, opacity: 0.55 }}
+                    />
                   ))
                 : mobileSubjectItems.map((subject) => {
                     const active = selectedSubject === subject.id;
@@ -374,11 +427,15 @@ export function QuestionBankPage() {
                       <button
                         key={subject.id}
                         type="button"
-                        className={`qb-ref-mobile-subject${active ? ' is-active' : ''}`}
+                        className={`qb-ref-mobile-subject${active ? " is-active" : ""}`}
                         onClick={() => setSelectedSubject(subject.id)}
                       >
-                        <span className="qb-ref-mobile-subject-name">{subject.name}</span>
-                        <span className="qb-ref-mobile-subject-count">{subject.count}</span>
+                        <span className="qb-ref-mobile-subject-name">
+                          {subject.name}
+                        </span>
+                        <span className="qb-ref-mobile-subject-count">
+                          {subject.count}
+                        </span>
                       </button>
                     );
                   })}
@@ -388,7 +445,7 @@ export function QuestionBankPage() {
 
         <section className="qb-ref-content-scroll">
           <div className="qb-ref-content-inner">
-            {activeTab === 'bank' ? (
+            {activeTab === "bank" ? (
               <BankQuestionList
                 questions={questions}
                 loading={loading}
@@ -407,7 +464,7 @@ export function QuestionBankPage() {
                 total={total}
                 page={page}
                 pageSize={pageSize}
-                statusFilter={filters.status ?? 'all'}
+                statusFilter={filters.status ?? "all"}
                 statusCounts={statusCounts}
                 onStatusFilterChange={setStatusFilter}
                 onNewQuestion={() => {

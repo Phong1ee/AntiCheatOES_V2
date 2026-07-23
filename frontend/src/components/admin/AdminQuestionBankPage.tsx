@@ -1,62 +1,66 @@
 import { useState } from 'react';
-import { Card } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Textarea } from '../ui/textarea';
-import { Badge } from '../ui/badge';
-import { Label } from '../ui/label';
-import { useUserRole } from '../../contexts/UserRoleContext';
+import { toast } from 'sonner';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
-import {
-  BookOpen,
+  Database,
+  Library,
+  ClipboardCheck,
   Search,
-  Filter,
   Plus,
+  Upload,
   Edit,
   Trash2,
-  MoreVertical,
   Eye,
   Copy,
-  BookMarked,
-  ListChecks,
-  FileText,
-  Upload,
-  GraduationCap,
-  FolderTree,
+  MoreVertical,
   ChevronRight,
   ArrowLeft,
+  GraduationCap,
+  BookOpen,
+  CheckSquare,
+  Circle,
+  FileText,
+  Link2,
+  CheckCircle,
+  XCircle,
+  User,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  BarChart2,
+  X,
+  GitCompare,
+  AlertTriangle,
 } from 'lucide-react';
-import { toast } from 'sonner';
 
-interface Question {
-  id: string;
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type QType = 'mcq' | 'true-false' | 'essay' | 'matching';
+type Difficulty = 'easy' | 'medium' | 'hard';
+
+interface Answer {
   text: string;
-  type: 'multiple-choice' | 'essay' | 'true-false';
-  department: string;
+  isCorrect: boolean;
+}
+
+interface QuestionSnapshot {
+  type: QType;
+  difficulty: Difficulty;
+  text: string;
   subject: string;
+  chapters: string[];
+  learningObjectives: string[];
+  answers?: Answer[];
+  editedAt: string;
+}
+
+interface BankQuestion {
+  id: string;
+  type: QType;
+  text: string;
+  subject: string;
+  department: string;
   chapter: string;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: Difficulty;
   options?: string[];
   correctAnswer?: string;
   createdBy: string;
@@ -64,1217 +68,980 @@ interface Question {
   usageCount: number;
 }
 
-interface Department {
+interface PendingQuestion {
   id: string;
-  name: string;
-  subjects: string[];
+  type: QType;
+  difficulty: Difficulty;
+  text: string;
+  subject: string;
+  chapters: string[];
+  learningObjectives: string[];
+  answers?: Answer[];
+  submittedBy: string;
+  submittedAt: string;
+  usedInExams: number;
+  previousVersion?: QuestionSnapshot;
 }
 
-const mockDepartments: Department[] = [
-  {
-    id: '1',
-    name: 'Computer Science',
-    subjects: [
-      'Database Systems',
-      'Data Structures',
-      'Algorithms',
-      'Web Development',
-      'Operating Systems',
-    ],
-  },
-  {
-    id: '2',
-    name: 'Information Technology',
-    subjects: [
-      'Network Security',
-      'Cloud Computing',
-      'Mobile Development',
-      'Software Engineering',
-    ],
-  },
-  {
-    id: '3',
-    name: 'Business Administration',
-    subjects: ['Marketing', 'Finance', 'Management', 'Economics'],
-  },
-  {
-    id: '4',
-    name: 'Mathematics',
-    subjects: ['Calculus', 'Linear Algebra', 'Statistics', 'Discrete Math'],
-  },
+interface SubjectMeta {
+  name: string;
+  code: string;
+  color: string;
+  iconColor: string;
+  dept: string;
+}
+
+// ─── Mock data ────────────────────────────────────────────────────────────────
+
+const SUBJECTS: SubjectMeta[] = [
+  { name: 'Database Systems', code: 'IT3120', color: 'bg-blue-500/10', iconColor: 'text-blue-500', dept: 'Computer Science' },
+  { name: 'Data Structures', code: 'IT2000', color: 'bg-emerald-500/10', iconColor: 'text-emerald-500', dept: 'Computer Science' },
+  { name: 'Algorithms', code: 'IT2030', color: 'bg-violet-500/10', iconColor: 'text-violet-500', dept: 'Computer Science' },
+  { name: 'Web Development', code: 'IT4409', color: 'bg-amber-500/10', iconColor: 'text-amber-500', dept: 'Computer Science' },
+  { name: 'Operating Systems', code: 'IT3070', color: 'bg-rose-500/10', iconColor: 'text-rose-500', dept: 'Computer Science' },
+  { name: 'Network Security', code: 'IT4360', color: 'bg-teal-500/10', iconColor: 'text-teal-500', dept: 'Information Technology' },
+  { name: 'Cloud Computing', code: 'IT4520', color: 'bg-sky-500/10', iconColor: 'text-sky-500', dept: 'Information Technology' },
+  { name: 'Mobile Development', code: 'IT4735', color: 'bg-orange-500/10', iconColor: 'text-orange-500', dept: 'Information Technology' },
+  { name: 'Calculus', code: 'MA1001', color: 'bg-indigo-500/10', iconColor: 'text-indigo-500', dept: 'Mathematics' },
+  { name: 'Linear Algebra', code: 'MA1002', color: 'bg-pink-500/10', iconColor: 'text-pink-500', dept: 'Mathematics' },
+  { name: 'Statistics', code: 'MA3010', color: 'bg-cyan-500/10', iconColor: 'text-cyan-500', dept: 'Mathematics' },
 ];
 
-const mockQuestions: Question[] = [
+const MOCK_BANK: BankQuestion[] = [
+  { id: 'b1', type: 'mcq', text: 'What is the primary key in a relational database?', subject: 'Database Systems', department: 'Computer Science', chapter: 'Introduction to Databases', difficulty: 'easy', options: ['A column that contains duplicate values', 'A unique identifier for each row in a table', 'A foreign key reference', 'An index for faster searches'], correctAnswer: 'A unique identifier for each row in a table', createdBy: 'Dr. Smith', createdAt: '2024-09-15', usageCount: 15 },
+  { id: 'b2', type: 'mcq', text: 'Which normal form eliminates partial dependencies?', subject: 'Database Systems', department: 'Computer Science', chapter: 'Normalization', difficulty: 'medium', options: ['1NF', '2NF', '3NF', 'BCNF'], correctAnswer: '2NF', createdBy: 'Dr. Smith', createdAt: '2024-09-20', usageCount: 12 },
+  { id: 'b3', type: 'essay', text: 'Explain the difference between INNER JOIN and LEFT JOIN with examples.', subject: 'Database Systems', department: 'Computer Science', chapter: 'SQL Joins', difficulty: 'hard', createdBy: 'Dr. Smith', createdAt: '2024-09-22', usageCount: 8 },
+  { id: 'b4', type: 'true-false', text: 'A primary key can contain NULL values.', subject: 'Database Systems', department: 'Computer Science', chapter: 'SQL Basics', difficulty: 'easy', correctAnswer: 'False', createdBy: 'Dr. Smith', createdAt: '2024-10-01', usageCount: 20 },
+  { id: 'b5', type: 'mcq', text: 'What is the time complexity of binary search?', subject: 'Data Structures', department: 'Computer Science', chapter: 'Searching Algorithms', difficulty: 'medium', options: ['O(n)', 'O(log n)', 'O(n²)', 'O(1)'], correctAnswer: 'O(log n)', createdBy: 'Dr. Williams', createdAt: '2024-10-10', usageCount: 18 },
+  { id: 'b6', type: 'true-false', text: 'A stack follows FIFO principle.', subject: 'Data Structures', department: 'Computer Science', chapter: 'Stacks & Queues', difficulty: 'easy', correctAnswer: 'False', createdBy: 'Dr. Williams', createdAt: '2024-10-12', usageCount: 25 },
+  { id: 'b7', type: 'mcq', text: 'Which HTML tag is used to define a hyperlink?', subject: 'Web Development', department: 'Computer Science', chapter: 'HTML Basics', difficulty: 'easy', options: ['<a>', '<link>', '<href>', '<url>'], correctAnswer: '<a>', createdBy: 'Prof. Johnson', createdAt: '2024-11-01', usageCount: 30 },
+  { id: 'b8', type: 'essay', text: 'Explain the box model in CSS.', subject: 'Web Development', department: 'Computer Science', chapter: 'CSS Basics', difficulty: 'medium', createdBy: 'Prof. Johnson', createdAt: '2024-11-05', usageCount: 6 },
+];
+
+const MOCK_PENDING: PendingQuestion[] = [
   {
-    id: '1',
-    text: 'What is the primary key in a relational database?',
-    type: 'multiple-choice',
-    department: 'Computer Science',
-    subject: 'Database Systems',
-    chapter: 'Chapter 1: Introduction to Databases',
-    difficulty: 'easy',
-    options: [
-      'A column that contains duplicate values',
-      'A unique identifier for each row in a table',
-      'A foreign key reference',
-      'An index for faster searches',
-    ],
-    correctAnswer: 'A unique identifier for each row in a table',
-    createdBy: 'Dr. Smith',
-    createdAt: '2024-09-15',
-    usageCount: 15,
-  },
-  {
-    id: '2',
-    text: 'Which normal form eliminates partial dependencies?',
-    type: 'multiple-choice',
-    department: 'Computer Science',
-    subject: 'Database Systems',
-    chapter: 'Chapter 3: Normalization',
-    difficulty: 'medium',
-    options: [
-      'First Normal Form (1NF)',
-      'Second Normal Form (2NF)',
-      'Third Normal Form (3NF)',
-      'Boyce-Codd Normal Form (BCNF)',
-    ],
-    correctAnswer: 'Second Normal Form (2NF)',
-    createdBy: 'Dr. Smith',
-    createdAt: '2024-09-15',
-    usageCount: 12,
-  },
-  {
-    id: '3',
-    text: 'Explain the difference between INNER JOIN and LEFT JOIN with examples.',
-    type: 'essay',
-    department: 'Computer Science',
-    subject: 'Database Systems',
-    chapter: 'Chapter 4: SQL Joins',
-    difficulty: 'hard',
-    createdBy: 'Dr. Smith',
-    createdAt: '2024-09-20',
-    usageCount: 8,
-  },
-  {
-    id: '4',
-    text: 'Arrays in JavaScript are zero-indexed.',
+    id: 'p1',
     type: 'true-false',
-    department: 'Computer Science',
+    difficulty: 'easy',
+    text: 'HTTP is a stateless protocol.',
     subject: 'Web Development',
-    chapter: 'Chapter 2: JavaScript Basics',
-    difficulty: 'easy',
-    correctAnswer: 'True',
-    createdBy: 'Prof. Johnson',
-    createdAt: '2024-10-01',
-    usageCount: 20,
+    chapters: ['HTTP Protocols'],
+    learningObjectives: ['LO1', 'LO2'],
+    answers: [{ text: 'True', isCorrect: true }, { text: 'False', isCorrect: false }],
+    submittedBy: 'Nguyen Van A',
+    submittedAt: '2025-07-20',
+    usedInExams: 2,
   },
   {
-    id: '5',
-    text: 'What is time complexity of binary search?',
-    type: 'multiple-choice',
-    department: 'Computer Science',
-    subject: 'Data Structures',
-    chapter: 'Chapter 5: Searching Algorithms',
-    difficulty: 'medium',
-    options: ['O(n)', 'O(log n)', 'O(n²)', 'O(1)'],
-    correctAnswer: 'O(log n)',
-    createdBy: 'Dr. Williams',
-    createdAt: '2024-10-10',
-    usageCount: 18,
-  },
-  {
-    id: '6',
-    text: 'What is a stack data structure?',
-    type: 'multiple-choice',
-    department: 'Computer Science',
-    subject: 'Data Structures',
-    chapter: 'Chapter 2: Linear Data Structures',
+    id: 'p2',
+    type: 'mcq',
     difficulty: 'easy',
-    options: [
-      'FIFO structure',
-      'LIFO structure',
-      'Random access structure',
-      'Tree structure',
+    text: 'Which CSS property is used to make text bold?',
+    subject: 'Web Development',
+    chapters: ['CSS Basics', 'Introduction to Web'],
+    learningObjectives: ['LO1'],
+    answers: [
+      { text: 'font-weight: bold', isCorrect: true },
+      { text: 'text-style: bold', isCorrect: false },
+      { text: 'font-style: bold', isCorrect: false },
+      { text: 'text-weight: bold', isCorrect: false },
     ],
-    correctAnswer: 'LIFO structure',
-    createdBy: 'Dr. Williams',
-    createdAt: '2024-10-12',
-    usageCount: 25,
+    submittedBy: 'Nguyen Van A',
+    submittedAt: '2025-07-21',
+    usedInExams: 0,
+    previousVersion: {
+      type: 'mcq',
+      difficulty: 'medium',
+      text: 'Which CSS property controls text boldness?',
+      subject: 'Web Development',
+      chapters: ['CSS Basics'],
+      learningObjectives: ['LO1', 'LO3'],
+      answers: [
+        { text: 'font-weight', isCorrect: true },
+        { text: 'text-bold', isCorrect: false },
+        { text: 'font-bold', isCorrect: false },
+        { text: 'text-weight', isCorrect: false },
+      ],
+      editedAt: '2025-07-20',
+    },
+  },
+  {
+    id: 'p3',
+    type: 'essay',
+    difficulty: 'hard',
+    text: 'Describe the MVC architecture pattern and its advantages in web development.',
+    subject: 'Web Development',
+    chapters: ['Architecture Patterns'],
+    learningObjectives: ['LO2'],
+    submittedBy: 'Tran Thi B',
+    submittedAt: '2025-07-19',
+    usedInExams: 0,
+  },
+  {
+    id: 'p4',
+    type: 'mcq',
+    difficulty: 'easy',
+    text: 'What does SQL stand for?',
+    subject: 'Database Systems',
+    chapters: ['SQL Basics', 'Introduction to Databases'],
+    learningObjectives: ['LO1'],
+    answers: [
+      { text: 'Structured Query Language', isCorrect: true },
+      { text: 'Simple Query Language', isCorrect: false },
+      { text: 'Standard Query Logic', isCorrect: false },
+      { text: 'Sequential Query Language', isCorrect: false },
+    ],
+    submittedBy: 'Le Van C',
+    submittedAt: '2025-07-22',
+    usedInExams: 3,
+    previousVersion: {
+      type: 'mcq',
+      difficulty: 'easy',
+      text: 'SQL stands for?',
+      subject: 'Database Systems',
+      chapters: ['SQL Basics'],
+      learningObjectives: [],
+      answers: [
+        { text: 'Structured Query Language', isCorrect: true },
+        { text: 'Simple Query List', isCorrect: false },
+        { text: 'Stored Query Language', isCorrect: false },
+        { text: 'Sequential Query Language', isCorrect: false },
+      ],
+      editedAt: '2025-07-21',
+    },
+  },
+  {
+    id: 'p5',
+    type: 'true-false',
+    difficulty: 'medium',
+    text: 'JavaScript is a statically typed language.',
+    subject: 'Web Development',
+    chapters: ['JavaScript Basics'],
+    learningObjectives: ['LO2', 'LO3'],
+    answers: [{ text: 'True', isCorrect: false }, { text: 'False', isCorrect: true }],
+    submittedBy: 'Pham Thi D',
+    submittedAt: '2025-07-18',
+    usedInExams: 1,
   },
 ];
 
-export function AdminQuestionBankPage() {
-  const { isAdmin } = useUserRole();
-  const [departments] = useState<Department[]>(mockDepartments);
-  const [questions, setQuestions] = useState<Question[]>(mockQuestions);
-  
-  // Navigation state
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
-  const [selectedSubject, setSelectedSubject] = useState<string>('');
-  
-  // Filter states
-  const [searchQuery, setSearchQuery] = useState('');
-  const [chapterFilter, setChapterFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
-  
-  // Dialog states
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [showEditDialog, setShowEditDialog] = useState(false);
-  const [showViewDialog, setShowViewDialog] = useState(false);
-  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  // Form states
-  const [formText, setFormText] = useState('');
-  const [formType, setFormType] = useState<'multiple-choice' | 'essay' | 'true-false'>('multiple-choice');
-  const [formChapter, setFormChapter] = useState('');
-  const [formDifficulty, setFormDifficulty] = useState<'easy' | 'medium' | 'hard'>('easy');
-  const [formOptions, setFormOptions] = useState(['', '', '', '']);
-  const [formCorrectAnswer, setFormCorrectAnswer] = useState('');
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+const TYPE_CFG: Record<QType, { icon: React.ElementType; label: string; pill: string }> = {
+  mcq: { icon: CheckSquare, label: 'Multiple Choice', pill: 'bg-blue-50 text-blue-600' },
+  'true-false': { icon: Circle, label: 'True / False', pill: 'bg-violet-50 text-violet-600' },
+  essay: { icon: FileText, label: 'Essay', pill: 'bg-amber-50 text-amber-600' },
+  matching: { icon: Link2, label: 'Matching', pill: 'bg-emerald-50 text-emerald-600' },
+};
 
-  // Get filtered questions for selected subject
-  const subjectQuestions = questions.filter(
-    (q) => q.department === selectedDepartment && q.subject === selectedSubject
+const DIFF_CFG: Record<Difficulty, { label: string; pill: string; border: string; dot: string }> = {
+  easy: { label: 'Easy', pill: 'bg-emerald-50 text-emerald-600', border: 'border-l-emerald-400', dot: 'bg-emerald-400' },
+  medium: { label: 'Medium', pill: 'bg-amber-50 text-amber-600', border: 'border-l-amber-400', dot: 'bg-amber-400' },
+  hard: { label: 'Hard', pill: 'bg-red-50 text-red-600', border: 'border-l-red-400', dot: 'bg-red-400' },
+};
+
+const LETTER = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+// ─── Approval Detail Modal ────────────────────────────────────────────────────
+
+function ApprovalDetailModal({
+  q,
+  onClose,
+  onApprove,
+  onReject,
+}: {
+  q: PendingQuestion;
+  onClose: () => void;
+  onApprove: (id: string) => void;
+  onReject: (id: string, reason: string) => void;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const hasPrev = !!q.previousVersion;
+  const prev = q.previousVersion;
+
+  // Diff helpers
+  const changed = (oldVal: unknown, newVal: unknown) =>
+    JSON.stringify(oldVal) !== JSON.stringify(newVal);
+
+  const FieldLabel = ({ label }: { label: string }) => (
+    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">{label}</p>
   );
 
-  // Get unique chapters for selected subject
-  const chapters = Array.from(new Set(subjectQuestions.map((q) => q.chapter))).sort();
-
-  const filteredQuestions = subjectQuestions.filter((q) => {
-    const matchesSearch =
-      q.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.chapter.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesChapter = chapterFilter === 'all' || q.chapter === chapterFilter;
-    const matchesType = typeFilter === 'all' || q.type === typeFilter;
-    const matchesDifficulty = difficultyFilter === 'all' || q.difficulty === difficultyFilter;
-    return matchesSearch && matchesChapter && matchesType && matchesDifficulty;
-  });
-
-  const resetForm = () => {
-    setFormText('');
-    setFormType('multiple-choice');
-    setFormChapter('');
-    setFormDifficulty('easy');
-    setFormOptions(['', '', '', '']);
-    setFormCorrectAnswer('');
-  };
-
-  const handleAddQuestion = () => {
-    const newQuestion: Question = {
-      id: `${Date.now()}`,
-      text: formText,
-      type: formType,
-      department: selectedDepartment,
-      subject: selectedSubject,
-      chapter: formChapter,
-      difficulty: formDifficulty,
-      createdBy: 'Admin User',
-      createdAt: new Date().toISOString().split('T')[0],
-      usageCount: 0,
-      ...(formType === 'multiple-choice' && {
-        options: formOptions.filter((o) => o.trim() !== ''),
-        correctAnswer: formCorrectAnswer,
-      }),
-      ...(formType === 'true-false' && {
-        correctAnswer: formCorrectAnswer,
-      }),
-    };
-
-    setQuestions([...questions, newQuestion]);
-    setShowAddDialog(false);
-    resetForm();
-    toast.success('Question added successfully');
-  };
-
-  const handleEditQuestion = () => {
-    if (!selectedQuestion) return;
-
-    setQuestions(
-      questions.map((q) =>
-        q.id === selectedQuestion.id
-          ? {
-              ...q,
-              text: formText,
-              type: formType,
-              chapter: formChapter,
-              difficulty: formDifficulty,
-              ...(formType === 'multiple-choice' && {
-                options: formOptions.filter((o) => o.trim() !== ''),
-                correctAnswer: formCorrectAnswer,
-              }),
-              ...(formType === 'true-false' && {
-                correctAnswer: formCorrectAnswer,
-              }),
-            }
-          : q
-      )
-    );
-
-    setShowEditDialog(false);
-    setSelectedQuestion(null);
-    resetForm();
-    toast.success('Question updated successfully');
-  };
-
-  const handleDeleteQuestion = (questionId: string) => {
-    setQuestions(questions.filter((q) => q.id !== questionId));
-    toast.success('Question deleted successfully');
-  };
-
-  const handleDuplicateQuestion = (question: Question) => {
-    const newQuestion: Question = {
-      ...question,
-      id: `${Date.now()}`,
-      text: `${question.text} (Copy)`,
-      usageCount: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    setQuestions([...questions, newQuestion]);
-    toast.success('Question duplicated successfully');
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const validTypes = [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      ];
-      if (validTypes.includes(file.type)) {
-        setUploadedFile(file);
-        toast.success(`File "${file.name}" uploaded successfully`);
-      } else {
-        toast.error('Please upload PDF or Word documents only');
-      }
-    }
-  };
-
-  const handleProcessUpload = () => {
-    if (!uploadedFile) {
-      toast.error('Please select a file first');
-      return;
-    }
-
-    // Simulate file processing
-    toast.success('Processing file... This may take a moment');
-    
-    setTimeout(() => {
-      // Mock: Add questions from file
-      const mockImportedQuestions: Question[] = [
-        {
-          id: `${Date.now()}-1`,
-          text: 'What is a foreign key constraint?',
-          type: 'multiple-choice',
-          department: selectedDepartment,
-          subject: selectedSubject,
-          chapter: formChapter || 'Imported Chapter',
-          difficulty: 'medium',
-          options: [
-            'A constraint that enforces uniqueness',
-            'A constraint that links two tables',
-            'A constraint that prevents null values',
-            'A constraint that sets default values',
-          ],
-          correctAnswer: 'A constraint that links two tables',
-          createdBy: 'Admin User (Imported)',
-          createdAt: new Date().toISOString().split('T')[0],
-          usageCount: 0,
-        },
-        {
-          id: `${Date.now()}-2`,
-          text: 'Explain the ACID properties in database transactions.',
-          type: 'essay',
-          department: selectedDepartment,
-          subject: selectedSubject,
-          chapter: formChapter || 'Imported Chapter',
-          difficulty: 'hard',
-          createdBy: 'Admin User (Imported)',
-          createdAt: new Date().toISOString().split('T')[0],
-          usageCount: 0,
-        },
-      ];
-
-      setQuestions([...questions, ...mockImportedQuestions]);
-      setShowUploadDialog(false);
-      setUploadedFile(null);
-      setFormChapter('');
-      toast.success(`Successfully imported ${mockImportedQuestions.length} questions`);
-    }, 2000);
-  };
-
-  const openEditDialog = (question: Question) => {
-    setSelectedQuestion(question);
-    setFormText(question.text);
-    setFormType(question.type);
-    setFormChapter(question.chapter);
-    setFormDifficulty(question.difficulty);
-    if (question.options) {
-      setFormOptions([...question.options, '', '', '', ''].slice(0, 4));
-    }
-    if (question.correctAnswer) {
-      setFormCorrectAnswer(question.correctAnswer);
-    }
-    setShowEditDialog(true);
-  };
-
-  const openViewDialog = (question: Question) => {
-    setSelectedQuestion(question);
-    setShowViewDialog(true);
-  };
-
-  const handleBackToSubjects = () => {
-    setSelectedSubject('');
-    setSearchQuery('');
-    setChapterFilter('all');
-    setTypeFilter('all');
-    setDifficultyFilter('all');
-  };
-
-  const handleBackToDepartments = () => {
-    setSelectedDepartment('');
-    setSelectedSubject('');
-    setSearchQuery('');
-    setChapterFilter('all');
-    setTypeFilter('all');
-    setDifficultyFilter('all');
-  };
-
-  const getDifficultyBadge = (difficulty: string) => {
-    const styles = {
-      easy: 'bg-green-100 text-green-700 border-green-300',
-      medium: 'bg-amber-100 text-amber-700 border-amber-300',
-      hard: 'bg-red-100 text-red-700 border-red-300',
-    };
-    return styles[difficulty as keyof typeof styles] || styles.easy;
-  };
-
-  const getTypeBadge = (type: string) => {
-    const styles = {
-      'multiple-choice': 'bg-blue-100 text-blue-700 border-blue-300',
-      essay: 'bg-purple-100 text-purple-700 border-purple-300',
-      'true-false': 'bg-teal-100 text-teal-700 border-teal-300',
-    };
-    return styles[type as keyof typeof styles] || styles['multiple-choice'];
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'multiple-choice':
-        return <ListChecks className="size-4" />;
-      case 'essay':
-        return <FileText className="size-4" />;
-      case 'true-false':
-        return <BookMarked className="size-4" />;
-      default:
-        return <BookOpen className="size-4" />;
-    }
-  };
-
-  // Department Selection View
-  if (!selectedDepartment) {
+  // Render a single field in side-by-side mode with diff highlight
+  const DiffRow = ({
+    label,
+    oldVal,
+    newVal,
+    render,
+  }: {
+    label: string;
+    oldVal: unknown;
+    newVal: unknown;
+    render: (val: unknown, side: 'old' | 'new') => React.ReactNode;
+  }) => {
+    const isDiff = changed(oldVal, newVal);
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
-        <main className="container mx-auto px-4 py-8 max-w-7xl">
-          <div className="mb-6">
-            <h1 className="text-3xl text-gray-900 mb-2">Question Bank Management</h1>
-            <p className="text-gray-600">Select a department to manage questions</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {departments.map((dept) => (
-              <Card
-                key={dept.id}
-                className="p-6 bg-white border border-gray-200 shadow-md hover:shadow-xl hover:border-red-300 transition-all cursor-pointer group"
-                onClick={() => setSelectedDepartment(dept.name)}
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 bg-gradient-to-br from-red-500 to-orange-600 rounded-lg shadow-md group-hover:scale-110 transition-transform">
-                    <GraduationCap className="size-6 text-white" />
-                  </div>
-                  <ChevronRight className="size-5 text-gray-400 group-hover:text-red-600 transition-colors" />
-                </div>
-
-                <h3 className="text-xl text-gray-900 mb-2">{dept.name}</h3>
-                <p className="text-sm text-gray-600 mb-3">{dept.subjects.length} subjects</p>
-
-                <div className="flex flex-wrap gap-1">
-                  {dept.subjects.slice(0, 3).map((subject, idx) => (
-                    <Badge key={idx} variant="outline" className="text-xs">
-                      {subject}
-                    </Badge>
-                  ))}
-                  {dept.subjects.length > 3 && (
-                    <Badge variant="outline" className="text-xs">
-                      +{dept.subjects.length - 3} more
-                    </Badge>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-        </main>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className={`rounded-xl p-3 border ${isDiff ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}>
+          <FieldLabel label={label} />
+          <div className={isDiff ? 'text-red-800' : 'text-gray-700'}>{render(oldVal, 'old')}</div>
+        </div>
+        <div className={`rounded-xl p-3 border ${isDiff ? 'bg-teal-50 border-teal-200' : 'bg-gray-50 border-gray-100'}`}>
+          <FieldLabel label={label} />
+          <div className={isDiff ? 'text-teal-900 font-medium' : 'text-gray-700'}>{render(newVal, 'new')}</div>
+        </div>
       </div>
     );
-  }
+  };
 
-  // Subject Selection View
-  if (!selectedSubject) {
-    const currentDept = departments.find((d) => d.name === selectedDepartment);
-    if (!currentDept) return null;
+  const renderText = (val: unknown) => (
+    <p className="text-sm leading-relaxed">{val as string || '—'}</p>
+  );
 
+  const renderPill = (val: unknown, side: 'old' | 'new') => {
+    const isDiff = side === 'old'
+      ? changed(val, q.type) || changed(val, q.difficulty)
+      : false;
+    return <p className="text-sm font-medium">{val as string || '—'}</p>;
+  };
+
+  const renderTypeVal = (val: unknown) => {
+    const t = val as QType;
+    const cfg = TYPE_CFG[t];
+    if (!cfg) return <span className="text-sm">—</span>;
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
-        <main className="container mx-auto px-4 py-8 max-w-7xl">
-          <Button
-            onClick={handleBackToDepartments}
-            variant="ghost"
-            className="mb-4 gap-2"
-          >
-            <ArrowLeft className="size-4" />
-            Back to Departments
-          </Button>
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${cfg.pill}`}>
+        <cfg.icon className="size-3.5" />{cfg.label}
+      </span>
+    );
+  };
 
-          <div className="mb-6">
-            <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-              <GraduationCap className="size-4" />
-              <span>{selectedDepartment}</span>
-            </div>
-            <h1 className="text-3xl text-gray-900 mb-2">Select Subject</h1>
-            <p className="text-gray-600">Choose a subject to view and manage questions</p>
-          </div>
+  const renderDiffVal = (val: unknown) => {
+    const d = val as Difficulty;
+    const cfg = DIFF_CFG[d];
+    if (!cfg) return <span className="text-sm">—</span>;
+    return (
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${cfg.pill}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
+      </span>
+    );
+  };
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {currentDept.subjects.map((subject, idx) => {
-              const subjectQuestionCount = questions.filter(
-                (q) => q.department === selectedDepartment && q.subject === subject
-              ).length;
-
-              return (
-                <Card
-                  key={idx}
-                  className="p-5 bg-white border border-gray-200 shadow-md hover:shadow-xl hover:border-orange-300 transition-all cursor-pointer group"
-                  onClick={() => setSelectedSubject(subject)}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="p-2 bg-gradient-to-br from-orange-500 to-red-600 rounded-lg group-hover:scale-110 transition-transform">
-                      <FolderTree className="size-5 text-white" />
-                    </div>
-                    <ChevronRight className="size-5 text-gray-400 group-hover:text-orange-600 transition-colors" />
-                  </div>
-
-                  <h3 className="text-lg text-gray-900 mb-2">{subject}</h3>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <BookOpen className="size-4" />
-                    <span>{subjectQuestionCount} questions</span>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </main>
+  const renderTags = (val: unknown) => {
+    const arr = val as string[];
+    if (!arr || arr.length === 0) return <span className="text-sm text-gray-400 italic">None selected</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {arr.map((s) => (
+          <span key={s} className="text-xs px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-700">{s}</span>
+        ))}
       </div>
     );
-  }
+  };
 
-  // Questions View
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
-      <main className="container mx-auto px-4 py-8 max-w-7xl">
-        <Button
-          onClick={handleBackToSubjects}
-          variant="ghost"
-          className="mb-4 gap-2"
-        >
-          <ArrowLeft className="size-4" />
-          Back to Subjects
-        </Button>
-
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-          <GraduationCap className="size-4" />
-          <span>{selectedDepartment}</span>
-          <ChevronRight className="size-3" />
-          <FolderTree className="size-4" />
-          <span>{selectedSubject}</span>
-        </div>
-
-        {/* Page Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl text-gray-900 mb-2">{selectedSubject}</h1>
-          <p className="text-gray-600">Manage questions for this subject</p>
-        </div>
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <Card className="p-4 bg-white border border-gray-200 shadow-sm">
-            <div className="text-2xl text-gray-900 mb-1">{subjectQuestions.length}</div>
-            <div className="text-sm text-gray-600">Total Questions</div>
-          </Card>
-          <Card className="p-4 bg-white border border-gray-200 shadow-sm">
-            <div className="text-2xl text-gray-900 mb-1">{chapters.length}</div>
-            <div className="text-sm text-gray-600">Chapters</div>
-          </Card>
-          <Card className="p-4 bg-white border border-gray-200 shadow-sm">
-            <div className="text-2xl text-gray-900 mb-1">
-              {subjectQuestions.filter((q) => q.type === 'multiple-choice').length}
-            </div>
-            <div className="text-sm text-gray-600">Multiple Choice</div>
-          </Card>
-          <Card className="p-4 bg-white border border-gray-200 shadow-sm">
-            <div className="text-2xl text-gray-900 mb-1">
-              {subjectQuestions.filter((q) => q.type === 'essay').length}
-            </div>
-            <div className="text-sm text-gray-600">Essay Questions</div>
-          </Card>
-        </div>
-
-        {/* Filters Bar */}
-        <Card className="p-4 bg-white border border-gray-200 shadow-sm mb-6">
-          <div className="flex flex-col lg:flex-row gap-3">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-              <Input
-                placeholder="Search questions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-
-            {/* Chapter Filter */}
-            <Select value={chapterFilter} onValueChange={setChapterFilter}>
-              <SelectTrigger className="w-full lg:w-56">
-                <Filter className="size-4 mr-2" />
-                <SelectValue placeholder="Chapter" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Chapters</SelectItem>
-                {chapters.map((chapter) => (
-                  <SelectItem key={chapter} value={chapter}>
-                    {chapter}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Type Filter */}
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full lg:w-40">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="multiple-choice">Multiple Choice</SelectItem>
-                <SelectItem value="essay">Essay</SelectItem>
-                <SelectItem value="true-false">True/False</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Difficulty Filter */}
-            <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
-              <SelectTrigger className="w-full lg:w-36">
-                <SelectValue placeholder="Difficulty" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Levels</SelectItem>
-                <SelectItem value="easy">Easy</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="hard">Hard</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Action Buttons */}
-            <div className="flex gap-2">
-              {isAdmin && (
-                <>
-                  <Button
-                    onClick={() => setShowUploadDialog(true)}
-                    variant="outline"
-                    className="gap-2"
-                  >
-                    <Upload className="size-4" />
-                    <span className="hidden sm:inline">Upload File</span>
-                  </Button>
-                  <Button
-                    onClick={() => setShowAddDialog(true)}
-                    className="bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700 gap-2"
-                  >
-                    <Plus className="size-4" />
-                    <span className="hidden sm:inline">Add Question</span>
-                  </Button>
-                </>
+  const renderAnswers = (val: unknown, side: 'old' | 'new') => {
+    const answers = val as Answer[] | undefined;
+    if (!answers || answers.length === 0) {
+      return <p className="text-sm text-gray-400 italic">Essay — no predefined answers</p>;
+    }
+    const otherAnswers = side === 'old' ? q.answers : prev?.answers;
+    return (
+      <div className="space-y-1.5">
+        {answers.map((opt, i) => {
+          const otherOpt = otherAnswers?.[i];
+          const ansChanged = otherOpt ? (opt.text !== otherOpt.text || opt.isCorrect !== otherOpt.isCorrect) : false;
+          return (
+            <div
+              key={i}
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-sm ${
+                opt.isCorrect
+                  ? 'border-teal-300 bg-teal-100/60 border-l-4'
+                  : ansChanged
+                  ? 'border-orange-200 bg-orange-50/50'
+                  : 'border-gray-100 bg-white'
+              }`}
+            >
+              <span className={`font-bold w-4 flex-shrink-0 text-xs ${opt.isCorrect ? 'text-teal-600' : 'text-gray-400'}`}>
+                {LETTER[i]}
+              </span>
+              <span className={`flex-1 ${opt.isCorrect ? 'text-teal-800 font-semibold' : 'text-gray-700'}`}>{opt.text}</span>
+              {opt.isCorrect && (
+                <span className="text-[10px] font-semibold text-teal-600 bg-teal-100 px-1.5 py-0.5 rounded-full">✓ Correct</span>
               )}
             </div>
-          </div>
-        </Card>
+          );
+        })}
+      </div>
+    );
+  };
 
-        {/* Questions List */}
-        <div className="space-y-4">
-          {filteredQuestions.map((question, index) => (
-            <Card
-              key={question.id}
-              className="p-5 bg-white border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start gap-4">
-                {/* Question Number */}
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-red-500 to-orange-600 rounded-lg flex items-center justify-center text-white shadow-md">
-                  <span className="text-lg">{index + 1}</span>
-                </div>
+  // Build the "current version" snapshot from the pending question itself (for single-view)
+  const currentSnapshot: QuestionSnapshot = {
+    type: q.type,
+    difficulty: q.difficulty,
+    text: q.text,
+    subject: q.subject,
+    chapters: q.chapters,
+    learningObjectives: q.learningObjectives,
+    answers: q.answers,
+    editedAt: q.submittedAt,
+  };
 
-                {/* Question Content */}
-                <div className="flex-1">
-                  {/* Header */}
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    {getTypeIcon(question.type)}
-                    <Badge className={getTypeBadge(question.type)}>
-                      {question.type.replace('-', ' ')}
-                    </Badge>
-                    <Badge className={getDifficultyBadge(question.difficulty)}>
-                      {question.difficulty}
-                    </Badge>
-                    <span className="text-xs text-gray-500">• {question.chapter}</span>
-                  </div>
-
-                  {/* Question Text */}
-                  <p className="text-gray-900 mb-3 line-clamp-2">{question.text}</p>
-
-                  {/* Options Preview for Multiple Choice */}
-                  {question.type === 'multiple-choice' && question.options && (
-                    <div className="mb-3 space-y-1">
-                      {question.options.slice(0, 2).map((option, idx) => (
-                        <div key={idx} className="text-sm text-gray-600 flex items-center gap-2">
-                          <div className="w-5 h-5 rounded border border-gray-300 flex items-center justify-center text-xs">
-                            {String.fromCharCode(65 + idx)}
-                          </div>
-                          {option}
-                        </div>
-                      ))}
-                      {question.options.length > 2 && (
-                        <div className="text-xs text-gray-500 pl-7">
-                          +{question.options.length - 2} more options
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Footer Info */}
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
-                    <span>Created by {question.createdBy}</span>
-                    <span>•</span>
-                    <span>{question.createdAt}</span>
-                    <span>•</span>
-                    <span>Used {question.usageCount} times</span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm">
-                      <MoreVertical className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => openViewDialog(question)}>
-                      <Eye className="size-4 mr-2" />
-                      View Details
-                    </DropdownMenuItem>
-                    {isAdmin && (
-                      <>
-                        <DropdownMenuItem onClick={() => openEditDialog(question)}>
-                          <Edit className="size-4 mr-2" />
-                          Edit Question
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDuplicateQuestion(question)}>
-                          <Copy className="size-4 mr-2" />
-                          Duplicate
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteQuestion(question.id)}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="size-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-base font-semibold text-gray-900">Approval Request</h2>
+                {hasPrev && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
+                    <GitCompare className="size-3" />Re-submitted
+                  </span>
+                )}
               </div>
-            </Card>
-          ))}
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <User className="size-3" />{q.submittedBy}
+                <span>·</span>
+                <Calendar className="size-3" />
+                {new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                {q.usedInExams > 0 && (
+                  <>
+                    <span>·</span>
+                    <BarChart2 className="size-3" />Used in {q.usedInExams} exam{q.usedInExams > 1 ? 's' : ''}
+                  </>
+                )}
+              </div>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
+              <X className="size-4" />
+            </button>
+          </div>
 
-          {filteredQuestions.length === 0 && (
-            <Card className="p-12 text-center bg-white border border-gray-200">
-              <BookOpen className="size-12 mx-auto mb-3 text-gray-400" />
-              <p className="text-gray-500">No questions found</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Try adjusting your filters or add new questions
-              </p>
-            </Card>
+          {/* Column headers for diff mode */}
+          {hasPrev && (
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl">
+                <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
+                <span className="text-xs font-semibold text-red-700">Current version</span>
+                <span className="text-xs text-red-400 ml-auto">{new Date(prev!.editedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-xl">
+                <div className="w-2 h-2 rounded-full bg-teal-400 flex-shrink-0" />
+                <span className="text-xs font-semibold text-teal-700">Changed version</span>
+                <span className="text-xs text-teal-400 ml-auto">{new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Upload File Dialog */}
-        <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Upload Questions from File</DialogTitle>
-              <DialogDescription>
-                Upload a PDF or Word document containing questions. The system will automatically
-                parse and import them.
-              </DialogDescription>
-            </DialogHeader>
+        {/* Body */}
+        <div className="px-6 py-5 overflow-y-auto flex-1">
+          {hasPrev && prev ? (
+            <>
+              {/* ── DIFF MODE: side by side ─────────────── */}
 
-            <div className="space-y-4">
-              {/* Chapter Selection */}
-              <div>
-                <Label htmlFor="upload-chapter">Chapter (Optional)</Label>
-                <Input
-                  id="upload-chapter"
-                  placeholder="e.g., Chapter 1: Introduction"
-                  value={formChapter}
-                  onChange={(e) => setFormChapter(e.target.value)}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Leave blank if the file contains chapter information
-                </p>
-              </div>
-
-              {/* File Upload */}
-              <div>
-                <Label htmlFor="file-upload">Upload File</Label>
-                <div className="mt-2 flex items-center justify-center w-full">
-                  <label
-                    htmlFor="file-upload"
-                    className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <Upload className="size-10 mb-3 text-gray-400" />
-                      <p className="mb-2 text-sm text-gray-700">
-                        <span className="font-medium">Click to upload</span> or drag and drop
-                      </p>
-                      <p className="text-xs text-gray-500">PDF or Word documents (MAX. 10MB)</p>
-                      {uploadedFile && (
-                        <div className="mt-3 px-4 py-2 bg-green-100 text-green-700 rounded-lg text-sm">
-                          ✓ {uploadedFile.name}
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      id="file-upload"
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.doc,.docx"
-                      onChange={handleFileUpload}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Info */}
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h4 className="text-sm font-medium text-blue-900 mb-2">
-                  Supported File Formats:
-                </h4>
-                <ul className="text-xs text-blue-700 space-y-1">
-                  <li>• PDF documents (.pdf)</li>
-                  <li>• Microsoft Word (.doc, .docx)</li>
-                </ul>
-                <p className="text-xs text-blue-600 mt-3">
-                  Note: The system will attempt to automatically detect question types and answers.
-                  You may need to review and edit imported questions.
-                </p>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowUploadDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleProcessUpload}
-                className="bg-gradient-to-r from-red-500 to-orange-600"
-                disabled={!uploadedFile}
-              >
-                <Upload className="size-4 mr-2" />
-                Process & Import
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Add Question Dialog */}
-        <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Question</DialogTitle>
-              <DialogDescription>
-                Create a new question for {selectedSubject}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="question-text">Question Text</Label>
-                <Textarea
-                  id="question-text"
-                  placeholder="Enter the question..."
-                  value={formText}
-                  onChange={(e) => setFormText(e.target.value)}
-                  rows={3}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="type">Question Type</Label>
-                  <Select value={formType} onValueChange={(v: any) => setFormType(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="multiple-choice">Multiple Choice</SelectItem>
-                      <SelectItem value="essay">Essay</SelectItem>
-                      <SelectItem value="true-false">True/False</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="difficulty">Difficulty</Label>
-                  <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="easy">Easy</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="hard">Hard</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="chapter">Chapter</Label>
-                <Input
-                  id="chapter"
-                  placeholder="e.g., Chapter 1: Introduction to Databases"
-                  value={formChapter}
-                  onChange={(e) => setFormChapter(e.target.value)}
-                />
-              </div>
-
-              {formType === 'multiple-choice' && (
-                <>
-                  <div>
-                    <Label>Answer Options</Label>
-                    <div className="space-y-2">
-                      {formOptions.map((option, idx) => (
-                        <Input
-                          key={idx}
-                          placeholder={`Option ${String.fromCharCode(65 + idx)}`}
-                          value={option}
-                          onChange={(e) => {
-                            const newOptions = [...formOptions];
-                            newOptions[idx] = e.target.value;
-                            setFormOptions(newOptions);
-                          }}
-                        />
-                      ))}
-                    </div>
+              {/* Question Type + Difficulty in one row */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {/* Left: old type + difficulty */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className={`rounded-xl p-3 border ${changed(prev.type, q.type) ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Question Type" />
+                    {renderTypeVal(prev.type)}
+                    {changed(prev.type, q.type) && (
+                      <p className="text-[10px] text-red-400 mt-1 flex items-center gap-0.5"><AlertTriangle className="size-3" />Changed</p>
+                    )}
                   </div>
-
-                  <div>
-                    <Label htmlFor="correct-answer">Correct Answer</Label>
-                    <Select value={formCorrectAnswer} onValueChange={setFormCorrectAnswer}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select correct answer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions
-                          .filter((o) => o.trim() !== '')
-                          .map((option, idx) => (
-                            <SelectItem key={idx} value={option}>
-                              {String.fromCharCode(65 + idx)}: {option}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                  <div className={`rounded-xl p-3 border ${changed(prev.difficulty, q.difficulty) ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Difficulty" />
+                    {renderDiffVal(prev.difficulty)}
+                    {changed(prev.difficulty, q.difficulty) && (
+                      <p className="text-[10px] text-red-400 mt-1 flex items-center gap-0.5"><AlertTriangle className="size-3" />Changed</p>
+                    )}
                   </div>
-                </>
+                </div>
+                {/* Right: new type + difficulty */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className={`rounded-xl p-3 border ${changed(prev.type, q.type) ? 'bg-teal-50 border-teal-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Question Type" />
+                    {renderTypeVal(q.type)}
+                    {changed(prev.type, q.type) && (
+                      <p className="text-[10px] text-teal-500 mt-1 flex items-center gap-0.5"><CheckCircle className="size-3" />Updated</p>
+                    )}
+                  </div>
+                  <div className={`rounded-xl p-3 border ${changed(prev.difficulty, q.difficulty) ? 'bg-teal-50 border-teal-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Difficulty" />
+                    {renderDiffVal(q.difficulty)}
+                    {changed(prev.difficulty, q.difficulty) && (
+                      <p className="text-[10px] text-teal-500 mt-1 flex items-center gap-0.5"><CheckCircle className="size-3" />Updated</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Question Text */}
+              <DiffRow
+                label="Question Text"
+                oldVal={prev.text}
+                newVal={q.text}
+                render={renderText}
+              />
+
+              {/* Subject */}
+              <DiffRow
+                label="Subject"
+                oldVal={prev.subject}
+                newVal={q.subject}
+                render={renderText}
+              />
+
+              {/* Chapters */}
+              <DiffRow
+                label="Chapter"
+                oldVal={prev.chapters}
+                newVal={q.chapters}
+                render={renderTags}
+              />
+
+              {/* Learning Objectives */}
+              <DiffRow
+                label="Learning Objective"
+                oldVal={prev.learningObjectives}
+                newVal={q.learningObjectives}
+                render={renderTags}
+              />
+
+              {/* Answers */}
+              {q.type !== 'essay' && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className={`rounded-xl p-3 border ${changed(prev.answers, q.answers) ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Answers" />
+                    {renderAnswers(prev.answers, 'old')}
+                  </div>
+                  <div className={`rounded-xl p-3 border ${changed(prev.answers, q.answers) ? 'bg-teal-50 border-teal-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <FieldLabel label="Answers" />
+                    {renderAnswers(q.answers, 'new')}
+                  </div>
+                </div>
               )}
 
-              {formType === 'true-false' && (
-                <div>
-                  <Label htmlFor="tf-answer">Correct Answer</Label>
-                  <Select value={formCorrectAnswer} onValueChange={setFormCorrectAnswer}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select correct answer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="True">True</SelectItem>
-                      <SelectItem value="False">False</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddQuestion}
-                className="bg-gradient-to-r from-red-500 to-orange-600"
-                disabled={!formText || !formChapter}
-              >
-                Add Question
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Question Dialog */}
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Question</DialogTitle>
-              <DialogDescription>Update question details</DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="edit-question-text">Question Text</Label>
-                <Textarea
-                  id="edit-question-text"
-                  value={formText}
-                  onChange={(e) => setFormText(e.target.value)}
-                  rows={3}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="edit-type">Question Type</Label>
-                  <Select value={formType} onValueChange={(v: any) => setFormType(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="multiple-choice">Multiple Choice</SelectItem>
-                      <SelectItem value="essay">Essay</SelectItem>
-                      <SelectItem value="true-false">True/False</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="edit-difficulty">Difficulty</Label>
-                  <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="easy">Easy</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="hard">Hard</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="edit-chapter">Chapter</Label>
-                <Input
-                  id="edit-chapter"
-                  value={formChapter}
-                  onChange={(e) => setFormChapter(e.target.value)}
-                />
-              </div>
-
-              {formType === 'multiple-choice' && (
-                <>
-                  <div>
-                    <Label>Answer Options</Label>
-                    <div className="space-y-2">
-                      {formOptions.map((option, idx) => (
-                        <Input
-                          key={idx}
-                          placeholder={`Option ${String.fromCharCode(65 + idx)}`}
-                          value={option}
-                          onChange={(e) => {
-                            const newOptions = [...formOptions];
-                            newOptions[idx] = e.target.value;
-                            setFormOptions(newOptions);
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="edit-correct-answer">Correct Answer</Label>
-                    <Select value={formCorrectAnswer} onValueChange={setFormCorrectAnswer}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select correct answer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions
-                          .filter((o) => o.trim() !== '')
-                          .map((option, idx) => (
-                            <SelectItem key={idx} value={option}>
-                              {String.fromCharCode(65 + idx)}: {option}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </>
-              )}
-
-              {formType === 'true-false' && (
-                <div>
-                  <Label htmlFor="edit-tf-answer">Correct Answer</Label>
-                  <Select value={formCorrectAnswer} onValueChange={setFormCorrectAnswer}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select correct answer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="True">True</SelectItem>
-                      <SelectItem value="False">False</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowEditDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleEditQuestion}
-                className="bg-gradient-to-r from-red-500 to-orange-600"
-              >
-                Save Changes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Question Dialog */}
-        <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Question Details</DialogTitle>
-            </DialogHeader>
-
-            {selectedQuestion && (
-              <div className="space-y-4">
-                {/* Badges */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge className={getTypeBadge(selectedQuestion.type)}>
-                    {selectedQuestion.type.replace('-', ' ')}
-                  </Badge>
-                  <Badge className={getDifficultyBadge(selectedQuestion.difficulty)}>
-                    {selectedQuestion.difficulty}
-                  </Badge>
-                  <Badge variant="outline">{selectedQuestion.chapter}</Badge>
-                </div>
-
-                {/* Question Text */}
-                <div>
-                  <Label>Question</Label>
-                  <p className="text-gray-900 mt-2">{selectedQuestion.text}</p>
-                </div>
-
-                {/* Options */}
-                {selectedQuestion.type === 'multiple-choice' && selectedQuestion.options && (
-                  <div>
-                    <Label>Answer Options</Label>
-                    <div className="mt-2 space-y-2">
-                      {selectedQuestion.options.map((option, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-3 rounded-lg border ${
-                            option === selectedQuestion.correctAnswer
-                              ? 'bg-green-50 border-green-300'
-                              : 'bg-gray-50 border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded border border-gray-400 flex items-center justify-center text-sm">
-                              {String.fromCharCode(65 + idx)}
-                            </div>
-                            <span className="text-gray-900">{option}</span>
-                            {option === selectedQuestion.correctAnswer && (
-                              <Badge className="ml-auto bg-green-100 text-green-700 border-green-300">
-                                Correct
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* True/False Answer */}
-                {selectedQuestion.type === 'true-false' && (
-                  <div>
-                    <Label>Correct Answer</Label>
-                    <p className="text-gray-900 mt-2 p-3 bg-green-50 border border-green-300 rounded-lg">
-                      {selectedQuestion.correctAnswer}
+              {/* Changed fields summary */}
+              {(() => {
+                const changedFields: string[] = [];
+                if (changed(prev.type, q.type)) changedFields.push('Question Type');
+                if (changed(prev.difficulty, q.difficulty)) changedFields.push('Difficulty');
+                if (changed(prev.text, q.text)) changedFields.push('Question Text');
+                if (changed(prev.subject, q.subject)) changedFields.push('Subject');
+                if (changed(prev.chapters, q.chapters)) changedFields.push('Chapter');
+                if (changed(prev.learningObjectives, q.learningObjectives)) changedFields.push('Learning Objectives');
+                if (changed(prev.answers, q.answers)) changedFields.push('Answers');
+                if (changedFields.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-2 px-3 py-2.5 bg-orange-50 border border-orange-200 rounded-xl mb-4">
+                    <GitCompare className="size-3.5 text-orange-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-orange-700">
+                      <span className="font-semibold">{changedFields.length} field{changedFields.length > 1 ? 's' : ''} changed: </span>
+                      {changedFields.join(', ')}
                     </p>
                   </div>
-                )}
+                );
+              })()}
+            </>
+          ) : (
+            <>
+              {/* ── SINGLE VIEW (no previous version) ───── */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <FieldLabel label="Question Type" />
+                  {renderTypeVal(q.type)}
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <FieldLabel label="Difficulty" />
+                  {renderDiffVal(q.difficulty)}
+                </div>
+              </div>
 
-                {/* Metadata */}
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
-                  <div>
-                    <Label className="text-xs text-gray-500">Department</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.department}</p>
+              <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 mb-4">
+                <FieldLabel label="Question Text" />
+                <p className="text-sm text-gray-800 leading-relaxed">{q.text}</p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <FieldLabel label="Subject" />
+                  <p className="text-sm text-gray-700">{q.subject}</p>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <FieldLabel label="Chapter" />
+                  {renderTags(q.chapters)}
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <FieldLabel label="Learning Objective" />
+                  {renderTags(q.learningObjectives)}
+                </div>
+              </div>
+
+              {q.answers && q.answers.length > 0 && (
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 mb-4">
+                  <FieldLabel label="Answers" />
+                  {renderAnswers(q.answers, 'new')}
+                </div>
+              )}
+
+              {q.type === 'essay' && (
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 mb-4">
+                  <FieldLabel label="Answers" />
+                  <p className="text-sm text-gray-400 italic">Essay question — teacher-defined rubric, no predefined answers.</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
+          {!rejecting ? (
+            <div className="flex items-center justify-between gap-3">
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Close
+              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setRejecting(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+                  <XCircle className="size-4" />Reject
+                </button>
+                <button onClick={() => { onApprove(q.id); onClose(); }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
+                  <CheckCircle className="size-4" />Approve & Add to Bank
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-red-500 flex-shrink-0" />
+                <p className="text-sm font-medium text-gray-700">Rejection reason (will be sent to teacher)</p>
+              </div>
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+                placeholder="Explain why this question is being rejected..."
+                className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300 resize-none placeholder:text-gray-400" />
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => { setRejecting(false); setReason(''); }} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                  Cancel
+                </button>
+                <button onClick={() => { onReject(q.id, reason); onClose(); }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors">
+                  <XCircle className="size-4" />Confirm Reject
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pending card (compact, click to open detail) ─────────────────────────────
+
+function PendingCard({ q, onClick }: { q: PendingQuestion; onClick: () => void }) {
+  const typeInfo = TYPE_CFG[q.type];
+  const diff = DIFF_CFG[q.difficulty];
+  return (
+    <button onClick={onClick}
+      className={`w-full text-left bg-white rounded-xl border border-gray-100 border-l-4 ${diff.border} shadow-sm hover:shadow-md hover:border-gray-200 transition-all px-5 py-4`}>
+      <div className="flex items-start gap-4">
+        <div className={`mt-0.5 flex-shrink-0 p-1.5 rounded-lg ${typeInfo.pill}`}>
+          <typeInfo.icon className="size-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 leading-snug line-clamp-2">{q.text}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${typeInfo.pill}`}>{typeInfo.label}</span>
+            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${diff.pill}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${diff.dot}`} />{diff.label}
+            </span>
+            {q.previousVersion && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
+                <GitCompare className="size-3" />Re-submitted
+              </span>
+            )}
+            <span className="text-xs text-gray-400 flex items-center gap-1"><User className="size-3" />{q.submittedBy}</span>
+            <span className="text-xs text-gray-400 flex items-center gap-1">
+              <Calendar className="size-3" />{new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5">{q.subject} · {q.chapters.join(', ')}</p>
+        </div>
+        <div className="flex-shrink-0 flex items-center gap-1 mt-1">
+          <span className="text-xs text-teal-600 font-medium flex items-center gap-1"><Eye className="size-3.5" />Review</span>
+          <ChevronRight className="size-4 text-gray-300" />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ─── Bank question card ───────────────────────────────────────────────────────
+
+function BankCard({ q, index, onDelete, onDuplicate }: {
+  q: BankQuestion; index: number;
+  onDelete: (id: string) => void; onDuplicate: (q: BankQuestion) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const typeInfo = TYPE_CFG[q.type];
+  const diff = DIFF_CFG[q.difficulty];
+
+  return (
+    <div className={`bg-white rounded-xl border border-gray-100 border-l-4 ${diff.border} shadow-sm hover:shadow-md transition-all`}>
+      <div className="px-5 py-4 flex items-start gap-4">
+        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-semibold flex items-center justify-center mt-0.5">{index + 1}</span>
+        <div className={`flex-shrink-0 p-1.5 rounded-lg ${typeInfo.pill}`}><typeInfo.icon className="size-3.5" /></div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 leading-snug line-clamp-2">{q.text}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeInfo.pill}`}>{typeInfo.label}</span>
+            <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${diff.pill}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${diff.dot}`} />{diff.label}
+            </span>
+            <span className="text-xs text-gray-400">{q.chapter}</span>
+            <span className="text-xs text-gray-400 flex items-center gap-1"><BarChart2 className="size-3" />Used {q.usageCount}×</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button onClick={() => setExpanded(!expanded)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all">
+            {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+          <div className="relative">
+            <button onClick={() => setMenuOpen(!menuOpen)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all">
+              <MoreVertical className="size-4" />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-8 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 w-40">
+                  <button onClick={() => setMenuOpen(false)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Edit className="size-3.5" />Edit</button>
+                  <button onClick={() => { onDuplicate(q); setMenuOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Copy className="size-3.5" />Duplicate</button>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button onClick={() => { onDelete(q.id); setMenuOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"><Trash2 className="size-3.5" />Delete</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      {expanded && (
+        <div className="px-5 pb-4 pt-0">
+          <div className="pt-3 border-t border-gray-100">
+            {q.options && (
+              <div className="space-y-1.5 mb-3">
+                {q.options.map((opt, i) => (
+                  <div key={i} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border ${opt === q.correctAnswer ? 'border-teal-300 bg-teal-50 border-l-4' : 'border-gray-100 bg-gray-50'}`}>
+                    <span className={`font-semibold w-4 flex-shrink-0 ${opt === q.correctAnswer ? 'text-teal-600' : 'text-gray-400'}`}>{LETTER[i]}</span>
+                    <span className={opt === q.correctAnswer ? 'text-teal-800 font-medium' : 'text-gray-700'}>{opt}</span>
+                    {opt === q.correctAnswer && <span className="ml-auto text-xs font-medium text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">Correct</span>}
                   </div>
-                  <div>
-                    <Label className="text-xs text-gray-500">Subject</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.subject}</p>
+                ))}
+              </div>
+            )}
+            {q.type === 'true-false' && q.correctAnswer && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-800 font-medium mb-3">
+                <CheckCircle className="size-3.5" />Correct: {q.correctAnswer}
+              </div>
+            )}
+            <div className="flex items-center gap-4 text-xs text-gray-400">
+              <span className="flex items-center gap-1"><User className="size-3" />{q.createdBy}</span>
+              <span className="flex items-center gap-1"><Calendar className="size-3" />{q.createdAt}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export function AdminQuestionBankPage() {
+  const [mainTab, setMainTab] = useState<'bank' | 'approvals'>('bank');
+  const [bankQuestions, setBankQuestions] = useState<BankQuestion[]>(MOCK_BANK);
+  const [selectedSubject, setSelectedSubject] = useState('');
+  const [bankSearch, setBankSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [diffFilter, setDiffFilter] = useState('');
+  const [pending, setPending] = useState<PendingQuestion[]>(MOCK_PENDING);
+  const [approvalSearch, setApprovalSearch] = useState('');
+  const [approvalDiff, setApprovalDiff] = useState('');
+  const [approvalType, setApprovalType] = useState('');
+  const [detailQuestion, setDetailQuestion] = useState<PendingQuestion | null>(null);
+
+  const subjectMeta = SUBJECTS.find((s) => s.name === selectedSubject);
+  const subjectQuestions = bankQuestions.filter((q) => q.subject === selectedSubject);
+
+  const filteredBank = subjectQuestions.filter((q) => {
+    if (bankSearch && !q.text.toLowerCase().includes(bankSearch.toLowerCase()) && !q.chapter.toLowerCase().includes(bankSearch.toLowerCase())) return false;
+    if (typeFilter && q.type !== typeFilter) return false;
+    if (diffFilter && q.difficulty !== diffFilter) return false;
+    return true;
+  });
+
+  const filteredPending = pending.filter((q) => {
+    if (approvalSearch && !q.text.toLowerCase().includes(approvalSearch.toLowerCase()) && !q.subject.toLowerCase().includes(approvalSearch.toLowerCase())) return false;
+    if (approvalType && q.type !== approvalType) return false;
+    if (approvalDiff && q.difficulty !== approvalDiff) return false;
+    return true;
+  });
+
+  const handleApprove = (id: string) => {
+    setPending((p) => p.filter((q) => q.id !== id));
+    toast.success('Question approved and added to the Question Bank.');
+  };
+
+  const handleReject = (id: string, reason: string) => {
+    setPending((p) => p.filter((q) => q.id !== id));
+    toast.error(`Question rejected.${reason ? ' Reason sent to teacher.' : ''}`);
+  };
+
+  const handleDeleteBank = (id: string) => {
+    setBankQuestions((q) => q.filter((x) => x.id !== id));
+    toast.success('Question deleted.');
+  };
+
+  const handleDuplicate = (q: BankQuestion) => {
+    setBankQuestions((prev) => [
+      { ...q, id: Date.now().toString(), text: q.text + ' (Copy)', usageCount: 0, createdAt: new Date().toISOString().slice(0, 10) },
+      ...prev,
+    ]);
+    toast.success('Question duplicated.');
+  };
+
+  const departments = Array.from(new Set(SUBJECTS.map((s) => s.dept)));
+
+  return (
+    <div className="h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-gray-50">
+      {/* Top bar */}
+      <div className="bg-white border-b border-gray-100 px-6 py-4 flex-shrink-0">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-teal-50">
+            <Database className="size-4 text-teal-600" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-gray-800 leading-tight">Question Bank</h1>
+            <p className="text-xs text-gray-400 leading-tight">Manage the central question library</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+          <button onClick={() => setMainTab('bank')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${mainTab === 'bank' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            <Library className="size-3.5" />Question Bank
+          </button>
+          <button onClick={() => setMainTab('approvals')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${mainTab === 'approvals' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            <ClipboardCheck className="size-3.5" />Approval Requests
+            {pending.length > 0 && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-600">{pending.length}</span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ── BANK TAB ───────────────────────────────────── */}
+      {mainTab === 'bank' && (
+        <div className="flex-1 overflow-y-auto">
+          {!selectedSubject && (
+            <div className="p-6">
+              <p className="text-sm text-gray-500 mb-6">Select a subject to browse and manage questions.</p>
+              <div className="space-y-6">
+                {departments.map((dept) => {
+                  const deptSubjects = SUBJECTS.filter((s) => s.dept === dept);
+                  return (
+                    <div key={dept}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <GraduationCap className="size-3.5 text-gray-400" />
+                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{dept}</span>
+                        <div className="flex-1 h-px bg-gray-100 ml-1" />
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {deptSubjects.map((subj) => {
+                          const count = bankQuestions.filter((q) => q.subject === subj.name).length;
+                          return (
+                            <button key={subj.code} onClick={() => setSelectedSubject(subj.name)}
+                              className="group bg-white rounded-2xl border border-gray-100 p-4 text-left hover:shadow-md hover:border-teal-200 transition-all">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className={`flex items-center justify-center w-8 h-8 rounded-lg ${subj.color}`}>
+                                  <BookOpen className={`size-4 ${subj.iconColor}`} />
+                                </div>
+                                <ChevronRight className="size-3.5 text-gray-300 group-hover:text-teal-400 transition-colors" />
+                              </div>
+                              <h3 className="text-xs font-semibold text-gray-800 mb-0.5 leading-tight">{subj.name}</h3>
+                              <p className="text-xs text-gray-400">{subj.code} · {count} questions</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {selectedSubject && (
+            <div className="flex flex-col h-full">
+              <div className="bg-white border-b border-gray-100 px-6 py-3 flex-shrink-0">
+                <div className="flex items-center gap-3 mb-3">
+                  <button onClick={() => setSelectedSubject('')} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                    <ArrowLeft className="size-4" />
+                  </button>
+                  <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                    <span>{subjectMeta?.dept}</span><ChevronRight className="size-3" />
+                    <span className="text-gray-700 font-medium">{selectedSubject}</span>
                   </div>
-                  <div>
-                    <Label className="text-xs text-gray-500">Created By</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.createdBy}</p>
+                  <span className="ml-auto text-xs text-gray-400">{subjectMeta?.code}</span>
+                </div>
+                <div className="flex items-center gap-6 mb-3">
+                  {[
+                    { label: 'Total', val: subjectQuestions.length },
+                    { label: 'MCQ', val: subjectQuestions.filter((q) => q.type === 'mcq').length },
+                    { label: 'Essay', val: subjectQuestions.filter((q) => q.type === 'essay').length },
+                    { label: 'True/False', val: subjectQuestions.filter((q) => q.type === 'true-false').length },
+                  ].map((s) => (
+                    <div key={s.label} className="text-center">
+                      <p className="text-lg font-semibold text-gray-800 leading-tight">{s.val}</p>
+                      <p className="text-xs text-gray-400">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="relative flex-1 min-w-48 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" />
+                    <input type="text" placeholder="Search questions..." value={bankSearch} onChange={(e) => setBankSearch(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 placeholder:text-gray-400" />
                   </div>
-                  <div>
-                    <Label className="text-xs text-gray-500">Created Date</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.createdAt}</p>
+                  <div className="flex items-center gap-1">
+                    {(['', 'mcq', 'true-false', 'essay'] as const).map((t) => (
+                      <button key={t} onClick={() => setTypeFilter(t)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${typeFilter === t ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-teal-50'}`}>
+                        {t === '' ? 'All' : t === 'mcq' ? 'MCQ' : t === 'true-false' ? 'T/F' : 'Essay'}
+                      </button>
+                    ))}
                   </div>
-                  <div>
-                    <Label className="text-xs text-gray-500">Usage Count</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.usageCount} times</p>
+                  <div className="h-5 w-px bg-gray-200" />
+                  <div className="flex items-center gap-1">
+                    {(['', 'easy', 'medium', 'hard'] as const).map((d) => {
+                      const colors: Record<string, string> = { easy: 'bg-emerald-100 text-emerald-700 border-emerald-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', hard: 'bg-red-100 text-red-700 border-red-200' };
+                      return (
+                        <button key={d} onClick={() => setDiffFilter(d)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${diffFilter === d ? (d === '' ? 'bg-teal-600 text-white border-teal-600' : colors[d]) : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                          {d === '' ? 'All' : d.charAt(0).toUpperCase() + d.slice(1)}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <Label className="text-xs text-gray-500">Question ID</Label>
-                    <p className="text-sm text-gray-900">{selectedQuestion.id}</p>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
+                      <Upload className="size-3.5" />Import
+                    </button>
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
+                      <Plus className="size-4" />Add Question
+                    </button>
                   </div>
                 </div>
               </div>
-            )}
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                <div className="max-w-4xl mx-auto space-y-2">
+                  <p className="text-sm text-gray-400 mb-4"><span className="font-semibold text-gray-700">{filteredBank.length}</span> question{filteredBank.length !== 1 ? 's' : ''}</p>
+                  {filteredBank.map((q, i) => <BankCard key={q.id} q={q} index={i} onDelete={handleDeleteBank} onDuplicate={handleDuplicate} />)}
+                  {filteredBank.length === 0 && (
+                    <div className="text-center py-16">
+                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gray-100 mb-4">
+                        <BookOpen className="size-6 text-gray-400" />
+                      </div>
+                      <p className="text-gray-600 font-medium">No questions found</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowViewDialog(false)}>
-                Close
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </main>
+      {/* ── APPROVALS TAB ──────────────────────────────── */}
+      {mainTab === 'approvals' && (
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center gap-4 mb-5 flex-wrap">
+              <div className="relative flex-1 min-w-48 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" />
+                <input type="text" placeholder="Search pending questions..." value={approvalSearch} onChange={(e) => setApprovalSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 placeholder:text-gray-400" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Type</span>
+                {(['', 'mcq', 'true-false', 'essay'] as const).map((t) => (
+                  <button key={t} onClick={() => setApprovalType(t)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${approvalType === t ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-teal-50'}`}>
+                    {t === '' ? 'All' : t === 'mcq' ? 'MCQ' : t === 'true-false' ? 'T/F' : 'Essay'}
+                  </button>
+                ))}
+              </div>
+              <div className="h-5 w-px bg-gray-200" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Level</span>
+                {(['', 'easy', 'medium', 'hard'] as const).map((d) => {
+                  const colors: Record<string, string> = { easy: 'bg-emerald-100 text-emerald-700 border-emerald-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', hard: 'bg-red-100 text-red-700 border-red-200' };
+                  return (
+                    <button key={d} onClick={() => setApprovalDiff(d)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${approvalDiff === d ? (d === '' ? 'bg-teal-600 text-white border-teal-600' : colors[d]) : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                      {d === '' ? 'All' : d.charAt(0).toUpperCase() + d.slice(1)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm text-gray-400"><span className="font-semibold text-gray-700">{filteredPending.length}</span> pending request{filteredPending.length !== 1 ? 's' : ''}</p>
+              {filteredPending.length > 0 && (
+                <button onClick={() => { filteredPending.forEach((q) => handleApprove(q.id)); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors">
+                  <CheckCircle className="size-3.5" />Approve All
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {filteredPending.map((q) => <PendingCard key={q.id} q={q} onClick={() => setDetailQuestion(q)} />)}
+            </div>
+
+            {filteredPending.length === 0 && (
+              <div className="text-center py-16">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-50 mb-4">
+                  <CheckCircle className="size-6 text-emerald-500" />
+                </div>
+                <p className="text-gray-600 font-medium">All caught up!</p>
+                <p className="text-sm text-gray-400 mt-1">No pending approval requests.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {detailQuestion && (
+        <ApprovalDetailModal
+          q={detailQuestion}
+          onClose={() => setDetailQuestion(null)}
+          onApprove={(id) => { handleApprove(id); setDetailQuestion(null); }}
+          onReject={(id, reason) => { handleReject(id, reason); setDetailQuestion(null); }}
+        />
+      )}
     </div>
   );
 }

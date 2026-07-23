@@ -11,15 +11,6 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
-import { Label } from '../ui/label';
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -38,6 +29,10 @@ import {
   Unlock,
   Mail,
   Calendar,
+  Eye,
+  EyeOff,
+  X,
+  Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -127,6 +122,8 @@ export function UserManagementPage() {
   // Form states
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formPassword, setFormPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [formRole, setFormRole] = useState<'student' | 'teacher' | 'admin'>('student');
   const [formStatus, setFormStatus] = useState<'active' | 'suspended' | 'inactive'>('active');
 
@@ -203,6 +200,8 @@ export function UserManagementPage() {
   const resetForm = () => {
     setFormName('');
     setFormEmail('');
+    setFormPassword('');
+    setShowPassword(false);
     setFormRole('student');
     setFormStatus('active');
   };
@@ -414,150 +413,132 @@ export function UserManagementPage() {
           </div>
         </Card>
 
-        {/* Add User Dialog */}
-        <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>Create a new user account in the system</DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  placeholder="John Doe"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                />
+        {/* Add User Modal */}
+        {showAddDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowAddDialog(false); resetForm(); } }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+              <div className="px-6 pt-6 pb-4 flex items-start justify-between border-b border-gray-100">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Add New User</h2>
+                  <p className="text-sm text-gray-400 mt-0.5">Create a new user account in the system</p>
+                </div>
+                <button onClick={() => { setShowAddDialog(false); resetForm(); }} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
+                  <X className="size-4" />
+                </button>
               </div>
-
-              <div>
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="john.doe@university.edu"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                />
+              <div className="px-6 py-5 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Full Name</label>
+                  <input type="text" placeholder="John Doe" value={formName} onChange={(e) => setFormName(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Email Address</label>
+                  <input type="email" placeholder="john.doe@university.edu" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Password</label>
+                  <div className="relative">
+                    <input type={showPassword ? 'text' : 'password'} placeholder="Set initial password" value={formPassword} onChange={(e) => setFormPassword(e.target.value)}
+                      className="w-full px-3 py-2.5 pr-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Role</label>
+                    <select value={formRole} onChange={(e) => setFormRole(e.target.value as any)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
+                      <option value="student">Student</option>
+                      <option value="teacher">Teacher</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Status</label>
+                    <select value={formStatus} onChange={(e) => setFormStatus(e.target.value as any)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-
-              <div>
-                <Label htmlFor="role">Role</Label>
-                <Select value={formRole} onValueChange={(v: any) => setFormRole(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="student">Student</SelectItem>
-                    <SelectItem value="teacher">Teacher</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select value={formStatus} onValueChange={(v: any) => setFormStatus(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                    <SelectItem value="suspended">Suspended</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddUser}
-                className="bg-gradient-to-r from-red-500 to-orange-600"
-                disabled={!formName || !formEmail}
-              >
-                Add User
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit User Dialog */}
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>Update user information</DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="edit-name">Full Name</Label>
-                <Input
-                  id="edit-name"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="edit-email">Email Address</Label>
-                <Input
-                  id="edit-email"
-                  type="email"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="edit-role">Role</Label>
-                <Select value={formRole} onValueChange={(v: any) => setFormRole(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="student">Student</SelectItem>
-                    <SelectItem value="teacher">Teacher</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="edit-status">Status</Label>
-                <Select value={formStatus} onValueChange={(v: any) => setFormStatus(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                    <SelectItem value="suspended">Suspended</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+                <button onClick={() => { setShowAddDialog(false); resetForm(); }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+                <button onClick={handleAddUser} disabled={!formName || !formEmail || !formPassword}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-teal-500 to-teal-600 rounded-lg hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                  <UserPlus className="size-4" />Add User
+                </button>
               </div>
             </div>
+          </div>
+        )}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowEditDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleEditUser}
-                className="bg-gradient-to-r from-red-500 to-orange-600"
-              >
-                Save Changes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Edit User Modal */}
+        {showEditDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowEditDialog(false); resetForm(); } }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+              <div className="px-6 pt-6 pb-4 flex items-start justify-between border-b border-gray-100">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Edit User</h2>
+                  <p className="text-sm text-gray-400 mt-0.5">Update user account information</p>
+                </div>
+                <button onClick={() => { setShowEditDialog(false); resetForm(); }} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Full Name</label>
+                  <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Email Address</label>
+                  <input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Role</label>
+                    <select value={formRole} onChange={(e) => setFormRole(e.target.value as any)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
+                      <option value="student">Student</option>
+                      <option value="teacher">Teacher</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Status</label>
+                    <select value={formStatus} onChange={(e) => setFormStatus(e.target.value as any)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+                <button onClick={() => { setShowEditDialog(false); resetForm(); }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+                <button onClick={handleEditUser} disabled={!formName || !formEmail}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-teal-500 to-teal-600 rounded-lg hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                  <Save className="size-4" />Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

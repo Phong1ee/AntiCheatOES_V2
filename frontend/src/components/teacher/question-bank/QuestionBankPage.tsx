@@ -3,7 +3,6 @@ import { SubjectSidebar } from "./SubjectSidebar";
 import { QuestionFilters } from "./QuestionFilters";
 import { BankQuestionList } from "./BankQuestionList";
 import { YourQuestionsList } from "./YourQuestionsList";
-import "./QuestionBankReplica.css";
 import { QuestionEditor } from "./QuestionEditor";
 import { QuestionDetailModal } from "./QuestionDetailModal";
 import { Search, Library, User, Database } from "lucide-react";
@@ -330,8 +329,8 @@ export function QuestionBankPage() {
   };
 
   return (
-    <div className="qb-ref-page">
-      <div className="qb-ref-sidebar-slot">
+    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-gray-50 text-gray-800">
+      <div className="hidden w-56 shrink-0 min-w-0 md:block">
         <SubjectSidebar
           selectedSubject={selectedSubject}
           subjects={subjects}
@@ -341,16 +340,18 @@ export function QuestionBankPage() {
         />
       </div>
 
-      <main className="qb-ref-main">
-        <header className="qb-ref-topbar">
-          <div className="qb-ref-title-row">
-            <div className="qb-ref-title-wrap">
-              <span className="qb-ref-title-icon">
-                <Database />
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="shrink-0 border-b border-gray-100 bg-white px-4 py-4 md:px-6">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+                <Database className="size-4" />
               </span>
               <div>
-                <h1 className="qb-ref-title">Question Bank</h1>
-                <p className="qb-ref-subtitle">
+                <h1 className="m-0 text-base font-semibold leading-tight text-gray-800">
+                  Question Bank
+                </h1>
+                <p className="m-0 mt-0.5 text-xs leading-tight text-gray-400">
                   {activeTab === "bank"
                     ? "Browse the central question library"
                     : "Questions you have created"}
@@ -360,7 +361,7 @@ export function QuestionBankPage() {
           </div>
 
           <div
-            className="qb-ref-tabs"
+            className="mb-4 inline-flex max-w-full items-center gap-1 rounded-xl bg-gray-100 p-1"
             role="tablist"
             aria-label="Question bank sections"
           >
@@ -368,7 +369,11 @@ export function QuestionBankPage() {
               type="button"
               role="tab"
               aria-selected={activeTab === "bank"}
-              className={`qb-ref-tab${activeTab === "bank" ? " is-active" : ""}`}
+              className={`inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border-0 px-4 py-1.5 font-[inherit] text-sm font-medium leading-5 transition-all max-[480px]:px-3 [&_svg]:size-3.5 ${
+                activeTab === "bank"
+                  ? "bg-white text-gray-800 shadow-sm"
+                  : "bg-transparent text-gray-500 hover:text-gray-700"
+              }`}
               onClick={() => resetPagingAndFiltersForTab("bank")}
             >
               <Library />
@@ -378,7 +383,11 @@ export function QuestionBankPage() {
               type="button"
               role="tab"
               aria-selected={activeTab === "mine"}
-              className={`qb-ref-tab${activeTab === "mine" ? " is-active" : ""}`}
+              className={`inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border-0 px-4 py-1.5 font-[inherit] text-sm font-medium leading-5 transition-all max-[480px]:px-3 [&_svg]:size-3.5 ${
+                activeTab === "mine"
+                  ? "bg-white text-gray-800 shadow-sm"
+                  : "bg-transparent text-gray-500 hover:text-gray-700"
+              }`}
               onClick={() => resetPagingAndFiltersForTab("mine")}
             >
               <User />
@@ -386,9 +395,9 @@ export function QuestionBankPage() {
             </button>
           </div>
 
-          <div className="qb-ref-toolbar">
-            <div className="qb-ref-search">
-              <Search />
+          <div className="flex flex-wrap items-center gap-4 max-md:items-stretch">
+            <div className="relative min-w-48 flex-1 basis-[280px] md:max-w-sm max-md:w-full max-md:max-w-none max-md:basis-full">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-gray-400" />
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
@@ -397,6 +406,7 @@ export function QuestionBankPage() {
                     ? "Search questions, topics, tags..."
                     : "Search your questions..."
                 }
+                className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 font-[inherit] text-sm leading-5 text-gray-700 outline-none transition-all placeholder:text-gray-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-300/40"
               />
             </div>
 
@@ -412,13 +422,12 @@ export function QuestionBankPage() {
           </div>
 
           {activeTab === "bank" && (
-            <div className="qb-ref-mobile-subjects">
+            <div className="hidden gap-2 overflow-x-auto pb-1 pt-4 max-md:flex">
               {subjectsLoading
                 ? [0, 1, 2].map((item) => (
                     <span
                       key={item}
-                      className="qb-ref-mobile-subject"
-                      style={{ width: 112, opacity: 0.55 }}
+                      className="inline-flex min-h-[34px] w-28 shrink-0 items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 opacity-[0.55]"
                     />
                   ))
                 : mobileSubjectItems.map((subject) => {
@@ -427,13 +436,23 @@ export function QuestionBankPage() {
                       <button
                         key={subject.id}
                         type="button"
-                        className={`qb-ref-mobile-subject${active ? " is-active" : ""}`}
+                        className={`inline-flex min-h-[34px] shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 font-[inherit] text-xs font-medium ${
+                          active
+                            ? "border-teal-200 bg-teal-50 text-teal-700"
+                            : "border-gray-200 bg-white text-gray-600"
+                        }`}
                         onClick={() => setSelectedSubject(subject.id)}
                       >
-                        <span className="qb-ref-mobile-subject-name">
+                        <span className="max-w-28 truncate">
                           {subject.name}
                         </span>
-                        <span className="qb-ref-mobile-subject-count">
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                            active
+                              ? "bg-white text-teal-700"
+                              : "bg-gray-100 text-gray-500"
+                          }`}
+                        >
                           {subject.count}
                         </span>
                       </button>
@@ -443,8 +462,8 @@ export function QuestionBankPage() {
           )}
         </header>
 
-        <section className="qb-ref-content-scroll">
-          <div className="qb-ref-content-inner">
+        <section className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5">
+          <div className="mx-auto w-full max-w-4xl">
             {activeTab === "bank" ? (
               <BankQuestionList
                 questions={questions}

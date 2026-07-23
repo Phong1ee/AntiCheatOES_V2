@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import "./QuestionEditorReplica.css";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
@@ -389,39 +388,39 @@ export function QuestionEditor({
 
   return createPortal(
     <div
-      className="qb-editor-backdrop"
+      className="oes-dialog-overlay flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="qb-editor-modal">
-        <div className="qb-editor-header">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">
+      <div className="question-editor-modal bg-white">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold text-slate-900">
               {questionId ? "Edit Question" : "New Question"}
             </h2>
-            <p className="mt-0.5 text-sm text-gray-400">
+            <p className="mt-0.5 text-sm text-slate-500">
               Save a reusable draft or submit it for admin review.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="qb-editor-close"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
             aria-label="Close question editor"
           >
-            <X className="size-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="qb-editor-body">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {loading && (
-            <div className="flex min-h-64 items-center justify-center rounded-xl border border-gray-200 bg-gray-50">
+            <div className="flex min-h-64 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
               <div className="flex flex-col items-center gap-3 text-center">
                 <Loader2 className="size-8 animate-spin text-teal-600" />
-                <p className="text-sm font-medium text-gray-700">
+                <p className="text-sm font-medium text-slate-700">
                   Loading question editor...
                 </p>
               </div>
@@ -473,10 +472,10 @@ export function QuestionEditor({
                       }
                       disabled={isPending}
                     >
-                      <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="qb-editor-select-content">
+                    <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                      <SelectContent className="oes-select-content">
                         <SelectItem value="MCQ">Multiple Choice</SelectItem>
                         <SelectItem value="true-false">True/False</SelectItem>
                         <SelectItem value="essay">Essay</SelectItem>
@@ -494,10 +493,10 @@ export function QuestionEditor({
                       }
                       disabled={isPending}
                     >
-                      <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
-                        <SelectValue placeholder="Optional for drafts" />
-                      </SelectTrigger>
-                      <SelectContent className="qb-editor-select-content">
+                    <SelectTrigger className="rounded-lg border-gray-200 bg-gray-50 text-sm focus:ring-2 focus:ring-teal-300 focus:ring-offset-0">
+                      <SelectValue placeholder="Optional for drafts" />
+                    </SelectTrigger>
+                      <SelectContent className="oes-select-content">
                         <SelectItem value="none">No difficulty</SelectItem>
                         <SelectItem value="easy">Easy</SelectItem>
                         <SelectItem value="medium">Medium</SelectItem>
@@ -556,7 +555,7 @@ export function QuestionEditor({
                     >
                       <SelectValue placeholder="Select subject" />
                     </SelectTrigger>
-                    <SelectContent className="qb-editor-select-content">
+                    <SelectContent className="oes-select-content">
                       <SelectItem value={subjectPlaceholder} disabled>
                         Select subject
                       </SelectItem>
@@ -818,21 +817,21 @@ export function QuestionEditor({
           )}
         </div>
 
-        <div className="qb-editor-footer">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <Button
             variant="outline"
             onClick={onClose}
-            className="rounded-lg border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="h-10 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancel
           </Button>
-          <div className="qb-editor-actions">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {!isApprovedEdit && (
               <Button
                 variant="outline"
                 onClick={saveDraft}
                 disabled={draftDisabled || loading}
-                className="gap-1.5 rounded-lg border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="h-10 gap-1.5 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 {saving ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -845,7 +844,7 @@ export function QuestionEditor({
             <Button
               onClick={submitForApproval}
               disabled={submitActionDisabled}
-              className="gap-1.5 rounded-lg bg-teal-500 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600"
+              className="h-10 gap-1.5 rounded-full bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
             >
               {saving ? (
                 <Loader2 className="size-4 animate-spin" />

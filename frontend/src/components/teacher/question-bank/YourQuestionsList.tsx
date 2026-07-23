@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import {
   AlertCircle,
   BarChart2,
@@ -71,20 +71,20 @@ const typeConfig: Record<
   MCQ: {
     icon: CheckSquare,
     label: 'MCQ',
-    iconTone: 'border-sky-200 bg-sky-50 text-sky-700',
-    pillTone: 'border-sky-200 bg-sky-50 text-sky-700',
+    iconTone: 'border-blue-100 bg-blue-50 text-blue-600',
+    pillTone: 'bg-blue-50 text-blue-600',
   },
   'true-false': {
     icon: Circle,
     label: 'True/False',
-    iconTone: 'border-violet-200 bg-violet-50 text-violet-700',
-    pillTone: 'border-violet-200 bg-violet-50 text-violet-700',
+    iconTone: 'border-violet-100 bg-violet-50 text-violet-600',
+    pillTone: 'bg-violet-50 text-violet-600',
   },
   essay: {
     icon: FileText,
     label: 'Essay',
-    iconTone: 'border-amber-200 bg-amber-50 text-amber-700',
-    pillTone: 'border-amber-200 bg-amber-50 text-amber-700',
+    iconTone: 'border-amber-100 bg-amber-50 text-amber-600',
+    pillTone: 'bg-amber-50 text-amber-600',
   },
 };
 
@@ -93,27 +93,23 @@ const difficultyConfig: Record<
   {
     label: string;
     pillTone: string;
-    borderTone: string;
     dotTone: string;
   }
 > = {
   easy: {
     label: 'Easy',
-    pillTone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    borderTone: 'border-l-emerald-400',
-    dotTone: 'bg-emerald-400',
+    pillTone: 'bg-emerald-50 text-emerald-600',
+    dotTone: 'bg-emerald-500',
   },
   medium: {
     label: 'Medium',
-    pillTone: 'border-amber-200 bg-amber-50 text-amber-700',
-    borderTone: 'border-l-amber-400',
-    dotTone: 'bg-amber-400',
+    pillTone: 'bg-amber-50 text-amber-600',
+    dotTone: 'bg-amber-500',
   },
   hard: {
     label: 'Hard',
-    pillTone: 'border-rose-200 bg-rose-50 text-rose-700',
-    borderTone: 'border-l-rose-400',
-    dotTone: 'bg-rose-400',
+    pillTone: 'bg-rose-50 text-rose-600',
+    dotTone: 'bg-rose-500',
   },
 };
 
@@ -130,34 +126,37 @@ const statusConfig: Record<
   draft: {
     label: 'Draft',
     icon: AlertCircle,
-    pillTone: 'border-slate-200 bg-slate-50 text-slate-600',
-    borderTone: 'border-l-slate-300',
-    tabTone: 'bg-slate-100 text-slate-700',
+    pillTone: 'bg-gray-100 text-gray-600',
+    borderTone: 'border-l-gray-300',
+    tabTone: 'bg-gray-100 text-gray-700',
   },
   pending: {
     label: 'Pending',
     icon: Clock,
-    pillTone: 'border-amber-200 bg-amber-50 text-amber-700',
+    pillTone: 'bg-amber-50 text-amber-600',
     borderTone: 'border-l-amber-400',
     tabTone: 'bg-amber-100 text-amber-700',
   },
   approved: {
     label: 'Approved',
     icon: CheckCircle,
-    pillTone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    pillTone: 'bg-emerald-50 text-emerald-600',
     borderTone: 'border-l-emerald-400',
     tabTone: 'bg-emerald-100 text-emerald-700',
   },
   rejected: {
     label: 'Rejected',
     icon: XCircle,
-    pillTone: 'border-rose-200 bg-rose-50 text-rose-700',
+    pillTone: 'bg-rose-50 text-rose-600',
     borderTone: 'border-l-rose-400',
     tabTone: 'bg-rose-100 text-rose-700',
   },
 };
 
-const statusTabs: Array<{ value: StatusFilter; label: string }> = [
+const statusTabs: Array<{
+  value: StatusFilter;
+  label: string;
+}> = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Draft' },
   { value: 'pending', label: 'Pending' },
@@ -165,48 +164,42 @@ const statusTabs: Array<{ value: StatusFilter; label: string }> = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
-function formatDate(value?: string | null): string | null {
-  if (!value) return null;
+function formatDate(value?: string | null): string {
+  if (!value) {
+    return 'Unknown';
+  }
+
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown';
+  }
+
   return date.toLocaleDateString('en-US', {
     month: 'short',
-    day: 'numeric',
+    day: '2-digit',
     year: 'numeric',
   });
 }
 
-function getRejectedFeedback(question: QuestionBankItem): string | null {
+function getRejectedFeedback(
+  question: QuestionBankItem,
+): string | null {
   return (
-    (question as QuestionBankItem & { rejected_feedback?: string | null })
-      .rejected_feedback ?? null
+    (
+      question as QuestionBankItem & {
+        rejected_feedback?: string | null;
+      }
+    ).rejected_feedback ?? null
   );
 }
 
-function joinValues(values: string[]): string {
-  return values.length > 0 ? values.join(', ') : 'None';
-}
+function getChapterText(question: QuestionBankItem): string {
+  const chapters = question.chapters
+    .map((chapter) => chapter.chapter_name)
+    .filter(Boolean);
 
-function MetaItem({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm shadow-slate-100/60">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {label}
-        </p>
-        <div className="mt-0.5 text-sm font-medium text-slate-900">{value}</div>
-      </div>
-    </div>
-  );
+  return chapters.length > 0 ? chapters.join(', ') : 'None';
 }
 
 function Pagination({
@@ -225,16 +218,17 @@ function Pagination({
         size="sm"
         disabled={page <= 1}
         onClick={() => onPageChange(page - 1)}
-        className="h-10 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="h-10 rounded-full border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
       >
         Previous
       </Button>
+
       <Button
         variant="outline"
         size="sm"
         disabled={page >= totalPages}
         onClick={() => onPageChange(page + 1)}
-        className="h-10 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="h-10 rounded-full border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
       >
         Next
       </Button>
@@ -261,15 +255,17 @@ export function YourQuestionsList({
 }: YourQuestionsListProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const statusCountText = statusFilter === 'all' ? total : questions.length;
+  const statusCountText =
+    statusFilter === 'all' ? total : questions.length;
 
   return (
     <section className="space-y-4" aria-label="Your questions">
-      <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100 p-1">
+      <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-xl bg-gray-100 p-1">
         {statusTabs.map((tab) => {
           const active = statusFilter === tab.value;
           const count = statusCounts?.[tab.value];
-          const statusInfo = tab.value === 'all' ? null : statusConfig[tab.value];
+          const statusInfo =
+            tab.value === 'all' ? null : statusConfig[tab.value];
 
           return (
             <button
@@ -277,22 +273,24 @@ export function YourQuestionsList({
               type="button"
               role="tab"
               aria-selected={active}
-              className={`inline-flex min-h-9 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition ${
+              className={`inline-flex min-h-9 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition ${
                 active
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
+                  ? 'bg-white text-gray-800 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
               onClick={() => onStatusFilterChange(tab.value)}
             >
               <span>{tab.label}</span>
+
               {typeof count === 'number' && (
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${
                     active
                       ? tab.value === 'all'
                         ? 'bg-teal-100 text-teal-700'
-                        : statusInfo?.tabTone ?? 'bg-slate-200 text-slate-600'
-                      : 'bg-slate-200 text-slate-500'
+                        : statusInfo?.tabTone ??
+                          'bg-gray-200 text-gray-600'
+                      : 'bg-gray-200 text-gray-500'
                   }`}
                 >
                   {count}
@@ -304,8 +302,10 @@ export function YourQuestionsList({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">
-          <span className="font-semibold text-slate-700">{loading ? 0 : statusCountText}</span>{' '}
+        <p className="text-sm text-gray-400">
+          <span className="font-semibold text-gray-700">
+            {loading ? 0 : statusCountText}
+          </span>{' '}
           question{statusCountText !== 1 ? 's' : ''}
         </p>
 
@@ -313,7 +313,7 @@ export function YourQuestionsList({
           type="button"
           size="sm"
           onClick={onNewQuestion}
-          className="h-10 gap-1.5 rounded-full bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
+          className="h-10 gap-1.5 rounded-lg bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
         >
           <Plus className="h-3.5 w-3.5" />
           New Question
@@ -321,70 +321,79 @@ export function YourQuestionsList({
       </div>
 
       {loading && (
-        <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="flex flex-col items-center gap-3 text-center">
             <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-            <p className="text-sm font-medium text-slate-700">Loading questions...</p>
+            <p className="text-sm font-medium text-gray-700">
+              Loading questions...
+            </p>
           </div>
         </div>
       )}
 
       {error && !loading && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
         </div>
       )}
 
       {!loading && !error && (
         <>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {questions.map((question) => {
               const typeInfo = typeConfig[question.question_type];
               const TypeIcon = typeInfo.icon;
-              const statusInfo = statusConfig[question.question_status];
+              const statusInfo =
+                statusConfig[question.question_status];
               const StatusIcon = statusInfo.icon;
+
               const difficulty = question.question_difficulties
                 ? difficultyConfig[question.question_difficulties]
                 : null;
-              const expanded = expandedId === question.question_id;
-              const rejectedFeedback = getRejectedFeedback(question);
-              const createdDate = formatDate(question.created_at);
-              const updatedDate = formatDate(question.updated_at);
-              const chapterText = joinValues(
-                question.chapters.map((chapter) => chapter.chapter_name),
-              );
-              const loText = joinValues(
-                question.learning_objectives.map((lo) => lo.lo_name),
-              );
+
+              const expanded =
+                expandedId === question.question_id;
+
+              const rejectedFeedback =
+                getRejectedFeedback(question);
+
+              const chapter = getChapterText(question);
+
+              const subject = question.subject
+                ? `${question.subject.subject_id} - ${question.subject.subject_name}`
+                : 'No Subject';
+
+              const createdAt = formatDate(question.created_at);
+
               const showOptionCount =
-                question.question_type === 'MCQ' &&
-                typeof question.option_count === 'number';
+                typeof question.option_count === 'number' &&
+                question.question_type !== 'essay';
 
               return (
                 <article
                   key={question.question_id}
-                  className={`overflow-hidden rounded-2xl border border-slate-200 border-l-4 bg-white shadow-sm shadow-slate-100/60 transition hover:border-slate-300 hover:shadow-md ${statusInfo.borderTone}`}
+                  className={`overflow-hidden rounded-xl border border-gray-200 border-l-4 bg-white shadow-sm transition-shadow hover:shadow-md ${statusInfo.borderTone}`}
                 >
-                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:gap-4">
+                  <div className="flex items-start gap-3 px-5 py-4">
                     <span
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${typeInfo.iconTone}`}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${typeInfo.iconTone}`}
                     >
-                      <TypeIcon className="h-5 w-5" />
+                      <TypeIcon className="h-4 w-4" />
                     </span>
 
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold leading-6 text-slate-900">
+                      <p className="line-clamp-2 text-sm font-medium leading-5 text-gray-800">
                         {question.question_text}
                       </p>
 
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${typeInfo.pillTone}`}
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${typeInfo.pillTone}`}
                         >
                           {typeInfo.label}
+
                           {showOptionCount && (
-                            <span className="font-medium text-slate-500">
-                              {' '}
+                            <span className="ml-1 text-current opacity-70">
                               · {question.option_count} opts
                             </span>
                           )}
@@ -392,32 +401,37 @@ export function YourQuestionsList({
 
                         {difficulty && (
                           <span
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${difficulty.pillTone}`}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${difficulty.pillTone}`}
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${difficulty.dotTone}`} />
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${difficulty.dotTone}`}
+                            />
+
                             {difficulty.label}
                           </span>
                         )}
 
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${statusInfo.pillTone}`}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${statusInfo.pillTone}`}
                         >
-                          <StatusIcon className="h-3.5 w-3.5" />
+                          <StatusIcon className="h-3 w-3" />
                           {statusInfo.label}
                         </span>
 
                         {typeof question.usage_count === 'number' &&
                           question.usage_count > 0 && (
-                            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                              <BarChart2 className="h-3.5 w-3.5" />
-                              Used in {question.usage_count} exam
-                              {question.usage_count === 1 ? '' : 's'}
+                            <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                              <BarChart2 className="h-3 w-3" />
+                              Used in {question.usage_count}{' '}
+                              {question.usage_count === 1
+                                ? 'exam'
+                                : 'exams'}
                             </span>
                           )}
 
                         {question.subject && (
                           <span
-                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600"
+                            className="rounded-full bg-gray-50 px-2.5 py-1 text-xs text-gray-400"
                             title={question.subject.subject_name}
                           >
                             #{question.subject.subject_id}
@@ -427,23 +441,35 @@ export function YourQuestionsList({
 
                       {question.question_status === 'rejected' &&
                         rejectedFeedback && (
-                          <div className="mt-2 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                          <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                             <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span>{rejectedFeedback}</span>
                           </div>
                         )}
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-2 sm:pt-1">
+                    <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
                         onClick={() =>
-                          setExpandedId(expanded ? null : question.question_id)
+                          setExpandedId(
+                            expanded
+                              ? null
+                              : question.question_id,
+                          )
                         }
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                          expanded
+                            ? 'border-gray-800 bg-white text-gray-700'
+                            : 'border-transparent text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                        }`}
                         title="Show details"
                         aria-expanded={expanded}
-                        aria-label={expanded ? 'Collapse question' : 'Expand question'}
+                        aria-label={
+                          expanded
+                            ? 'Collapse question'
+                            : 'Expand question'
+                        }
                       >
                         {expanded ? (
                           <ChevronUp className="h-4 w-4" />
@@ -454,8 +480,10 @@ export function YourQuestionsList({
 
                       <button
                         type="button"
-                        onClick={() => onView(question.question_id)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-teal-200 bg-teal-50 text-teal-600 transition hover:border-teal-300 hover:bg-teal-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+                        onClick={() =>
+                          onView(question.question_id)
+                        }
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition hover:bg-teal-50 hover:text-teal-600"
                         aria-label="View question"
                         title="View"
                       >
@@ -465,121 +493,149 @@ export function YourQuestionsList({
                   </div>
 
                   {expanded && (
-                    <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-4">
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 gap-3 text-xs text-slate-500 md:grid-cols-3">
-                          <MetaItem
-                            icon={BookOpen}
-                            label="Subject"
-                            value={
-                              question.subject
-                                ? `${question.subject.subject_id} - ${question.subject.subject_name}`
-                                : 'No Subject'
+                    <div className="border-t border-gray-100 px-5 py-4">
+                      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+                        <div className="flex items-start gap-2">
+                          <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-gray-700">
+                              Subject
+                            </p>
+
+                            <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                              {subject}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-gray-700">
+                              Chapter
+                            </p>
+
+                            <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                              {chapter}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-gray-700">
+                              Created
+                            </p>
+
+                            <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                              {createdAt}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        {question.permissions.can_edit && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              onEdit(question.question_id)
                             }
-                          />
-                          {createdDate && (
-                            <MetaItem icon={Calendar} label="Created" value={createdDate} />
-                          )}
-                          {updatedDate && (
-                            <MetaItem icon={Calendar} label="Updated" value={updatedDate} />
-                          )}
-                        </div>
+                            className="h-9 rounded-lg border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        )}
 
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm shadow-slate-100/60">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Chapters
-                            </p>
-                            <p className="mt-1 text-sm font-medium text-slate-900">
-                              {chapterText}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm shadow-slate-100/60">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Learning Objectives
-                            </p>
-                            <p className="mt-1 text-sm font-medium text-slate-900">
-                              {loText}
-                            </p>
-                          </div>
-                        </div>
+                        {question.permissions.can_submit && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              onSubmit(question.question_id)
+                            }
+                            className="h-9 rounded-lg border-teal-200 bg-teal-50 px-3 text-xs font-medium text-teal-700 hover:bg-teal-100"
+                          >
+                            <Send className="mr-1.5 h-3.5 w-3.5" />
+                            Submit for Approval
+                          </Button>
+                        )}
 
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                          {question.permissions.can_edit && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onEdit(question.question_id)}
-                              className="h-10 rounded-full border-slate-200 px-4 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                            >
-                              <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                              Edit
-                            </Button>
-                          )}
-                          {question.permissions.can_submit && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onSubmit(question.question_id)}
-                              className="h-10 rounded-full border-teal-200 bg-teal-50 px-4 text-xs font-medium text-teal-700 hover:bg-teal-100"
-                            >
-                              <Send className="mr-1.5 h-3.5 w-3.5" />
-                              Submit for Approval
-                            </Button>
-                          )}
-                          {question.permissions.can_resubmit && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onSubmit(question.question_id)}
-                              className="h-10 rounded-full border-teal-200 bg-teal-50 px-4 text-xs font-medium text-teal-700 hover:bg-teal-100"
-                            >
-                              <Send className="mr-1.5 h-3.5 w-3.5" />
-                              Resubmit
-                            </Button>
-                          )}
-                          {question.permissions.can_delete && (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-10 rounded-full border-rose-200 px-4 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                        {question.permissions.can_resubmit && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              onSubmit(question.question_id)
+                            }
+                            className="h-9 rounded-lg border-teal-200 bg-teal-50 px-3 text-xs font-medium text-teal-700 hover:bg-teal-100"
+                          >
+                            <Send className="mr-1.5 h-3.5 w-3.5" />
+                            Resubmit
+                          </Button>
+                        )}
+
+                        {question.permissions.can_delete && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-9 rounded-lg border-rose-200 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                              >
+                                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                Delete
+                              </Button>
+                            </AlertDialogTrigger>
+
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Delete question?
+                                </AlertDialogTitle>
+
+                                <AlertDialogDescription>
+                                  This removes the question from your
+                                  list when it is not used by an exam.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>
+                                  Cancel
+                                </AlertDialogCancel>
+
+                                <AlertDialogAction
+                                  onClick={() =>
+                                    onDelete(
+                                      question.question_id,
+                                    )
+                                  }
+                                  className="bg-rose-600 hover:bg-rose-700"
                                 >
-                                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                                   Delete
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete question?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This removes the question from your list when it is not used by an exam.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => onDelete(question.question_id)}
-                                    className="bg-rose-600 hover:bg-rose-700"
-                                  >
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+
+                        {question.question_status === 'pending' &&
+                          !question.permissions.can_edit &&
+                          !question.permissions.can_submit &&
+                          !question.permissions.can_resubmit &&
+                          !question.permissions.can_delete && (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                              <Clock className="h-3.5 w-3.5" />
+                              Awaiting admin review
+                            </span>
                           )}
-                          {question.question_status === 'pending' &&
-                            !question.permissions.can_edit &&
-                            !question.permissions.can_submit &&
-                            !question.permissions.can_resubmit &&
-                            !question.permissions.can_delete && (
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                                <Clock className="h-3.5 w-3.5" />
-                                Awaiting admin review
-                              </span>
-                            )}
-                        </div>
                       </div>
                     </div>
                   )}
@@ -590,11 +646,15 @@ export function YourQuestionsList({
 
           {questions.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
-                <FileText className="h-6 w-6 text-slate-400" />
+              <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100">
+                <FileText className="h-6 w-6 text-gray-400" />
               </div>
-              <p className="font-medium text-slate-600">No questions here</p>
-              <p className="mt-1 text-sm text-slate-400">
+
+              <p className="font-medium text-gray-600">
+                No questions here
+              </p>
+
+              <p className="mt-1 text-sm text-gray-400">
                 {statusFilter === 'all'
                   ? 'Start creating questions to add them to your bank.'
                   : `You have no ${statusFilter} questions.`}
@@ -604,10 +664,15 @@ export function YourQuestionsList({
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-gray-400">
                 Page {page} of {totalPages}
               </p>
-              <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={onPageChange}
+              />
             </div>
           )}
         </>

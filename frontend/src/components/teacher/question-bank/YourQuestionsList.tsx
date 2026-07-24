@@ -194,6 +194,12 @@ function getRejectedFeedback(
   );
 }
 
+function getDisplayStatus(question: QuestionBankItem): QuestionStatus {
+  if (question.question_status !== 'approved') return question.question_status;
+  if (question.has_pending_revision) return 'pending';
+  return question.revision_rejection_reason ? 'rejected' : 'approved';
+}
+
 function getChapterText(question: QuestionBankItem): string {
   const chapters = question.chapters
     .map((chapter) => chapter.chapter_name)
@@ -354,8 +360,9 @@ export function YourQuestionsList({
 
               const TypeIcon = typeInfo.icon;
 
-              const statusInfo =
-                statusConfig[question.question_status];
+              const displayStatus = getDisplayStatus(question);
+
+              const statusInfo = statusConfig[displayStatus];
 
               const StatusIcon = statusInfo.icon;
 
@@ -391,14 +398,13 @@ export function YourQuestionsList({
                * Khi backend được cập nhật, permission trả về true thì
                * biểu thức này vẫn hoạt động bình thường.
                */
-              const isPending =
-                question.question_status === 'pending';
+              const isPending = displayStatus === 'pending';
 
               const canEdit =
-                question.permissions.can_edit || isPending;
+                displayStatus !== 'approved' &&
+                (question.permissions.can_edit || isPending);
 
-              const canDelete =
-                question.permissions.can_delete || isPending;
+              const canDelete = question.permissions.can_delete;
 
               return (
                 <article
@@ -474,8 +480,7 @@ export function YourQuestionsList({
                         )}
                       </div>
 
-                      {question.question_status ===
-                        'rejected' &&
+                      {displayStatus === 'rejected' &&
                         rejectedFeedback && (
                           <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                             <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

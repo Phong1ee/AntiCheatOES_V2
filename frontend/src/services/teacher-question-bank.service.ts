@@ -4,6 +4,7 @@ import type {
   LearningObjectiveSummary,
   QuestionBankListParams,
   QuestionDetail,
+  QuestionEditPayload,
   QuestionListResponse,
   QuestionPayload,
   SubjectCountResponse,
@@ -53,6 +54,13 @@ export const teacherQuestionBankService = {
 
   async getDetail(questionId: number): Promise<QuestionDetail> {
     const { data } = await apiClient.get<QuestionDetail>(`/api/teacher/question-bank/${questionId}`);
+    return data;
+  },
+
+  async getEditPayload(questionId: number): Promise<QuestionEditPayload> {
+    const { data } = await apiClient.get<QuestionEditPayload>(
+      `/api/teacher/question-bank/${questionId}/edit`,
+    );
     return data;
   },
 

@@ -98,11 +98,33 @@ export function QuestionBankPage() {
     };
 
     questions.forEach((question) => {
-      counts[question.question_status] += 1;
+      const displayStatus =
+        question.question_status === "approved" && question.has_pending_revision
+          ? "pending"
+          : question.question_status === "approved" && question.revision_rejection_reason
+            ? "rejected"
+            : question.question_status;
+      counts[displayStatus] += 1;
     });
 
     return counts;
   }, [questions]);
+
+  const visibleQuestions = useMemo(() => {
+    if (activeTab !== "mine" || !filters.status) return questions;
+    return questions.filter((question) => {
+      const displayStatus =
+        question.question_status === "approved" && question.has_pending_revision
+          ? "pending"
+          : question.question_status === "approved" && question.revision_rejection_reason
+            ? "rejected"
+            : question.question_status;
+      return displayStatus === filters.status;
+    });
+  }, [activeTab, filters.status, questions]);
+
+  const visibleTotal =
+    activeTab === "mine" && filters.status ? visibleQuestions.length : total;
 
   const mobileSubjectItems = useMemo(
     () => [
@@ -474,13 +496,17 @@ export function QuestionBankPage() {
                 pageSize={pageSize}
                 onPageChange={setPage}
                 onView={setDetailQuestionId}
+                onEdit={(questionId) => {
+                  setEditorQuestionId(questionId);
+                  setEditorOpen(true);
+                }}
               />
             ) : (
               <YourQuestionsList
-                questions={questions}
+                questions={visibleQuestions}
                 loading={loading}
                 error={error}
-                total={total}
+                total={visibleTotal}
                 page={page}
                 pageSize={pageSize}
                 statusFilter={filters.status ?? "all"}
@@ -508,7 +534,18 @@ export function QuestionBankPage() {
         open={editorOpen}
         questionId={editorQuestionId}
         onClose={() => setEditorOpen(false)}
-        onSaved={refresh}
+        onSaved={(nextStatus) => {
+          if (nextStatus === "pending") {
+            setActiveTab("mine");
+            setSelectedSubject("all");
+            setFilters({ status: "pending" });
+            setPage(1);
+            setQuestions([]);
+          } else if (activeTab === "mine" && nextStatus) {
+            setFilters((current) => ({ ...current, status: nextStatus }));
+          }
+          refresh();
+        }}
       />
 
       <QuestionDetailModal

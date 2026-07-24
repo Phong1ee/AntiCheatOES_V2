@@ -9,6 +9,7 @@ from src.route.profileRoute import router as profile_router
 from src.route.studentRoute.examRoute import router as exam_router
 from src.route.resultsRoute import router as results_router
 from src.route.teacherRoute import router as teacher_router
+from src.route.adminRoute import router as admin_router
 from sqlalchemy.orm import Session
 import src.a_db_config  
 
@@ -46,6 +47,7 @@ def read_root():
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(teacher_router, prefix="/api/teacher", tags=["teacher"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 # app.include_router(teacher_router, prefix="/api/exams", tags=["teacher"])
 app.include_router(exam_router, prefix="/api/exams", tags=["exams"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])

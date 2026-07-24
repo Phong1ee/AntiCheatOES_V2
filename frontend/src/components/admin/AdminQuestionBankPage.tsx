@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
+  adminQuestionApprovalService,
+  type AdminQuestionReviewItem,
+  type AdminRevisionDetail,
+  type AdminRevisionReviewItem,
+} from '../../services/admin-question-approval.service';
+import {
   Database,
   Library,
   ClipboardCheck,
@@ -84,6 +90,7 @@ interface PendingQuestion {
   submittedAt: string;
   usedInExams: number;
   previousVersion?: QuestionSnapshot;
+  reviewTarget?: { kind: 'question'; questionId: number } | { kind: 'revision'; revisionId: number };
 }
 
 interface SubjectMeta {
@@ -92,6 +99,63 @@ interface SubjectMeta {
   color: string;
   iconColor: string;
   dept: string;
+}
+
+function toUiType(type: AdminQuestionReviewItem['question_type']): QType {
+  if (type === 'MCQ') return 'mcq';
+  return type;
+}
+
+function toUiDifficulty(difficulty: AdminQuestionReviewItem['question_difficulties']): Difficulty {
+  return difficulty ?? 'medium';
+}
+
+function toAnswers(options: AdminQuestionReviewItem['options'] = []) {
+  return options.map((option) => ({ text: option.options_text, isCorrect: option.is_correct }));
+}
+
+function toSnapshot(question: AdminQuestionReviewItem | AdminRevisionReviewItem): QuestionSnapshot {
+  return {
+    type: toUiType(question.question_type),
+    difficulty: toUiDifficulty(question.question_difficulties),
+    text: question.question_text,
+    subject: question.subject?.subject_name ?? ('subject_id' in question ? question.subject_id : null) ?? 'No subject',
+    chapters: question.chapters.map((chapter) => chapter.chapter_name ?? `Chapter ${chapter.chapter_id}`),
+    learningObjectives: question.learning_objectives.map((lo) => lo.lo_name ?? `LO ${lo.lo_id}`),
+    answers: toAnswers(question.options),
+    editedAt: question.updated_at ?? question.created_at ?? '',
+  };
+}
+
+function toPendingQuestion(question: AdminQuestionReviewItem): PendingQuestion {
+  const snapshot = toSnapshot(question);
+  return {
+    id: `question-${question.question_id}`,
+    ...snapshot,
+    submittedBy: question.teacher?.full_name ?? question.teacher?.school_id ?? 'Unknown teacher',
+    submittedAt: question.updated_at ?? question.created_at ?? '',
+    usedInExams: 0,
+    reviewTarget: { kind: 'question', questionId: question.question_id },
+  };
+}
+
+function toPendingRevision(detail: AdminRevisionDetail): PendingQuestion {
+  const proposed = toSnapshot(detail.proposed_revision);
+  return {
+    id: `revision-${detail.proposed_revision.revision_id}`,
+    ...proposed,
+    submittedBy: detail.proposed_revision.editor?.full_name ?? detail.proposed_revision.editor?.school_id ?? 'Unknown teacher',
+    submittedAt: detail.proposed_revision.updated_at ?? detail.proposed_revision.created_at ?? '',
+    usedInExams: 0,
+    previousVersion: toSnapshot(detail.active_question),
+    reviewTarget: { kind: 'revision', revisionId: detail.proposed_revision.revision_id },
+  };
+}
+
+function formatReviewDate(value: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -121,113 +185,6 @@ const MOCK_BANK: BankQuestion[] = [
   { id: 'b8', type: 'essay', text: 'Explain the box model in CSS.', subject: 'Web Development', department: 'Computer Science', chapter: 'CSS Basics', difficulty: 'medium', createdBy: 'Prof. Johnson', createdAt: '2024-11-05', usageCount: 6 },
 ];
 
-const MOCK_PENDING: PendingQuestion[] = [
-  {
-    id: 'p1',
-    type: 'true-false',
-    difficulty: 'easy',
-    text: 'HTTP is a stateless protocol.',
-    subject: 'Web Development',
-    chapters: ['HTTP Protocols'],
-    learningObjectives: ['LO1', 'LO2'],
-    answers: [{ text: 'True', isCorrect: true }, { text: 'False', isCorrect: false }],
-    submittedBy: 'Nguyen Van A',
-    submittedAt: '2025-07-20',
-    usedInExams: 2,
-  },
-  {
-    id: 'p2',
-    type: 'mcq',
-    difficulty: 'easy',
-    text: 'Which CSS property is used to make text bold?',
-    subject: 'Web Development',
-    chapters: ['CSS Basics', 'Introduction to Web'],
-    learningObjectives: ['LO1'],
-    answers: [
-      { text: 'font-weight: bold', isCorrect: true },
-      { text: 'text-style: bold', isCorrect: false },
-      { text: 'font-style: bold', isCorrect: false },
-      { text: 'text-weight: bold', isCorrect: false },
-    ],
-    submittedBy: 'Nguyen Van A',
-    submittedAt: '2025-07-21',
-    usedInExams: 0,
-    previousVersion: {
-      type: 'mcq',
-      difficulty: 'medium',
-      text: 'Which CSS property controls text boldness?',
-      subject: 'Web Development',
-      chapters: ['CSS Basics'],
-      learningObjectives: ['LO1', 'LO3'],
-      answers: [
-        { text: 'font-weight', isCorrect: true },
-        { text: 'text-bold', isCorrect: false },
-        { text: 'font-bold', isCorrect: false },
-        { text: 'text-weight', isCorrect: false },
-      ],
-      editedAt: '2025-07-20',
-    },
-  },
-  {
-    id: 'p3',
-    type: 'essay',
-    difficulty: 'hard',
-    text: 'Describe the MVC architecture pattern and its advantages in web development.',
-    subject: 'Web Development',
-    chapters: ['Architecture Patterns'],
-    learningObjectives: ['LO2'],
-    submittedBy: 'Tran Thi B',
-    submittedAt: '2025-07-19',
-    usedInExams: 0,
-  },
-  {
-    id: 'p4',
-    type: 'mcq',
-    difficulty: 'easy',
-    text: 'What does SQL stand for?',
-    subject: 'Database Systems',
-    chapters: ['SQL Basics', 'Introduction to Databases'],
-    learningObjectives: ['LO1'],
-    answers: [
-      { text: 'Structured Query Language', isCorrect: true },
-      { text: 'Simple Query Language', isCorrect: false },
-      { text: 'Standard Query Logic', isCorrect: false },
-      { text: 'Sequential Query Language', isCorrect: false },
-    ],
-    submittedBy: 'Le Van C',
-    submittedAt: '2025-07-22',
-    usedInExams: 3,
-    previousVersion: {
-      type: 'mcq',
-      difficulty: 'easy',
-      text: 'SQL stands for?',
-      subject: 'Database Systems',
-      chapters: ['SQL Basics'],
-      learningObjectives: [],
-      answers: [
-        { text: 'Structured Query Language', isCorrect: true },
-        { text: 'Simple Query List', isCorrect: false },
-        { text: 'Stored Query Language', isCorrect: false },
-        { text: 'Sequential Query Language', isCorrect: false },
-      ],
-      editedAt: '2025-07-21',
-    },
-  },
-  {
-    id: 'p5',
-    type: 'true-false',
-    difficulty: 'medium',
-    text: 'JavaScript is a statically typed language.',
-    subject: 'Web Development',
-    chapters: ['JavaScript Basics'],
-    learningObjectives: ['LO2', 'LO3'],
-    answers: [{ text: 'True', isCorrect: false }, { text: 'False', isCorrect: true }],
-    submittedBy: 'Pham Thi D',
-    submittedAt: '2025-07-18',
-    usedInExams: 1,
-  },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TYPE_CFG: Record<QType, { icon: React.ElementType; label: string; pill: string }> = {
@@ -255,8 +212,8 @@ function ApprovalDetailModal({
 }: {
   q: PendingQuestion;
   onClose: () => void;
-  onApprove: (id: string) => void;
-  onReject: (id: string, reason: string) => void;
+  onApprove: () => void;
+  onReject: (reason: string) => void;
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
@@ -413,7 +370,7 @@ function ApprovalDetailModal({
                 <User className="size-3" />{q.submittedBy}
                 <span>·</span>
                 <Calendar className="size-3" />
-                {new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                {formatReviewDate(q.submittedAt)}
                 {q.usedInExams > 0 && (
                   <>
                     <span>·</span>
@@ -433,12 +390,12 @@ function ApprovalDetailModal({
               <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl">
                 <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
                 <span className="text-xs font-semibold text-red-700">Current version</span>
-                <span className="text-xs text-red-400 ml-auto">{new Date(prev!.editedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                <span className="text-xs text-red-400 ml-auto">{formatReviewDate(prev!.editedAt)}</span>
               </div>
               <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-xl">
                 <div className="w-2 h-2 rounded-full bg-teal-400 flex-shrink-0" />
                 <span className="text-xs font-semibold text-teal-700">Changed version</span>
-                <span className="text-xs text-teal-400 ml-auto">{new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                <span className="text-xs text-teal-400 ml-auto">{formatReviewDate(q.submittedAt)}</span>
               </div>
             </div>
           )}
@@ -618,7 +575,7 @@ function ApprovalDetailModal({
                 <button onClick={() => setRejecting(true)} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
                   <XCircle className="size-4" />Reject
                 </button>
-                <button onClick={() => { onApprove(q.id); onClose(); }}
+                <button onClick={onApprove}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
                   <CheckCircle className="size-4" />Approve & Add to Bank
                 </button>
@@ -637,7 +594,7 @@ function ApprovalDetailModal({
                 <button onClick={() => { setRejecting(false); setReason(''); }} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
                   Cancel
                 </button>
-                <button onClick={() => { onReject(q.id, reason); onClose(); }}
+                <button onClick={() => onReject(reason)}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors">
                   <XCircle className="size-4" />Confirm Reject
                 </button>
@@ -676,7 +633,7 @@ function PendingCard({ q, onClick }: { q: PendingQuestion; onClick: () => void }
             )}
             <span className="text-xs text-gray-400 flex items-center gap-1"><User className="size-3" />{q.submittedBy}</span>
             <span className="text-xs text-gray-400 flex items-center gap-1">
-              <Calendar className="size-3" />{new Date(q.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              <Calendar className="size-3" />{formatReviewDate(q.submittedAt)}
             </span>
           </div>
           <p className="text-xs text-gray-400 mt-1.5">{q.subject} · {q.chapters.join(', ')}</p>
@@ -1734,7 +1691,9 @@ export function AdminQuestionBankPage() {
   const [bankSearch, setBankSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [diffFilter, setDiffFilter] = useState('');
-  const [pending, setPending] = useState<PendingQuestion[]>(MOCK_PENDING);
+  const [pending, setPending] = useState<PendingQuestion[]>([]);
+  const [isLoadingPending, setIsLoadingPending] = useState(true);
+  const [isReviewActionPending, setIsReviewActionPending] = useState(false);
   const [approvalSearch, setApprovalSearch] = useState('');
   const [approvalDiff, setApprovalDiff] = useState('');
   const [approvalType, setApprovalType] = useState('');
@@ -1744,6 +1703,30 @@ export function AdminQuestionBankPage() {
 
   const [editingQuestion, setEditingQuestion] =
   useState<BankQuestion | null>(null);
+
+  const loadPendingRequests = async () => {
+    setIsLoadingPending(true);
+    try {
+      const [questions, revisions] = await Promise.all([
+        adminQuestionApprovalService.listPendingQuestions(),
+        adminQuestionApprovalService.listPendingRevisions(),
+      ]);
+      setPending([
+        ...questions.items.map(toPendingQuestion),
+        ...revisions.items.map(toPendingRevision),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load approval requests.';
+      toast.error(message);
+      setPending([]);
+    } finally {
+      setIsLoadingPending(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPendingRequests();
+  }, []);
 
   const subjectMeta = SUBJECTS.find((s) => s.name === selectedSubject);
   const subjectQuestions = bankQuestions.filter((q) => q.subject === selectedSubject);
@@ -1762,14 +1745,78 @@ export function AdminQuestionBankPage() {
     return true;
   });
 
-  const handleApprove = (id: string) => {
-    setPending((p) => p.filter((q) => q.id !== id));
-    toast.success('Question approved and added to the Question Bank.');
+  const openApprovalRequest = async (request: PendingQuestion) => {
+    if (!request.reviewTarget) return;
+    try {
+      if (request.reviewTarget.kind === 'question') {
+        setDetailQuestion(toPendingQuestion(await adminQuestionApprovalService.getPendingQuestion(request.reviewTarget.questionId)));
+      } else {
+        setDetailQuestion(toPendingRevision(await adminQuestionApprovalService.getRevision(request.reviewTarget.revisionId)));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'This approval request is no longer available.';
+      toast.error(message);
+      await loadPendingRequests();
+    }
   };
 
-  const handleReject = (id: string, reason: string) => {
-    setPending((p) => p.filter((q) => q.id !== id));
-    toast.error(`Question rejected.${reason ? ' Reason sent to teacher.' : ''}`);
+  const performApprovalAction = async (request: PendingQuestion, action: 'approve' | 'reject', reason?: string) => {
+    if (!request.reviewTarget) throw new Error('Approval request is missing its review target.');
+    if (request.reviewTarget.kind === 'question') {
+      if (action === 'approve') await adminQuestionApprovalService.approveQuestion(request.reviewTarget.questionId);
+      else await adminQuestionApprovalService.rejectQuestion(request.reviewTarget.questionId, reason ?? '');
+    } else if (action === 'approve') {
+      await adminQuestionApprovalService.approveRevision(request.reviewTarget.revisionId);
+    } else {
+      await adminQuestionApprovalService.rejectRevision(request.reviewTarget.revisionId, reason ?? '');
+    }
+  };
+
+  const handleApprove = async (request: PendingQuestion) => {
+    setIsReviewActionPending(true);
+    try {
+      await performApprovalAction(request, 'approve');
+      toast.success(request.previousVersion ? 'Proposed revision approved.' : 'Question approved and added to the Question Bank.');
+      setDetailQuestion(null);
+      await loadPendingRequests();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to approve this request.';
+      toast.error(message);
+    } finally {
+      setIsReviewActionPending(false);
+    }
+  };
+
+  const handleReject = async (request: PendingQuestion, reason: string) => {
+    setIsReviewActionPending(true);
+    try {
+      await performApprovalAction(request, 'reject', reason);
+      toast.success('Approval request rejected.');
+      setDetailQuestion(null);
+      await loadPendingRequests();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to reject this request.';
+      toast.error(message);
+    } finally {
+      setIsReviewActionPending(false);
+    }
+  };
+
+  const handleApproveAll = async () => {
+    const requests = filteredPending;
+    if (!requests.length) return;
+    setIsReviewActionPending(true);
+    try {
+      for (const request of requests) await performApprovalAction(request, 'approve');
+      toast.success(`${requests.length} approval request${requests.length === 1 ? '' : 's'} approved.`);
+      await loadPendingRequests();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to approve all requests.';
+      toast.error(message);
+      await loadPendingRequests();
+    } finally {
+      setIsReviewActionPending(false);
+    }
   };
 
   const handleDeleteBank = (id: string) => {
@@ -2003,18 +2050,22 @@ export function AdminQuestionBankPage() {
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-gray-400"><span className="font-semibold text-gray-700">{filteredPending.length}</span> pending request{filteredPending.length !== 1 ? 's' : ''}</p>
               {filteredPending.length > 0 && (
-                <button onClick={() => { filteredPending.forEach((q) => handleApprove(q.id)); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors">
+                <button onClick={() => void handleApproveAll()} disabled={isReviewActionPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60">
                   <CheckCircle className="size-3.5" />Approve All
                 </button>
               )}
             </div>
 
             <div className="space-y-2">
-              {filteredPending.map((q) => <PendingCard key={q.id} q={q} onClick={() => setDetailQuestion(q)} />)}
+              {filteredPending.map((q) => <PendingCard key={q.id} q={q} onClick={() => void openApprovalRequest(q)} />)}
             </div>
 
-            {filteredPending.length === 0 && (
+            {isLoadingPending && (
+              <p className="py-8 text-center text-sm text-gray-400">Loading approval requests…</p>
+            )}
+
+            {!isLoadingPending && filteredPending.length === 0 && (
               <div className="text-center py-16">
                 <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-50 mb-4">
                   <CheckCircle className="size-6 text-emerald-500" />
@@ -2031,14 +2082,8 @@ export function AdminQuestionBankPage() {
   <ApprovalDetailModal
     q={detailQuestion}
     onClose={() => setDetailQuestion(null)}
-    onApprove={(id) => {
-      handleApprove(id);
-      setDetailQuestion(null);
-    }}
-    onReject={(id, reason) => {
-      handleReject(id, reason);
-      setDetailQuestion(null);
-    }}
+    onApprove={() => { void handleApprove(detailQuestion); }}
+    onReject={(reason) => { void handleReject(detailQuestion, reason); }}
   />
 )}
 

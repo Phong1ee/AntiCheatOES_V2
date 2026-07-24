@@ -46,6 +46,12 @@ export interface QuestionBankItem {
   updated_at?: string | null;
   usage_count?: number;
   permissions: PermissionFlags;
+  has_pending_revision?: boolean;
+  pending_revision_id?: number | null;
+  pending_version_number?: number | null;
+  pending_updated_at?: string | null;
+  latest_rejected_revision_id?: number | null;
+  revision_rejection_reason?: string | null;
 }
 
 export interface QuestionDetail extends QuestionBankItem {
@@ -57,6 +63,24 @@ export interface QuestionDetail extends QuestionBankItem {
   } | null;
   options: QuestionOptionSummary[];
   rejected_feedback?: string | null;
+}
+
+export interface QuestionEditPayload {
+  question_id: number;
+  revision_id: number | null;
+  version_number: number | null;
+  question_status: QuestionStatus;
+  question_text: string;
+  question_type: QuestionType;
+  question_difficulties: QuestionDifficulty | null;
+  subject_id: string | null;
+  options: QuestionOptionSummary[];
+  chapter_ids: number[];
+  lo_ids: number[];
+  has_pending_revision: boolean;
+  rejection_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface QuestionListResponse {

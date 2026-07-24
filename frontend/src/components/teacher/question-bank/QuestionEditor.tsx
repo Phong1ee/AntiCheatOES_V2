@@ -28,7 +28,7 @@ import { teacherQuestionBankService } from "../../../services/teacher-question-b
 import type {
   ChapterSummary,
   LearningObjectiveSummary,
-  QuestionDetail,
+  QuestionEditPayload,
   QuestionDifficulty,
   QuestionOptionPayload,
   QuestionPayload,
@@ -41,7 +41,7 @@ interface QuestionEditorProps {
   open: boolean;
   questionId: number | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (nextStatus?: QuestionStatus) => void;
 }
 
 const defaultOptions: QuestionOptionPayload[] = [
@@ -69,7 +69,7 @@ export function QuestionEditor({
   onClose,
   onSaved,
 }: QuestionEditorProps) {
-  const [detail, setDetail] = useState<QuestionDetail | null>(null);
+  const [detail, setDetail] = useState<QuestionEditPayload | null>(null);
 
   const [subjects, setSubjects] = useState<SubjectCount[]>([]);
 
@@ -122,7 +122,7 @@ export function QuestionEditor({
         const [subjectMeta, questionDetail] = await Promise.all([
           teacherQuestionBankService.listSubjectCounts("mine"),
           questionId
-            ? teacherQuestionBankService.getDetail(questionId)
+            ? teacherQuestionBankService.getEditPayload(questionId)
             : Promise.resolve(null),
         ]);
 
@@ -139,14 +139,14 @@ export function QuestionEditor({
 
         setDifficulty(questionDetail?.question_difficulties ?? "none");
 
-        setSubjectId(questionDetail?.subject?.subject_id ?? subjectPlaceholder);
+        setSubjectId(questionDetail?.subject_id ?? subjectPlaceholder);
 
         setChapterIds(
-          questionDetail?.chapters.map((chapter) => chapter.chapter_id) ?? [],
+          questionDetail?.chapter_ids ?? [],
         );
 
         setLoIds(
-          questionDetail?.learning_objectives.map((lo) => lo.lo_id) ?? [],
+          questionDetail?.lo_ids ?? [],
         );
 
         setOptions(
@@ -342,8 +342,8 @@ export function QuestionEditor({
     options: questionType === "essay" ? [] : options,
   });
 
-  const closeAfterSave = () => {
-    onSaved();
+  const closeAfterSave = (nextStatus?: QuestionStatus) => {
+    onSaved(nextStatus);
     onClose();
   };
 
@@ -363,7 +363,7 @@ export function QuestionEditor({
       }
 
       toast.success("Draft saved.");
-      closeAfterSave();
+      closeAfterSave(detail?.question_status ?? "draft");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save draft.");
     } finally {
@@ -390,7 +390,7 @@ export function QuestionEditor({
          */
         await teacherQuestionBankService.update(questionId, payload());
 
-        if (statusNeedsSubmit(detail?.question_status)) {
+        if (statusNeedsSubmit(detail?.question_status) && detail?.revision_id === null) {
           await teacherQuestionBankService.submit(questionId);
         }
       } else {
@@ -407,7 +407,7 @@ export function QuestionEditor({
             : "Question submitted for approval.",
       );
 
-      closeAfterSave();
+      closeAfterSave("pending");
     } catch (err) {
       setError(
         err instanceof Error

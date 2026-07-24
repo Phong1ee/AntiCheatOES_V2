@@ -9,6 +9,7 @@ import {
   Circle,
   Eye,
   FileText,
+  Pencil,
   User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -27,6 +28,7 @@ interface BankQuestionListProps {
   pageSize: number;
   onPageChange: (page: number) => void;
   onView: (questionId: number) => void;
+  onEdit: (questionId: number) => void;
 }
 
 type QuestionWithCreator = QuestionBankItem & {
@@ -160,6 +162,7 @@ export function BankQuestionList({
   pageSize,
   onPageChange,
   onView,
+  onEdit,
 }: BankQuestionListProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -319,6 +322,18 @@ export function BankQuestionList({
                     >
                       <Eye className="h-4 w-4" />
                     </button>
+
+                    {question.permissions.can_edit && (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(question.question_id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition hover:bg-teal-50 hover:text-teal-600"
+                        title="Edit question"
+                        aria-label="Edit question"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 

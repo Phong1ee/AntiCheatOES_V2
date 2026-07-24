@@ -254,7 +254,9 @@ export function YourQuestionsList({
   onDelete,
 }: YourQuestionsListProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
   const statusCountText =
     statusFilter === 'all' ? total : questions.length;
 
@@ -264,8 +266,11 @@ export function YourQuestionsList({
         {statusTabs.map((tab) => {
           const active = statusFilter === tab.value;
           const count = statusCounts?.[tab.value];
+
           const statusInfo =
-            tab.value === 'all' ? null : statusConfig[tab.value];
+            tab.value === 'all'
+              ? null
+              : statusConfig[tab.value];
 
           return (
             <button
@@ -278,7 +283,9 @@ export function YourQuestionsList({
                   ? 'bg-white text-gray-800 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
-              onClick={() => onStatusFilterChange(tab.value)}
+              onClick={() =>
+                onStatusFilterChange(tab.value)
+              }
             >
               <span>{tab.label}</span>
 
@@ -324,6 +331,7 @@ export function YourQuestionsList({
         <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="flex flex-col items-center gap-3 text-center">
             <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+
             <p className="text-sm font-medium text-gray-700">
               Loading questions...
             </p>
@@ -341,15 +349,22 @@ export function YourQuestionsList({
         <>
           <div className="space-y-2">
             {questions.map((question) => {
-              const typeInfo = typeConfig[question.question_type];
+              const typeInfo =
+                typeConfig[question.question_type];
+
               const TypeIcon = typeInfo.icon;
+
               const statusInfo =
                 statusConfig[question.question_status];
+
               const StatusIcon = statusInfo.icon;
 
-              const difficulty = question.question_difficulties
-                ? difficultyConfig[question.question_difficulties]
-                : null;
+              const difficulty =
+                question.question_difficulties
+                  ? difficultyConfig[
+                      question.question_difficulties
+                    ]
+                  : null;
 
               const expanded =
                 expandedId === question.question_id;
@@ -363,11 +378,27 @@ export function YourQuestionsList({
                 ? `${question.subject.subject_id} - ${question.subject.subject_name}`
                 : 'No Subject';
 
-              const createdAt = formatDate(question.created_at);
+              const createdAt = formatDate(
+                question.created_at,
+              );
 
               const showOptionCount =
                 typeof question.option_count === 'number' &&
                 question.question_type !== 'essay';
+
+              /*
+               * Pending được mở quyền hiển thị Edit/Delete ở frontend.
+               * Khi backend được cập nhật, permission trả về true thì
+               * biểu thức này vẫn hoạt động bình thường.
+               */
+              const isPending =
+                question.question_status === 'pending';
+
+              const canEdit =
+                question.permissions.can_edit || isPending;
+
+              const canDelete =
+                question.permissions.can_delete || isPending;
 
               return (
                 <article
@@ -418,10 +449,12 @@ export function YourQuestionsList({
                           {statusInfo.label}
                         </span>
 
-                        {typeof question.usage_count === 'number' &&
+                        {typeof question.usage_count ===
+                          'number' &&
                           question.usage_count > 0 && (
                             <span className="inline-flex items-center gap-1 text-xs text-gray-400">
                               <BarChart2 className="h-3 w-3" />
+
                               Used in {question.usage_count}{' '}
                               {question.usage_count === 1
                                 ? 'exam'
@@ -432,17 +465,21 @@ export function YourQuestionsList({
                         {question.subject && (
                           <span
                             className="rounded-full bg-gray-50 px-2.5 py-1 text-xs text-gray-400"
-                            title={question.subject.subject_name}
+                            title={
+                              question.subject.subject_name
+                            }
                           >
                             #{question.subject.subject_id}
                           </span>
                         )}
                       </div>
 
-                      {question.question_status === 'rejected' &&
+                      {question.question_status ===
+                        'rejected' &&
                         rejectedFeedback && (
                           <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                             <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+
                             <span>{rejectedFeedback}</span>
                           </div>
                         )}
@@ -539,7 +576,7 @@ export function YourQuestionsList({
                       </div>
 
                       <div className="mt-4 flex flex-wrap items-center gap-2">
-                        {question.permissions.can_edit && (
+                        {canEdit && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -558,7 +595,9 @@ export function YourQuestionsList({
                             variant="outline"
                             size="sm"
                             onClick={() =>
-                              onSubmit(question.question_id)
+                              onSubmit(
+                                question.question_id,
+                              )
                             }
                             className="h-9 rounded-lg border-teal-200 bg-teal-50 px-3 text-xs font-medium text-teal-700 hover:bg-teal-100"
                           >
@@ -567,12 +606,15 @@ export function YourQuestionsList({
                           </Button>
                         )}
 
-                        {question.permissions.can_resubmit && (
+                        {question.permissions
+                          .can_resubmit && (
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() =>
-                              onSubmit(question.question_id)
+                              onSubmit(
+                                question.question_id,
+                              )
                             }
                             className="h-9 rounded-lg border-teal-200 bg-teal-50 px-3 text-xs font-medium text-teal-700 hover:bg-teal-100"
                           >
@@ -581,7 +623,7 @@ export function YourQuestionsList({
                           </Button>
                         )}
 
-                        {question.permissions.can_delete && (
+                        {canDelete && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button
@@ -597,12 +639,15 @@ export function YourQuestionsList({
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>
-                                  Delete question?
+                                  {isPending
+                                    ? 'Withdraw and delete this question?'
+                                    : 'Delete question?'}
                                 </AlertDialogTitle>
 
                                 <AlertDialogDescription>
-                                  This removes the question from your
-                                  list when it is not used by an exam.
+                                  {isPending
+                                    ? 'This question is currently awaiting admin review. Deleting it will withdraw the pending submission and remove the question.'
+                                    : 'This removes the question from your list when it is not used by an exam.'}
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
 
@@ -619,23 +664,21 @@ export function YourQuestionsList({
                                   }
                                   className="bg-rose-600 hover:bg-rose-700"
                                 >
-                                  Delete
+                                  {isPending
+                                    ? 'Withdraw & Delete'
+                                    : 'Delete'}
                                 </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
                         )}
 
-                        {question.question_status === 'pending' &&
-                          !question.permissions.can_edit &&
-                          !question.permissions.can_submit &&
-                          !question.permissions.can_resubmit &&
-                          !question.permissions.can_delete && (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                              <Clock className="h-3.5 w-3.5" />
-                              Awaiting admin review
-                            </span>
-                          )}
+                        {isPending && (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                            <Clock className="h-3.5 w-3.5" />
+                            Awaiting admin review
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}

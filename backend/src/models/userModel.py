@@ -29,12 +29,16 @@ def registerUser(fullname, email, password, role):
 def verifyUser(email, password):
     cnx = get_db_connection()
     cursor = cnx.cursor()
-    query = "SELECT id, full_name, email, role, password_hash, school_id FROM user WHERE email = %s"
+    query = """
+        SELECT id, full_name, email, role, password_hash, school_id, is_locked, deleted_at
+        FROM user
+        WHERE email = %s
+    """
     try:
         cursor.execute(query, (email,))
         result = cursor.fetchone()
 
-        if result and check_password_hash(result[4], password):
+        if result and not result[6] and result[7] is None and check_password_hash(result[4], password):
             return result
         return None
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -35,175 +35,210 @@ import {
   Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminUserService } from '../../services/admin-user.service';
+import type { AdminManagedUser, AdminManagedUserRole } from '../../types/admin-user';
+import { ConfirmUserActionDialog, type PendingUserAction } from './ConfirmUserActionDialog';
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: 'student' | 'teacher' | 'admin';
-  status: 'active' | 'suspended' | 'inactive';
-  joinDate: string;
-  lastLogin: string;
-  examsCompleted?: number;
-  examsCreated?: number;
+interface StoredCurrentUser {
+  id: number;
+  role: AdminManagedUserRole;
 }
 
-const mockUsers: User[] = [
-  {
-    id: '1',
-    name: 'John Doe',
-    email: 'john.doe@university.edu',
-    role: 'student',
-    status: 'active',
-    joinDate: '2024-01-15',
-    lastLogin: '2025-11-24 10:30',
-    examsCompleted: 12,
-  },
-  {
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane.smith@university.edu',
-    role: 'teacher',
-    status: 'active',
-    joinDate: '2023-08-20',
-    lastLogin: '2025-11-24 09:15',
-    examsCreated: 24,
-  },
-  {
-    id: '3',
-    name: 'Michael Johnson',
-    email: 'michael.j@university.edu',
-    role: 'student',
-    status: 'active',
-    joinDate: '2024-03-10',
-    lastLogin: '2025-11-23 16:45',
-    examsCompleted: 8,
-  },
-  {
-    id: '4',
-    name: 'Sarah Williams',
-    email: 'sarah.w@university.edu',
-    role: 'admin',
-    status: 'active',
-    joinDate: '2023-01-05',
-    lastLogin: '2025-11-24 11:20',
-  },
-  {
-    id: '5',
-    name: 'Robert Brown',
-    email: 'robert.b@university.edu',
-    role: 'student',
-    status: 'suspended',
-    joinDate: '2024-02-28',
-    lastLogin: '2025-11-20 14:30',
-    examsCompleted: 5,
-  },
-  {
-    id: '6',
-    name: 'Emily Davis',
-    email: 'emily.d@university.edu',
-    role: 'teacher',
-    status: 'active',
-    joinDate: '2023-09-12',
-    lastLogin: '2025-11-24 08:00',
-    examsCreated: 18,
-  },
-];
+function getStoredCurrentUser(): StoredCurrentUser | null {
+  try {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) return null;
+    const user = JSON.parse(rawUser) as StoredCurrentUser;
+    return typeof user.id === 'number' ? user : null;
+  } catch {
+    return null;
+  }
+}
 
 export function UserManagementPage() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<AdminManagedUser[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter] = useState<AdminManagedUserRole | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'locked'>('all');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUser, setSelectedUser] = useState<AdminManagedUser | null>(null);
+  const [currentUser] = useState<StoredCurrentUser | null>(getStoredCurrentUser);
+  const [pendingAction, setPendingAction] = useState<PendingUserAction>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
 
   // Form states
+  const [formSchoolId, setFormSchoolId] = useState('');
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [formRole, setFormRole] = useState<'student' | 'teacher' | 'admin'>('student');
-  const [formStatus, setFormStatus] = useState<'active' | 'suspended' | 'inactive'>('active');
+  const [formRole, setFormRole] = useState<AdminManagedUserRole>('student');
 
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch =
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
-  });
-
-  const handleAddUser = () => {
-    const newUser: User = {
-      id: `${Date.now()}`,
-      name: formName,
-      email: formEmail,
-      role: formRole,
-      status: formStatus,
-      joinDate: new Date().toISOString().split('T')[0],
-      lastLogin: 'Never',
-      examsCompleted: formRole === 'student' ? 0 : undefined,
-      examsCreated: formRole === 'teacher' ? 0 : undefined,
-    };
-
-    setUsers([...users, newUser]);
-    setShowAddDialog(false);
-    resetForm();
-    toast.success('User added successfully');
+  const loadUsers = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const response = await adminUserService.list({
+        search: searchQuery.trim() || undefined,
+        role: roleFilter === 'all' ? undefined : roleFilter,
+        locked: statusFilter === 'all' ? undefined : statusFilter === 'locked',
+      });
+      setUsers(response.items);
+      setTotalUsers(response.total);
+    } catch (error) {
+      setUsers([]);
+      setTotalUsers(0);
+      setLoadError(error instanceof Error ? error.message : 'Unable to load users.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleEditUser = () => {
+  useEffect(() => {
+    const timeout = window.setTimeout(() => { void loadUsers(); }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [searchQuery, roleFilter, statusFilter]);
+
+  const handleAddUser = async () => {
+    setIsSubmitting(true);
+    try {
+      await adminUserService.create({ school_id: formSchoolId, full_name: formName, email: formEmail, password: formPassword, role: formRole });
+      setShowAddDialog(false);
+      resetForm();
+      toast.success('User added successfully');
+      await loadUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add user.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditUser = async () => {
     if (!selectedUser) return;
-
-    setUsers(
-      users.map((user) =>
-        user.id === selectedUser.id
-          ? { ...user, name: formName, email: formEmail, role: formRole, status: formStatus }
-          : user
-      )
-    );
-
-    setShowEditDialog(false);
-    setSelectedUser(null);
-    resetForm();
-    toast.success('User updated successfully');
+    setIsSubmitting(true);
+    try {
+      const isCurrentAdmin = selectedUser.id === currentUser?.id && selectedUser.role === 'admin';
+      await adminUserService.update(selectedUser.id, {
+        ...(isCurrentAdmin ? {} : { school_id: formSchoolId, role: formRole }),
+        full_name: formName,
+        email: formEmail,
+        phone: formPhone.trim() || null,
+      });
+      setShowEditDialog(false);
+      setSelectedUser(null);
+      resetForm();
+      toast.success('User updated successfully');
+      await loadUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update user.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((user) => user.id !== userId));
-    toast.success('User deleted successfully');
+  const requestUserAction = (type: NonNullable<PendingUserAction>['type'], user: AdminManagedUser) => {
+    if (user.id === currentUser?.id && (type === 'lock' || type === 'delete')) return;
+    setActionError(null);
+    setPendingAction({ type, user });
   };
 
-  const handleToggleSuspend = (userId: string) => {
-    setUsers(
-      users.map((user) =>
-        user.id === userId
-          ? { ...user, status: user.status === 'suspended' ? 'active' : 'suspended' }
-          : user
-      )
-    );
-    toast.success('User status updated');
+  const confirmPendingAction = async () => {
+    if (!pendingAction) return;
+    setIsActionSubmitting(true);
+    setActionError(null);
+    try {
+      if (pendingAction.type === 'lock') await adminUserService.lock(pendingAction.user.id);
+      if (pendingAction.type === 'unlock') await adminUserService.unlock(pendingAction.user.id);
+      if (pendingAction.type === 'delete') await adminUserService.remove(pendingAction.user.id);
+      toast.success(
+        pendingAction.type === 'delete'
+          ? 'User deleted successfully'
+          : pendingAction.type === 'lock'
+            ? 'User locked successfully'
+            : 'User unlocked successfully',
+      );
+      setPendingAction(null);
+      await loadUsers();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to update user status.');
+    } finally {
+      setIsActionSubmitting(false);
+    }
   };
 
-  const openEditDialog = (user: User) => {
+  const closePendingAction = () => {
+    if (isActionSubmitting) return;
+    setPendingAction(null);
+    setActionError(null);
+  };
+
+  const handleChangeOwnPassword = async () => {
+    if (!currentPassword.trim() || !newPassword.trim() || !confirmNewPassword.trim()) {
+      toast.error('All password fields are required.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Password confirmation does not match');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await adminUserService.changeOwnPassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmNewPassword,
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      toast.success('Password changed. Please sign in again.');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('role');
+      localStorage.removeItem('loginTime');
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to change password.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openEditDialog = (user: AdminManagedUser) => {
     setSelectedUser(user);
-    setFormName(user.name);
+    setFormSchoolId(user.school_id);
+    setFormName(user.full_name);
     setFormEmail(user.email);
+    setFormPhone(user.phone ?? '');
     setFormRole(user.role);
-    setFormStatus(user.status);
     setShowEditDialog(true);
   };
 
   const resetForm = () => {
+    setFormSchoolId('');
     setFormName('');
     setFormEmail('');
     setFormPassword('');
+    setFormPhone('');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
     setShowPassword(false);
     setFormRole('student');
-    setFormStatus('active');
   };
 
   const getRoleBadge = (role: string) => {
@@ -218,16 +253,18 @@ export function UserManagementPage() {
   const getStatusBadge = (status: string) => {
     const styles = {
       active: 'bg-green-100 text-green-700 border-green-300',
-      suspended: 'bg-red-100 text-red-700 border-red-300',
-      inactive: 'bg-gray-100 text-gray-700 border-gray-300',
+      locked: 'bg-red-100 text-red-700 border-red-300',
+      deleted: 'bg-gray-100 text-gray-700 border-gray-300',
     };
-    return styles[status as keyof typeof styles] || styles.inactive;
+    return styles[status as keyof typeof styles] || styles.active;
   };
+
+  const handleRoleChange = (value: string) => setFormRole(value as AdminManagedUserRole);
 
   const stats = [
     {
       label: 'Total Users',
-      value: users.length,
+      value: totalUsers,
       color: 'from-blue-500 to-cyan-600',
     },
     {
@@ -302,8 +339,7 @@ export function UserManagementPage() {
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="suspended">Suspended</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="locked">Locked</SelectItem>
               </SelectContent>
             </Select>
 
@@ -333,11 +369,16 @@ export function UserManagementPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredUsers.map((user) => (
+                {users.map((user) => (
                   <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                     <td className="p-4">
                       <div>
-                        <div className="text-sm text-gray-900">{user.name}</div>
+                        <div className="flex items-center gap-2 text-sm text-gray-900">
+                          {user.full_name}
+                          {user.id === currentUser?.id && (
+                            <Badge className="border-teal-300 bg-teal-50 text-teal-700">You</Badge>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                           <Mail className="size-3" />
                           {user.email}
@@ -352,15 +393,14 @@ export function UserManagementPage() {
                     </td>
                     <td className="p-4">
                       <div className="text-sm text-gray-700">
-                        {user.examsCompleted !== undefined && `${user.examsCompleted} exams`}
-                        {user.examsCreated !== undefined && `${user.examsCreated} created`}
+                        {user.school_id}
                       </div>
-                      <div className="text-xs text-gray-500">Last: {user.lastLogin}</div>
+                      <div className="text-xs text-gray-500">{user.is_locked ? 'Account locked' : 'Account active'}</div>
                     </td>
                     <td className="p-4">
                       <div className="text-sm text-gray-700 flex items-center gap-1">
                         <Calendar className="size-3 text-gray-400" />
-                        {user.joinDate}
+                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
                       </div>
                     </td>
                     <td className="p-4 text-right">
@@ -375,22 +415,28 @@ export function UserManagementPage() {
                             <Edit className="size-4 mr-2" />
                             Edit User
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleToggleSuspend(user.id)}>
-                            {user.status === 'suspended' ? (
+                          <DropdownMenuItem
+                            disabled={user.id === currentUser?.id}
+                            title={user.id === currentUser?.id ? 'You cannot lock your own account' : undefined}
+                            onClick={() => requestUserAction(user.is_locked ? 'unlock' : 'lock', user)}
+                          >
+                            {user.is_locked ? (
                               <>
                                 <Unlock className="size-4 mr-2" />
-                                Activate
+                                Unlock
                               </>
                             ) : (
                               <>
                                 <Lock className="size-4 mr-2" />
-                                Suspend
+                                Lock
                               </>
                             )}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => handleDeleteUser(user.id)}
+                            disabled={user.id === currentUser?.id}
+                            title={user.id === currentUser?.id ? 'You cannot delete your own account' : undefined}
+                            onClick={() => requestUserAction('delete', user)}
                             className="text-red-600"
                           >
                             <Trash2 className="size-4 mr-2" />
@@ -404,7 +450,16 @@ export function UserManagementPage() {
               </tbody>
             </table>
 
-            {filteredUsers.length === 0 && (
+            {isLoading && (
+              <div className="text-center py-12 text-gray-500">Loading users...</div>
+            )}
+            {!isLoading && loadError && (
+              <div className="text-center py-12 text-red-600">
+                <p>{loadError}</p>
+                <Button variant="outline" className="mt-3" onClick={() => void loadUsers()}>Try Again</Button>
+              </div>
+            )}
+            {!isLoading && !loadError && users.length === 0 && (
               <div className="text-center py-12 text-gray-500">
                 <Users className="size-12 mx-auto mb-3 text-gray-400" />
                 <p>No users found</p>
@@ -429,6 +484,11 @@ export function UserManagementPage() {
               </div>
               <div className="px-6 py-5 space-y-4">
                 <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">School ID</label>
+                  <input type="text" placeholder="S000001" value={formSchoolId} onChange={(e) => setFormSchoolId(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium text-gray-700">Full Name</label>
                   <input type="text" placeholder="John Doe" value={formName} onChange={(e) => setFormName(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
@@ -449,23 +509,14 @@ export function UserManagementPage() {
                     </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-gray-700">Role</label>
-                    <select value={formRole} onChange={(e) => setFormRole(e.target.value as any)}
+                    <select value={formRole} onChange={(e) => handleRoleChange(e.target.value)}
                       className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
                       <option value="student">Student</option>
                       <option value="teacher">Teacher</option>
                       <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-gray-700">Status</label>
-                    <select value={formStatus} onChange={(e) => setFormStatus(e.target.value as any)}
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="suspended">Suspended</option>
                     </select>
                   </div>
                 </div>
@@ -473,7 +524,7 @@ export function UserManagementPage() {
               <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
                 <button onClick={() => { setShowAddDialog(false); resetForm(); }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button onClick={handleAddUser} disabled={!formName || !formEmail || !formPassword}
+                <button onClick={() => void handleAddUser()} disabled={isSubmitting || !formSchoolId || !formName || !formEmail || !formPassword}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-teal-500 to-teal-600 rounded-lg hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
                   <UserPlus className="size-4" />Add User
                 </button>
@@ -486,7 +537,7 @@ export function UserManagementPage() {
         {showEditDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
             onClick={(e) => { if (e.target === e.currentTarget) { setShowEditDialog(false); resetForm(); } }}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto flex flex-col">
               <div className="px-6 pt-6 pb-4 flex items-start justify-between border-b border-gray-100">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Edit User</h2>
@@ -498,6 +549,15 @@ export function UserManagementPage() {
               </div>
               <div className="px-6 py-5 space-y-4">
                 <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">School ID</label>
+                  <input type="text" value={formSchoolId} onChange={(e) => setFormSchoolId(e.target.value)}
+                    disabled={selectedUser?.id === currentUser?.id && selectedUser?.role === 'admin'}
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 disabled:cursor-not-allowed disabled:opacity-60" />
+                  {selectedUser?.id === currentUser?.id && selectedUser?.role === 'admin' && (
+                    <p className="text-xs text-gray-500">School ID cannot be changed for the current account</p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium text-gray-700">Full Name</label>
                   <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
@@ -507,31 +567,49 @@ export function UserManagementPage() {
                   <input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Phone</label>
+                  <input type="tel" value={formPhone} onChange={(e) => setFormPhone(e.target.value)} placeholder="Optional phone number"
+                    className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
+                </div>
+                <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-gray-700">Role</label>
-                    <select value={formRole} onChange={(e) => setFormRole(e.target.value as any)}
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
+                    <select value={formRole} onChange={(e) => handleRoleChange(e.target.value)}
+                      disabled={selectedUser?.id === currentUser?.id && selectedUser?.role === 'admin'}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-60">
                       <option value="student">Student</option>
                       <option value="teacher">Teacher</option>
                       <option value="admin">Admin</option>
                     </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-gray-700">Status</label>
-                    <select value={formStatus} onChange={(e) => setFormStatus(e.target.value as any)}
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 appearance-none cursor-pointer">
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
+                    {selectedUser?.id === currentUser?.id && selectedUser?.role === 'admin' && (
+                      <p className="text-xs text-gray-500">You cannot change the role of your current admin account</p>
+                    )}
                   </div>
                 </div>
+                {selectedUser?.id === currentUser?.id && selectedUser?.role === 'admin' && (
+                  <div className="space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Change Password</h3>
+                      <p className="text-xs text-gray-500">Use at least 8 characters. You will be signed out after a successful change.</p>
+                    </div>
+                    <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Current Password"
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New Password"
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    <input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="Confirm New Password"
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    <button type="button" onClick={() => void handleChangeOwnPassword()} disabled={isSubmitting}
+                      className="w-full px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
+                      Change Password
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
                 <button onClick={() => { setShowEditDialog(false); resetForm(); }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button onClick={handleEditUser} disabled={!formName || !formEmail}
+                <button onClick={() => void handleEditUser()} disabled={isSubmitting || !formSchoolId || !formName || !formEmail}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-teal-500 to-teal-600 rounded-lg hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
                   <Save className="size-4" />Save Changes
                 </button>
@@ -540,6 +618,13 @@ export function UserManagementPage() {
           </div>
         )}
       </main>
+      <ConfirmUserActionDialog
+        action={pendingAction}
+        loading={isActionSubmitting}
+        error={actionError}
+        onConfirm={confirmPendingAction}
+        onCancel={closePendingAction}
+      />
     </div>
   );
 }

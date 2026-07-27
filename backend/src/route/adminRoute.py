@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,9 +21,12 @@ from src.a_db_config import (
     QuestionRevision,
     QuestionStatus,
     Subject,
+    TeacherSubject,
     User,
+    UserRole,
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 router = APIRouter()
@@ -626,3 +630,591 @@ def reject_pending_revision(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Question revision rejection conflicted with another review") from exc
+
+
+# User management uses dedicated payloads so account-control fields cannot be
+# supplied by the browser as part of a normal create or update request.
+AdminUserRole = Literal["student", "teacher", "admin"]
+
+
+class CreateAdminUserPayload(BaseModel):
+    school_id: str = Field(min_length=1, max_length=30)
+    full_name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+    role: AdminUserRole
+    phone: str | None = Field(default=None, max_length=20)
+    date_of_birth: date | None = None
+
+
+class UpdateAdminUserPayload(BaseModel):
+    school_id: str | None = Field(default=None, min_length=1, max_length=30)
+    full_name: str | None = Field(default=None, min_length=1, max_length=100)
+    email: str | None = Field(default=None, min_length=3, max_length=100)
+    password: str | None = Field(default=None, max_length=128)
+    role: AdminUserRole | None = None
+    phone: str | None = Field(default=None, max_length=20)
+    date_of_birth: date | None = None
+
+
+class ChangeOwnPasswordPayload(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+
+
+def _user_role(user: User) -> str:
+    return (_value(user.role) or "").lower()
+
+
+def _valid_email(value: str) -> str:
+    email = value.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="A valid email address is required")
+    return email
+
+
+def _valid_text(value: str, field_name: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    return cleaned
+
+
+def _valid_password(value: str) -> str:
+    if len(value) < 8 or not value.strip():
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    return value
+
+
+def _valid_phone(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    phone = value.strip()
+    if not re.fullmatch(r"[0-9+()\-\s]{7,20}", phone):
+        raise HTTPException(status_code=400, detail="Phone number format is invalid")
+    return phone
+
+
+def _serialize_admin_user(user: User) -> dict:
+    is_deleted = user.deleted_at is not None
+    is_locked = bool(user.is_locked)
+    return {
+        "id": user.id,
+        "school_id": user.school_id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": _user_role(user),
+        "phone": user.phone,
+        "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "is_locked": is_locked,
+        "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
+        "status": "deleted" if is_deleted else ("locked" if is_locked else "active"),
+    }
+
+
+def _locked_user(db: Session, user_id: int, *, include_deleted: bool = False) -> User:
+    query = db.query(User).filter(User.id == user_id)
+    if not include_deleted:
+        query = query.filter(User.deleted_at.is_(None))
+    user = query.with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def _ensure_not_last_active_admin(db: Session, target: User) -> None:
+    if _user_role(target) != "admin" or target.is_locked or target.deleted_at is not None:
+        return
+    # Lock the active-admin set in this transaction, preventing two requests
+    # from concurrently disabling different final administrators.
+    active_admin_ids = (
+        db.query(User.id)
+        .filter(User.role == UserRole.admin, User.deleted_at.is_(None), User.is_locked.is_(False))
+        .with_for_update()
+        .all()
+    )
+    if len(active_admin_ids) <= 1:
+        raise HTTPException(
+            status_code=409,
+            detail="The last active admin cannot be locked, deleted, or demoted",
+        )
+
+
+def _deactivate_teacher_subjects(db: Session, user_id: int) -> None:
+    db.query(TeacherSubject).filter(
+        TeacherSubject.teacher_id == user_id,
+        TeacherSubject.is_active.is_(True),
+    ).update({TeacherSubject.is_active: False}, synchronize_session=False)
+
+
+def _management_admin(db: Session, current_user: dict) -> User:
+    return _admin(db, current_user["school_id"])
+
+
+@router.get("/users")
+def list_users(
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    role: AdminUserRole | None = None,
+    locked: bool | None = None,
+    include_deleted: bool = False,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    query = db.query(User)
+    if not include_deleted:
+        query = query.filter(User.deleted_at.is_(None))
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(User.school_id.ilike(term), User.full_name.ilike(term), User.email.ilike(term)))
+    if role:
+        query = query.filter(User.role == UserRole(role))
+    if locked is not None:
+        query = query.filter(User.is_locked.is_(locked))
+    total = query.count()
+    users = query.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {"items": [_serialize_admin_user(user) for user in users], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/users/{user_id}")
+def get_user_detail(
+    user_id: int,
+    include_deleted: bool = False,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    query = db.query(User).filter(User.id == user_id)
+    if not include_deleted:
+        query = query.filter(User.deleted_at.is_(None))
+    user = query.first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _serialize_admin_user(user)
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: CreateAdminUserPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        school_id = _valid_text(payload.school_id, "School ID")
+        full_name = _valid_text(payload.full_name, "Full name")
+        email = _valid_email(payload.email)
+        password = _valid_password(payload.password)
+        if db.query(User.id).filter(User.school_id == school_id).first():
+            raise HTTPException(status_code=409, detail="School ID already exists")
+        if db.query(User.id).filter(User.email == email).first():
+            raise HTTPException(status_code=409, detail="Email already exists")
+        user = User(
+            school_id=school_id,
+            full_name=full_name,
+            email=email,
+            password_hash=generate_password_hash(password),
+            role=UserRole(payload.role),
+            phone=_valid_phone(payload.phone),
+            date_of_birth=payload.date_of_birth,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return _serialize_admin_user(user)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="School ID or email already exists") from exc
+
+
+@router.patch("/users/{user_id}")
+def update_user(
+    user_id: int,
+    payload: UpdateAdminUserPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        user = _locked_user(db, user_id)
+        is_own_admin_account = user.id == admin.id and _user_role(user) == "admin"
+
+        # Reject all prohibited account mutations before changing any managed fields.
+        if payload.password is not None:
+            if user.id != admin.id:
+                raise HTTPException(status_code=403, detail="You can only change your own password")
+            raise HTTPException(status_code=400, detail="Use the dedicated password change endpoint")
+        if is_own_admin_account and payload.role is not None and payload.role != "admin":
+            raise HTTPException(status_code=409, detail="You cannot change the role of your own admin account")
+        if (
+            is_own_admin_account
+            and payload.school_id is not None
+            and payload.school_id.strip() != user.school_id
+        ):
+            raise HTTPException(status_code=409, detail="You cannot change the school ID of your current account")
+
+        if payload.school_id is not None:
+            school_id = _valid_text(payload.school_id, "School ID")
+            if db.query(User.id).filter(User.school_id == school_id, User.id != user.id).first():
+                raise HTTPException(status_code=409, detail="School ID already exists")
+            user.school_id = school_id
+        if payload.full_name is not None:
+            user.full_name = _valid_text(payload.full_name, "Full name")
+        if payload.email is not None:
+            email = _valid_email(payload.email)
+            if db.query(User.id).filter(User.email == email, User.id != user.id).first():
+                raise HTTPException(status_code=409, detail="Email already exists")
+            user.email = email
+        if "phone" in payload.model_fields_set:
+            user.phone = _valid_phone(payload.phone)
+        if "date_of_birth" in payload.model_fields_set:
+            user.date_of_birth = payload.date_of_birth
+        if payload.role is not None:
+            new_role = UserRole(payload.role)
+            if _user_role(user) == "teacher" and new_role != UserRole.teacher:
+                _deactivate_teacher_subjects(db, user.id)
+            if _user_role(user) == "admin" and new_role != UserRole.admin:
+                _ensure_not_last_active_admin(db, user)
+            user.role = new_role
+        db.commit()
+        db.refresh(user)
+        return _serialize_admin_user(user)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="School ID or email already exists") from exc
+
+
+@router.put("/me/password")
+def change_own_password(
+    payload: ChangeOwnPasswordPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        if not check_password_hash(admin.password_hash, payload.current_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        if payload.new_password != payload.confirm_password:
+            raise HTTPException(status_code=400, detail="Password confirmation does not match")
+        new_password = _valid_password(payload.new_password)
+        if check_password_hash(admin.password_hash, new_password):
+            raise HTTPException(status_code=400, detail="New password must be different from the current password")
+        admin.password_hash = generate_password_hash(new_password)
+        db.commit()
+        return {"success": True, "message": "Password changed successfully"}
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.post("/users/{user_id}/lock")
+def lock_user(
+    user_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        user = _locked_user(db, user_id)
+        if user.id == admin.id:
+            raise HTTPException(status_code=409, detail="You cannot lock your own account")
+        if user.is_locked:
+            raise HTTPException(status_code=409, detail="User is already locked")
+        _ensure_not_last_active_admin(db, user)
+        user.is_locked = True
+        user.locked_at = datetime.now()
+        user.locked_by = admin.id
+        db.commit()
+        db.refresh(user)
+        return _serialize_admin_user(user)
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.post("/users/{user_id}/unlock")
+def unlock_user(
+    user_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        user = _locked_user(db, user_id)
+        if not user.is_locked:
+            raise HTTPException(status_code=409, detail="User is not locked")
+        user.is_locked = False
+        user.locked_at = None
+        user.locked_by = None
+        db.commit()
+        db.refresh(user)
+        return _serialize_admin_user(user)
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        user = _locked_user(db, user_id, include_deleted=True)
+        if user.deleted_at is not None:
+            raise HTTPException(status_code=409, detail="User has already been deleted")
+        if user.id == admin.id:
+            raise HTTPException(status_code=409, detail="You cannot delete your own account")
+        _ensure_not_last_active_admin(db, user)
+        if _user_role(user) == "teacher":
+            _deactivate_teacher_subjects(db, user.id)
+        user.deleted_at = datetime.now()
+        user.deleted_by = admin.id
+        user.is_locked = True
+        user.locked_at = datetime.now()
+        user.locked_by = admin.id
+        db.commit()
+        return None
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+class TeacherPermissionPayload(BaseModel):
+    teacher_id: int
+    subject_id: str = Field(min_length=1, max_length=20)
+
+
+class UpdateTeacherPermissionPayload(BaseModel):
+    is_active: bool | None = None
+    new_subject_id: str | None = Field(default=None, min_length=1, max_length=20)
+
+
+class ReplaceTeacherPermissionsPayload(BaseModel):
+    subject_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+def _permission_teacher(db: Session, teacher_id: int) -> User:
+    teacher = db.query(User).filter(User.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    if _user_role(teacher) != "teacher":
+        raise HTTPException(status_code=400, detail="User is not a teacher")
+    if teacher.is_locked or teacher.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="Teacher account is unavailable")
+    return teacher
+
+
+def _permission_subject(db: Session, subject_id: str) -> Subject:
+    subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return subject
+
+
+def _serialize_teacher_permission(item: TeacherSubject) -> dict:
+    return {
+        "teacher_id": item.teacher_id,
+        "teacher_school_id": item.teacher.school_id,
+        "teacher_full_name": item.teacher.full_name,
+        "teacher_email": item.teacher.email,
+        "subject_id": item.subject_id,
+        "subject_name": item.subject.subject_name,
+        "assigned_by": item.assigned_by,
+        "assigned_by_school_id": item.assigner.school_id if item.assigner else None,
+        "assigned_by_full_name": item.assigner.full_name if item.assigner else None,
+        "assigned_at": item.assigned_at.isoformat() if item.assigned_at else None,
+        "is_active": bool(item.is_active),
+    }
+
+
+def _serialize_teacher_permission_set(teacher: User, items: list[TeacherSubject]) -> dict:
+    return {
+        "teacher_id": teacher.id,
+        "teacher_school_id": teacher.school_id,
+        "teacher_full_name": teacher.full_name,
+        "teacher_email": teacher.email,
+        "permissions": [
+            {
+                "subject_id": item.subject_id,
+                "subject_name": item.subject.subject_name,
+                "assigned_by": item.assigned_by,
+                "assigned_at": item.assigned_at.isoformat() if item.assigned_at else None,
+                "is_active": bool(item.is_active),
+            }
+            for item in items
+            if item.is_active
+        ],
+    }
+
+
+@router.get("/teacher-permissions")
+def list_teacher_permissions(
+    search: str | None = None, teacher_id: int | None = None, subject_id: str | None = None, is_active: bool | None = None,
+    current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    query = db.query(TeacherSubject).join(TeacherSubject.teacher).join(TeacherSubject.subject)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(User.full_name.ilike(term), User.school_id.ilike(term), User.email.ilike(term)))
+    if teacher_id is not None: query = query.filter(TeacherSubject.teacher_id == teacher_id)
+    if subject_id: query = query.filter(TeacherSubject.subject_id == subject_id)
+    if is_active is not None: query = query.filter(TeacherSubject.is_active.is_(is_active))
+    return {"items": [_serialize_teacher_permission(item) for item in query.order_by(TeacherSubject.teacher_id, TeacherSubject.subject_id).all()]}
+
+
+@router.get("/teacher-permissions/teachers")
+def list_permission_teachers(current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    return [{"id": user.id, "school_id": user.school_id, "full_name": user.full_name, "email": user.email} for user in db.query(User).filter(User.role == UserRole.teacher, User.deleted_at.is_(None), User.is_locked.is_(False)).order_by(User.full_name, User.id).all()]
+
+
+@router.get("/teacher-permissions/subjects")
+def list_permission_subjects(current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    return [{"subject_id": subject.subject_id, "subject_name": subject.subject_name} for subject in db.query(Subject).order_by(Subject.subject_name).all()]
+
+
+@router.get("/teachers/{teacher_id}/permissions")
+def list_teacher_subject_permissions(teacher_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    _permission_teacher(db, teacher_id)
+    return {"items": [_serialize_teacher_permission(item) for item in db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher_id).order_by(TeacherSubject.subject_id).all()]}
+
+
+@router.patch("/teachers/{teacher_id}/permissions")
+def replace_teacher_permissions(
+    teacher_id: int,
+    payload: ReplaceTeacherPermissionsPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Atomically replace a teacher's complete active subject-access set."""
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        teacher = _permission_teacher(db, teacher_id)
+        subject_ids = [subject_id.strip() for subject_id in payload.subject_ids]
+        if any(not subject_id for subject_id in subject_ids) or len(subject_ids) != len(set(subject_ids)):
+            raise HTTPException(status_code=400, detail="Subject IDs must be unique and non-empty")
+        subjects = db.query(Subject).filter(Subject.subject_id.in_(subject_ids)).all() if subject_ids else []
+        if len(subjects) != len(subject_ids):
+            raise HTTPException(status_code=404, detail="One or more subjects were not found")
+
+        existing = {
+            item.subject_id: item
+            for item in db.query(TeacherSubject)
+            .filter(TeacherSubject.teacher_id == teacher.id)
+            .with_for_update()
+            .all()
+        }
+        requested = set(subject_ids)
+        now = datetime.now()
+        for subject_id, item in existing.items():
+            if subject_id not in requested and item.is_active:
+                item.is_active = False
+        for subject_id in requested:
+            item = existing.get(subject_id)
+            if item is None:
+                item = TeacherSubject(teacher_id=teacher.id, subject_id=subject_id, is_active=True, assigned_by=admin.id, assigned_at=now)
+                db.add(item)
+            elif not item.is_active:
+                item.is_active = True
+                item.assigned_by = admin.id
+                item.assigned_at = now
+        db.commit()
+        refreshed = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher.id).order_by(TeacherSubject.subject_id).all()
+        return _serialize_teacher_permission_set(teacher, refreshed)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Teacher permissions could not be updated") from exc
+
+
+@router.post("/teacher-permissions", status_code=status.HTTP_201_CREATED)
+def grant_teacher_permission(payload: TeacherPermissionPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user); _permission_teacher(db, payload.teacher_id); _permission_subject(db, payload.subject_id)
+        item = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == payload.teacher_id, TeacherSubject.subject_id == payload.subject_id).with_for_update().first()
+        if item and item.is_active: raise HTTPException(status_code=409, detail="Teacher already has active permission for this subject")
+        if not item:
+            item = TeacherSubject(teacher_id=payload.teacher_id, subject_id=payload.subject_id); db.add(item)
+        item.is_active = True; item.assigned_by = admin.id; item.assigned_at = datetime.now()
+        db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+    except HTTPException:
+        db.rollback(); raise
+    except IntegrityError as exc:
+        db.rollback(); raise HTTPException(status_code=409, detail="Teacher permission conflicts with an existing assignment") from exc
+
+
+@router.patch("/teacher-permissions/{teacher_id}/{subject_id}")
+def update_teacher_permission(teacher_id: int, subject_id: str, payload: UpdateTeacherPermissionPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user); _permission_teacher(db, teacher_id)
+        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=subject_id).with_for_update().first()
+        if not item: raise HTTPException(status_code=404, detail="Teacher permission not found")
+        if payload.new_subject_id and payload.new_subject_id != subject_id:
+            _permission_subject(db, payload.new_subject_id)
+            other = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=payload.new_subject_id).with_for_update().first()
+            if other and other.is_active: raise HTTPException(status_code=409, detail="Teacher already has active permission for this subject")
+            item.is_active = False
+            if other: item = other
+            else: item = TeacherSubject(teacher_id=teacher_id, subject_id=payload.new_subject_id); db.add(item)
+            item.is_active = True
+        if payload.is_active is not None: item.is_active = payload.is_active
+        item.assigned_by = admin.id; item.assigned_at = datetime.now()
+        db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+    except HTTPException:
+        db.rollback(); raise
+
+
+@router.delete("/teacher-permissions/{teacher_id}/{subject_id}")
+def revoke_teacher_permission(teacher_id: int, subject_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=subject_id).with_for_update().first()
+        if not item: raise HTTPException(status_code=404, detail="Teacher permission not found")
+        item.is_active = False; db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+    except HTTPException:
+        db.rollback(); raise

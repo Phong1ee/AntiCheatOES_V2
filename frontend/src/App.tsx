@@ -35,6 +35,7 @@ export default function App() {
     setCurrentPage("login");
 
     authStorage.clearToken();
+    localStorage.removeItem("user");
     localStorage.removeItem("role");
     localStorage.removeItem("loginTime");
   };

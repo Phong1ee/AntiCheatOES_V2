@@ -444,7 +444,10 @@ def list_approved_question_bank(
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     subject_ids = _active_subject_ids(db, teacher.id)
+    if subject_id and subject_id not in subject_ids:
+        raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
     query = _apply_filters(_base_question_query(db).filter(Question.question_status == QuestionStatus.approved), subject_id, chapter_id, lo_id, search, question_type, difficulty)
+    query = query.filter(Question.subject_id.in_(subject_ids))
     questions, total = _list_questions(query, page, page_size)
     return {"items": [_serialize_item(item, teacher, True, db, subject_ids) for item in questions], "total": total, "page": page, "page_size": page_size}
 
@@ -460,7 +463,10 @@ def list_my_questions(
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     subject_ids = _active_subject_ids(db, teacher.id)
+    if subject_id and subject_id not in subject_ids:
+        raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
     query = _base_question_query(db).filter(Question.created_by == teacher.id)
+    query = query.filter(Question.subject_id.in_(subject_ids))
     if status_filter:
         pending_revision_exists = db.query(QuestionRevision.revision_id).filter(
             QuestionRevision.question_id == Question.question_id,
@@ -514,17 +520,19 @@ def list_my_questions(
 def list_subject_counts(scope: Literal["bank", "mine"] = "bank", current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
+    subject_ids = _active_subject_ids(db, teacher.id)
     filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [Question.created_by == teacher.id]
-    rows = db.query(Subject.subject_id, Subject.subject_name, Subject.subject_description, func.count(Question.question_id).label("question_count")).outerjoin(Question, (Subject.subject_id == Question.subject_id) & filters[0]).group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description).order_by(Subject.subject_name).all()
-    total = db.query(func.count(Question.question_id)).filter(*filters).scalar() or 0
-    no_subject_count = db.query(func.count(Question.question_id)).filter(Question.created_by == teacher.id, Question.subject_id.is_(None)).scalar() or 0 if scope == "mine" else 0
+    rows = db.query(Subject.subject_id, Subject.subject_name, Subject.subject_description, func.count(Question.question_id).label("question_count")).filter(Subject.subject_id.in_(subject_ids)).outerjoin(Question, (Subject.subject_id == Question.subject_id) & filters[0]).group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description).order_by(Subject.subject_name).all()
+    total = db.query(func.count(Question.question_id)).filter(*filters, Question.subject_id.in_(subject_ids)).scalar() or 0
+    no_subject_count = 0
     return {"scope": scope, "total_count": total, "no_subject_count": no_subject_count, "subjects": [{"subject_id": row.subject_id, "subject_name": row.subject_name, "subject_description": row.subject_description, "question_count": row.question_count} for row in rows]}
 
 
 @router.get("/subjects/{subject_id}/chapters")
 def list_subject_chapters(subject_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     del role_check
-    _teacher(db, current_user["school_id"])
+    teacher = _teacher(db, current_user["school_id"])
+    _require_subject_permission(db, teacher, subject_id)
     return [{"chapter_id": item.chapter_id, "chapter_name": item.chapter_name} for item in db.query(Chapter).filter(Chapter.subject_id == subject_id).order_by(Chapter.chapter_name).all()]
 
 
@@ -581,6 +589,7 @@ def get_question_detail(question_id: int, current_user: dict = Depends(verify_to
     question = _refresh_question(db, question_id)
     if _status(question) != "approved" and question.created_by != teacher.id:
         raise HTTPException(status_code=404, detail="Question not found")
+    _require_subject_permission(db, teacher, question.subject_id)
     return _serialize_detail(question, teacher, db)
 
 

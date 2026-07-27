@@ -59,7 +59,7 @@ class AuthController:
 
     @staticmethod
     def get_me(school_id: str):
-        """Get current user profile by school_id from token."""
+        """Get the profile after the token dependency has validated the account."""
         user = userModel.getUserBySchoolId(school_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")

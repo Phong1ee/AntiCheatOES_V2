@@ -1,9 +1,20 @@
 from fastapi import HTTPException, Header, Depends, status
 import jwt
+from sqlalchemy.orm import Session
+
+from database import get_db
+from src.a_db_config import User
 from src.middleware.constant import SECRET_KEY, ALGORITHM
 
-def verify_token(authorization: str = Header(None)):
-    """Verify JWT token from Authorization header."""
+def _role_value(role: object) -> str:
+    return role.value if hasattr(role, "value") else str(role or "")
+
+
+def verify_token(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Verify a token and resolve the account's current database state."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing authorization header")
     
@@ -14,9 +25,19 @@ def verify_token(authorization: str = Header(None)):
         
         token = parts[1]
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        school_id = payload.get("sub")
+        if not school_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        user = db.query(User).filter(User.school_id == school_id).first()
+        if not user or user.deleted_at is not None or user.is_locked:
+            raise HTTPException(status_code=401, detail="Account is unavailable")
+
         return {
-            "school_id": payload.get("sub"),
-            "role": payload.get("role"),
+            "id": user.id,
+            "school_id": user.school_id,
+            # Never trust a role claim after the token has been issued.
+            "role": _role_value(user.role).lower(),
             "exp": payload.get("exp")
         }
     except jwt.ExpiredSignatureError:

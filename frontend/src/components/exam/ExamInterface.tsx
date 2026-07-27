@@ -93,7 +93,23 @@ export function ExamInterface({
 
         const token = localStorage.getItem('token');
 
-        const res = await fetch(`${API_BASE_URL}/api/exams/${examId}`, {
+        const storedAttempt = localStorage.getItem('current_exam_attempt');
+        let persistedAttemptId: number | null = null;
+        if (storedAttempt) {
+          try {
+            const parsedAttempt = JSON.parse(storedAttempt) as {
+              examId?: string | number;
+              attemptId?: number;
+            };
+            if (String(parsedAttempt.examId) === String(examId) && parsedAttempt.attemptId) {
+              persistedAttemptId = Number(parsedAttempt.attemptId);
+            }
+          } catch {
+            persistedAttemptId = null;
+          }
+        }
+        const attemptQuery = persistedAttemptId ? `?attempt_id=${persistedAttemptId}` : '';
+        const res = await fetch(`${API_BASE_URL}/api/exams/${examId}${attemptQuery}`, {
           headers: {
             Authorization: token ? `Bearer ${token}` : '',
           },

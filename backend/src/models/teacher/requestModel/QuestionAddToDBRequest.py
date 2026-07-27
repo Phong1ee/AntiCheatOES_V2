@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -15,7 +16,7 @@ class QuestionAddToDBRequest(BaseModel):
     question_status: Literal["draft", "pending", "approved", "rejected"] = "draft"
     options: list[QuestionOptionsRequest] = Field(default_factory=list)
     exam_id: int | None = None
-    question_point: int | None = Field(default=None, gt=0)
+    question_point: Decimal | None = Field(default=None, gt=0, max_digits=10, decimal_places=2)
     # Temporary input compatibility. Responses and the frontend use chapter_ids.
     chapter_id: int | None = Field(default=None, exclude=True)
 

@@ -1,5 +1,8 @@
 from datetime import datetime
+from decimal import Decimal
+
 from src.a_db_config.config import get_db_connection
+from src.service.exam_pool_service import distribute_points, seeded_random, select_unique_candidates
 
 
 def insertQuestion(question_text: str, question_type: str):
@@ -147,7 +150,7 @@ def getAssignedExamById(school_id: str, exam_id: int):
         cnx.close()
 
 
-def getExamQuestions(exam_id: int):
+def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     """Get exam questions and student-safe options without correct answers."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -156,10 +159,24 @@ def getExamQuestions(exam_id: int):
         q.question_id,
         q.question_text,
         q.question_type,
+        aq.question_point
+    FROM attempt_question aq
+    JOIN attempt a
+        ON a.attempt_id = aq.attempt_id
+    JOIN question q
+        ON q.question_id = aq.question_id
+    WHERE a.exam_id = %s
+      AND aq.attempt_id = %s
+    ORDER BY aq.display_order ASC
+    """
+    fixed_question_query = """
+    SELECT
+        q.question_id,
+        q.question_text,
+        q.question_type,
         eq.question_point
     FROM exam_question eq
-    JOIN question q
-        ON q.question_id = eq.question_id
+    JOIN question q ON q.question_id = eq.question_id
     WHERE eq.exam_id = %s
     ORDER BY q.question_id ASC
     """
@@ -172,7 +189,10 @@ def getExamQuestions(exam_id: int):
     ORDER BY options_id ASC
     """
     try:
-        cursor.execute(question_query, (exam_id,))
+        if attempt_id is not None:
+            cursor.execute(question_query, (exam_id, attempt_id))
+        else:
+            cursor.execute(fixed_question_query, (exam_id,))
         question_rows = cursor.fetchall()
         questions = []
 
@@ -215,7 +235,8 @@ def getExamById(exam_id: int):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     query = """
-    SELECT exam_id, examcode, max_attempt, duration_minutes, start_time, end_time
+    SELECT exam_id, examcode, max_attempt, duration_minutes, start_time, end_time,
+           question_selection_mode, total_points
     FROM exam
     WHERE exam_id = %s
     """
@@ -224,6 +245,51 @@ def getExamById(exam_id: int):
         return cursor.fetchone()
     except Exception as e:
         raise e
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def validateExamQuestionPoints(exam_id: int):
+    """Reject starting an exam whose persisted selection cannot total its maximum."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT question_selection_mode, total_points FROM exam WHERE exam_id = %s",
+            (exam_id,),
+        )
+        exam = cursor.fetchone()
+        if not exam:
+            raise Exception("Exam not found")
+        if str(exam["question_selection_mode"] or "manual") == "pool":
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS rule_count, COALESCE(SUM(r.draw_count), 0) AS draw_count
+                FROM exam_pool_config c
+                LEFT JOIN exam_pool_rule r ON r.pool_config_id = c.pool_config_id
+                WHERE c.exam_id = %s
+                """,
+                (exam_id,),
+            )
+            pool = cursor.fetchone()
+            if not pool or int(pool["rule_count"] or 0) == 0 or int(pool["draw_count"] or 0) == 0:
+                raise Exception("Exam pool configuration is empty")
+            return
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS question_count,
+                   COALESCE(SUM(question_point), 0) AS assigned_points
+            FROM exam_question
+            WHERE exam_id = %s
+            """,
+            (exam_id,),
+        )
+        points = cursor.fetchone()
+        if int(points["question_count"] or 0) == 0:
+            raise Exception("Exam has no questions")
+        if Decimal(str(points["assigned_points"])) != Decimal(str(exam["total_points"])):
+            raise Exception("Exam question points do not match total points")
     finally:
         cursor.close()
         cnx.close()
@@ -294,10 +360,10 @@ def getOpenAttempt(exam_id: int, student_id: int):
 
 
 def createAttempt(exam_id: int, student_id: int, attempt_no: int):
-    """Create a new attempt row for a student exam."""
+    """Create an attempt and immutable question/point snapshot in one transaction."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
-    query = """
+    insert_attempt = """
     INSERT INTO attempt (
         exam_id,
         student_id,
@@ -310,11 +376,130 @@ def createAttempt(exam_id: int, student_id: int, attempt_no: int):
     VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL)
     """
     try:
-        cursor.execute(query, (exam_id, student_id, attempt_no))
+        cnx.start_transaction()
+        cursor.execute(
+            """
+            SELECT attempt_id
+            FROM attempt
+            WHERE exam_id = %s AND student_id = %s
+              AND submitted_at IS NULL AND end_time IS NULL
+            ORDER BY attempt_id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (exam_id, student_id),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            cnx.commit()
+            return int(existing[0])
+
+        cursor.execute(insert_attempt, (exam_id, student_id, attempt_no))
+        attempt_id = cursor.lastrowid
+        cursor.execute(
+            "SELECT question_selection_mode, total_points FROM exam WHERE exam_id = %s FOR UPDATE",
+            (exam_id,),
+        )
+        exam_row = cursor.fetchone()
+        mode = str(exam_row[0] or "manual")
+        selected_ids: list[int]
+        point_map: dict[int, Decimal]
+        if mode == "pool":
+            cursor.execute(
+                """
+                SELECT pool_config_id, version
+                FROM exam_pool_config
+                WHERE exam_id = %s
+                FOR UPDATE
+                """,
+                (exam_id,),
+            )
+            config = cursor.fetchone()
+            if not config:
+                raise Exception("Pool configuration not found")
+            cursor.execute(
+                """
+                SELECT rule_id, draw_count
+                FROM exam_pool_rule
+                WHERE pool_config_id = %s
+                ORDER BY rule_id
+                """,
+                (config[0],),
+            )
+            rule_rows = cursor.fetchall()
+            candidate_map: dict[int, list[int]] = {}
+            draw_counts: dict[int, int] = {}
+            for rule_id, draw_count in rule_rows:
+                cursor.execute(
+                    """
+                    SELECT question_id
+                    FROM exam_pool_question
+                    WHERE rule_id = %s
+                    ORDER BY question_id
+                    """,
+                    (rule_id,),
+                )
+                candidate_map[int(rule_id)] = [int(row[0]) for row in cursor.fetchall()]
+                draw_counts[int(rule_id)] = int(draw_count)
+            selected = select_unique_candidates(
+                candidate_map,
+                draw_counts,
+                seeded_random(exam_id, student_id, attempt_no, int(config[1])),
+            )
+            selected_ids = [
+                question_id
+                for rule_id in sorted(selected)
+                for question_id in selected[rule_id]
+            ]
+            rng = seeded_random("order", exam_id, student_id, attempt_no, int(config[1]))
+            rng.shuffle(selected_ids)
+            point_map = distribute_points(exam_row[1], selected_ids)
+        else:
+            cursor.execute(
+                """
+                SELECT question_id, question_point
+                FROM exam_question
+                WHERE exam_id = %s
+                ORDER BY question_id
+                """,
+                (exam_id,),
+            )
+            fixed_rows = cursor.fetchall()
+            if not fixed_rows:
+                raise Exception("Exam has no questions")
+            selected_ids = [int(row[0]) for row in fixed_rows]
+            point_map = {
+                int(question_id): Decimal(str(question_point))
+                for question_id, question_point in fixed_rows
+            }
+        cursor.executemany(
+            """
+            INSERT INTO attempt_question
+                (attempt_id, question_id, display_order, question_point)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                (attempt_id, question_id, index, point_map[question_id])
+                for index, question_id in enumerate(selected_ids, start=1)
+            ],
+        )
         cnx.commit()
-        return cursor.lastrowid
+        return attempt_id
     except Exception as e:
         cnx.rollback()
+        if getattr(e, "errno", None) == 1062:
+            cursor.execute(
+                """
+                SELECT attempt_id
+                FROM attempt
+                WHERE exam_id = %s AND student_id = %s AND attempt_no = %s
+                LIMIT 1
+                """,
+                (exam_id, student_id, attempt_no),
+            )
+            concurrent_attempt = cursor.fetchone()
+            if concurrent_attempt:
+                return int(concurrent_attempt[0])
         raise e
     finally:
         cursor.close()
@@ -346,26 +531,20 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
     cursor = cnx.cursor(dictionary=True)
     try:
         question_query = """
-        SELECT q.question_id, q.question_type, eq.question_point
-        FROM exam_question eq
-        JOIN question q ON q.question_id = eq.question_id
-        WHERE eq.exam_id = %s
+        SELECT q.question_id, q.question_type, aq.question_point
+        FROM attempt_question aq
+        JOIN attempt a ON a.attempt_id = aq.attempt_id
+        JOIN question q ON q.question_id = aq.question_id
+        WHERE aq.attempt_id = %s AND a.exam_id = %s
         """
-        cursor.execute(question_query, (exam_id,))
+        cursor.execute(question_query, (attempt_id, exam_id))
         question_rows = cursor.fetchall()
         question_map = {row["question_id"]: row for row in question_rows}
 
         delete_mcq_query = "DELETE FROM mcq_answers WHERE attempt_id = %s"
         delete_essay_query = "DELETE FROM essay_answers WHERE attempt_id = %s"
-        delete_attempt_question_query = "DELETE FROM attempt_question WHERE attempt_id = %s"
         cursor.execute(delete_mcq_query, (attempt_id,))
         cursor.execute(delete_essay_query, (attempt_id,))
-        cursor.execute(delete_attempt_question_query, (attempt_id,))
-
-        insert_attempt_question_query = """
-        INSERT INTO attempt_question (attempt_id, question_id, display_order)
-        VALUES (%s, %s, %s)
-        """
         insert_mcq_query = """
         INSERT INTO mcq_answers (attempt_id, question_id, selected_option_id)
         VALUES (%s, %s, %s)
@@ -387,7 +566,7 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
         LIMIT 1
         """
 
-        total_score = 0
+        total_score = Decimal("0.00")
         essay_pending = False
 
         for index, answer in enumerate(answers, start=1):
@@ -399,8 +578,6 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
 
             selected_option_id = answer.get("selectedOptionId")
             answer_text = (answer.get("answerText") or "").strip()
-
-            cursor.execute(insert_attempt_question_query, (attempt_id, question_id, index))
 
             if question_info["question_type"] == "essay":
                 if not answer_text:
@@ -423,7 +600,7 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
 
             cursor.execute(insert_mcq_query, (attempt_id, question_id, option_row["options_id"]))
             if option_row["is_correct"]:
-                total_score += int(question_info["question_point"] or 0)
+                total_score += Decimal(str(question_info["question_point"] or 0))
 
         update_attempt_query = """
         UPDATE attempt

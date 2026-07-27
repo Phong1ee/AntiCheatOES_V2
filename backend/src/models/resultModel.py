@@ -258,7 +258,7 @@ def _get_attempt_questions(cursor, attempt_id: int):
         q.question_text,
         q.question_type,
         q.subject_id,
-        eq.question_point,
+        aq.question_point,
         ma.selected_option_id,
         selected.options_text AS student_mcq_answer,
         selected.is_correct AS selected_is_correct,
@@ -269,9 +269,6 @@ def _get_attempt_questions(cursor, attempt_id: int):
         ON a.attempt_id = aq.attempt_id
     JOIN question q
         ON q.question_id = aq.question_id
-    LEFT JOIN exam_question eq
-        ON eq.exam_id = a.exam_id
-        AND eq.question_id = q.question_id
     LEFT JOIN mcq_answers ma
         ON ma.attempt_id = aq.attempt_id
         AND ma.question_id = aq.question_id

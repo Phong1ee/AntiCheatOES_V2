@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,13 +11,16 @@ from src.a_db_config import (
     Chapter,
     ChapterLO,
     ChapterQuestion,
+    AttemptQuestion,
     Exam,
+    ExamPoolConfig,
     ExamQuestion,
     LO,
     LOQuestion,
     Option,
     Question,
     QuestionStatus,
+    QuestionSelectionMode,
     Subject,
     User,
 )
@@ -26,6 +30,8 @@ from src.models.teacher.requestModel.QuestionAddToExamRequest import QuestionAdd
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
+from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
+from src.service.exam_pool_service import distribute_points
 
 router = APIRouter()
 
@@ -48,6 +54,15 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
 
 def _status_value(question: Question) -> str | None:
     return question.question_status.value if hasattr(question.question_status, "value") else question.question_status
+
+
+def _leave_pool_for_manual_edit(db: Session, exam: Exam) -> None:
+    mode = exam.question_selection_mode.value if hasattr(exam.question_selection_mode, "value") else exam.question_selection_mode
+    if mode != "manual":
+        config = db.query(ExamPoolConfig).filter_by(exam_id=exam.exam_id).first()
+        if config:
+            db.delete(config)
+        exam.question_selection_mode = QuestionSelectionMode.manual
 
 
 def _serialize_import_candidate(question: Question, already_added: bool = False) -> dict:
@@ -186,6 +201,132 @@ def _replace_options(db: Session, question: Question, requested: list[QuestionOp
             existing[item.options_id].is_correct = item.is_correct
 
 
+def _has_content_changes(question: Question, request: QuestionUpdateRequest) -> bool:
+    if request.question_text is not None and request.question_text.strip() != question.question_text:
+        return True
+    if request.question_difficulties is not None:
+        current = question.question_difficulties.value if hasattr(question.question_difficulties, "value") else question.question_difficulties
+        if request.question_difficulties != current:
+            return True
+    if request.question_type is not None:
+        current = question.question_type.value if hasattr(question.question_type, "value") else question.question_type
+        if request.question_type != current:
+            return True
+    if request.subject_id is not None and request.subject_id != question.subject_id:
+        return True
+    if request.chapter_ids is not None and set(request.chapter_ids) != {item.chapter_id for item in question.chapter_questions}:
+        return True
+    if request.lo_ids is not None and set(request.lo_ids) != {item.lo_id for item in question.lo_questions}:
+        return True
+    if request.options is not None:
+        current_options = [
+            (option.options_text, bool(option.is_correct))
+            for option in sorted(question.options, key=lambda item: item.options_id)
+        ]
+        requested_options = [(item.options_text.strip(), bool(item.is_correct)) for item in request.options]
+        if current_options != requested_options:
+            return True
+    return False
+
+
+def _can_edit_exam_draft_in_place(
+    db: Session,
+    question: Question,
+    exam_id: int,
+    teacher_id: int,
+) -> bool:
+    return (
+        question.created_by == teacher_id
+        and _status_value(question) == "draft"
+        and db.query(ExamQuestion).filter(ExamQuestion.question_id == question.question_id).count() == 1
+        and db.query(ExamQuestion).filter_by(
+            exam_id=exam_id, question_id=question.question_id
+        ).first()
+        is not None
+        and db.query(AttemptQuestion)
+        .filter(AttemptQuestion.question_id == question.question_id)
+        .first()
+        is None
+    )
+
+
+def _replace_taxonomy_rows(
+    db: Session,
+    question_id: int,
+    chapters: list[Chapter] | None,
+    los: list[LO] | None,
+) -> None:
+    if chapters is not None:
+        db.query(ChapterQuestion).filter(
+            ChapterQuestion.question_id == question_id
+        ).delete(synchronize_session=False)
+        db.add_all(
+            ChapterQuestion(question_id=question_id, chapter_id=chapter.chapter_id)
+            for chapter in chapters
+        )
+    if los is not None:
+        db.query(LOQuestion).filter(LOQuestion.question_id == question_id).delete(
+            synchronize_session=False
+        )
+        db.add_all(
+            LOQuestion(question_id=question_id, lo_id=lo.lo_id)
+            for lo in los
+        )
+
+
+def _clone_question(
+    db: Session,
+    source: Question,
+    teacher_id: int,
+    request: QuestionUpdateRequest,
+    chapters: list[Chapter],
+    los: list[LO],
+) -> Question:
+    clone = Question(
+        question_text=(request.question_text or source.question_text).strip(),
+        question_difficulties=request.question_difficulties or source.question_difficulties,
+        question_type=request.question_type or source.question_type,
+        subject_id=request.subject_id or source.subject_id,
+        created_by=teacher_id,
+        question_status=QuestionStatus.draft,
+        source_question_id=source.question_id,
+    )
+    db.add(clone)
+    db.flush()
+    db.add_all(
+        ChapterQuestion(question_id=clone.question_id, chapter_id=chapter.chapter_id)
+        for chapter in chapters
+    )
+    db.add_all(
+        LOQuestion(question_id=clone.question_id, lo_id=lo.lo_id)
+        for lo in los
+    )
+    source_options = (
+        request.options
+        if request.options is not None
+        else [
+            QuestionOptionsRequest(
+                options_text=option.options_text,
+                is_correct=option.is_correct,
+            )
+            for option in sorted(source.options, key=lambda item: item.options_id)
+        ]
+    )
+    _validate_options(
+        clone.question_type.value if hasattr(clone.question_type, "value") else clone.question_type,
+        source_options,
+    )
+    db.add_all(
+        Option(
+            question_id=clone.question_id,
+            options_text=option.options_text.strip(),
+            is_correct=option.is_correct,
+        )
+        for option in source_options
+    )
+    return clone
+
+
 @router.post("/add-question", status_code=status.HTTP_201_CREATED)
 def add_question_to_database(
     request: QuestionAddToDBRequest,
@@ -221,6 +362,7 @@ def add_question_to_database(
             for item in request.options
         )
         if request.exam_id is not None:
+            _leave_pool_for_manual_edit(db, exam)
             db.add(ExamQuestion(exam_id=request.exam_id, question_id=question.question_id, question_point=request.question_point))
         db.commit()
         db.refresh(question)
@@ -248,6 +390,7 @@ def add_question_to_exam(
     del role_check
     try:
         exam = _owned_exam(db, exam_id, current_user["school_id"])
+        _leave_pool_for_manual_edit(db, exam)
         question = db.query(Question).filter(Question.question_id == request.question_id).first()
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
@@ -283,39 +426,73 @@ def update_question_in_exam(
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
 ):
-    """Update an exam question and its reusable question-bank data atomically."""
+    """Update an exam-local draft, cloning shared content before any content edit."""
     del role_check
     try:
         _owned_exam(db, exam_id, current_user["school_id"])
+        teacher = _teacher(db, current_user["school_id"])
         link = db.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
         if not link:
             raise HTTPException(status_code=404, detail="Question not found in the exam")
         question = db.query(Question).filter(Question.question_id == question_id).first()
+        content_changed = _has_content_changes(question, request)
+        if not content_changed:
+            link.question_point = request.question_point
+            db.commit()
+            return {
+                "success": True,
+                "question_id": question.question_id,
+                "cloned": False,
+            }
+
         target_subject = request.subject_id or question.subject_id
         chapter_ids = request.chapter_ids if request.chapter_ids is not None else [item.chapter_id for item in question.chapter_questions]
         lo_ids = request.lo_ids if request.lo_ids is not None else [item.lo_id for item in question.lo_questions]
         chapters, los = _validate_taxonomy(db, target_subject, chapter_ids, lo_ids)
 
-        if request.question_text is not None:
-            question.question_text = request.question_text.strip()
-        if request.question_difficulties is not None:
-            question.question_difficulties = request.question_difficulties
-        if request.question_type is not None:
-            question.question_type = request.question_type
-        question.subject_id = target_subject
-        # Status is server-controlled for reusable questions. Teacher exam edits
-        # may change content/points, but cannot directly approve a question.
-        link.question_point = request.question_point
-
-        if request.chapter_ids is not None:
-            question.chapter_questions.clear()
-            question.chapter_questions.extend(ChapterQuestion(chapter_id=chapter.chapter_id) for chapter in chapters)
-        if request.lo_ids is not None:
-            question.lo_questions.clear()
-            question.lo_questions.extend(LOQuestion(lo_id=lo.lo_id) for lo in los)
-        _replace_options(db, question, request.options)
+        can_edit_in_place = _can_edit_exam_draft_in_place(
+            db, question, exam_id, teacher.id
+        )
+        if can_edit_in_place:
+            if request.question_text is not None:
+                question.question_text = request.question_text.strip()
+            if request.question_difficulties is not None:
+                question.question_difficulties = request.question_difficulties
+            if request.question_type is not None:
+                question.question_type = request.question_type
+            question.subject_id = target_subject
+            _replace_taxonomy_rows(
+                db,
+                question.question_id,
+                chapters if request.chapter_ids is not None else None,
+                los if request.lo_ids is not None else None,
+            )
+            if request.options is not None:
+                _replace_options(db, question, request.options)
+            link.question_point = request.question_point
+            effective_question = question
+        else:
+            effective_question = _clone_question(
+                db, question, teacher.id, request, chapters, los
+            )
+            preserved_point = request.question_point
+            db.delete(link)
+            db.flush()
+            db.add(
+                ExamQuestion(
+                    exam_id=exam_id,
+                    question_id=effective_question.question_id,
+                    question_point=preserved_point,
+                )
+            )
         db.commit()
-        return {"success": True, "message": "Question updated successfully"}
+        return {
+            "success": True,
+            "message": "Question updated successfully",
+            "question_id": effective_question.question_id,
+            "cloned": not can_edit_in_place,
+            "source_question_id": question.question_id if not can_edit_in_place else question.source_question_id,
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -345,6 +522,82 @@ def delete_question_from_exam(
         db.delete(link)
         db.commit()
         return {"success": True, "message": "Question removed from exam"}
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.post("/{exam_id}/questions/bulk-remove")
+def bulk_remove_questions_from_exam(
+    exam_id: int,
+    request: BulkQuestionIdsRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _owned_exam(db, exam_id, current_user["school_id"])
+        existing_ids = {
+            row[0]
+            for row in db.query(ExamQuestion.question_id)
+            .filter(
+                ExamQuestion.exam_id == exam_id,
+                ExamQuestion.question_id.in_(request.question_ids),
+            )
+            .all()
+        }
+        missing = sorted(set(request.question_ids) - existing_ids)
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail={"message": "Questions are not attached to this exam", "question_ids": missing},
+            )
+        db.query(ExamQuestion).filter(
+            ExamQuestion.exam_id == exam_id,
+            ExamQuestion.question_id.in_(request.question_ids),
+        ).delete(synchronize_session=False)
+        db.commit()
+        return {
+            "success": True,
+            "removed_count": len(existing_ids),
+            "removed_question_ids": sorted(existing_ids),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.post("/{exam_id}/questions/distribute-points")
+def distribute_exam_question_points(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        exam = _owned_exam(db, exam_id, current_user["school_id"])
+        links = (
+            db.query(ExamQuestion)
+            .filter(ExamQuestion.exam_id == exam_id)
+            .order_by(ExamQuestion.question_id)
+            .all()
+        )
+        allocation = distribute_points(
+            exam.total_points or 0, [link.question_id for link in links]
+        )
+        for link in links:
+            link.question_point = allocation[link.question_id]
+        db.commit()
+        return {
+            "success": True,
+            "total_points": str(sum(allocation.values(), Decimal("0.00"))),
+            "points": [
+                {"question_id": question_id, "question_point": str(points)}
+                for question_id, points in allocation.items()
+            ],
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -403,7 +656,7 @@ def get_questions_from_question_bank(
 def get_question_import_candidates(
     exam_id: int,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 5,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
@@ -513,7 +766,8 @@ def add_questions_to_exam_from_question_bank(
     """Atomically attach authorized reusable questions to an owned exam."""
     del role_check
     try:
-        _owned_exam(db, exam_id, current_user["school_id"])
+        exam = _owned_exam(db, exam_id, current_user["school_id"])
+        _leave_pool_for_manual_edit(db, exam)
         teacher = _teacher(db, current_user["school_id"])
         if not request:
             raise HTTPException(status_code=400, detail="Select at least one question to import")

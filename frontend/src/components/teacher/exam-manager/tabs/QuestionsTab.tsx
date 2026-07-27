@@ -21,16 +21,16 @@ import {
   Database,
   Save,
   X,
-  Settings2,
-  Users,
-  Eye,
+  Loader2,
+  Shuffle,
 } from 'lucide-react';
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
-import { StudentQuestionPreview } from '../StudentQuestionPreview';
 import { toast } from 'sonner';
-import { questionService } from '../../../../services/question.service';
-import type { QuestionDifficulty } from '../../../../types/question-bank';
+import { questionService, type PoolConfig } from '../../../../services/question.service';
+import { teacherQuestionBankService } from '../../../../services/teacher-question-bank.service';
+import type { ChapterSummary, LearningObjectiveSummary, QuestionDifficulty } from '../../../../types/question-bank';
+import { Checkbox } from '../../../ui/checkbox';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,17 +56,6 @@ interface Question {
   chapterIds?: number[];
   loIds?: number[];
   status?: 'draft' | 'pending' | 'approved' | 'rejected';
-}
-
-interface PoolConfig {
-  subject: string;
-  rules: {
-    knowledgeDomain: string;
-    difficulty: 'easy' | 'medium' | 'hard';
-    count: number;
-    available: number;
-  }[];
-  totalQuestions: number;
 }
 
 interface QuestionsTabProps {
@@ -209,13 +198,52 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
   const [showQuestionPool, setShowQuestionPool] = useState(false);
   const [poolConfig, setPoolConfig] = useState<PoolConfig | null>(null);
   const [isPoolMode, setIsPoolMode] = useState(false);
-  const [showStudentPreview, setShowStudentPreview] = useState(false);
+  const [activePoolRuleId, setActivePoolRuleId] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+  const [distributeOpen, setDistributeOpen] = useState(false);
+  const [exitPoolOpen, setExitPoolOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [chapters, setChapters] = useState<ChapterSummary[]>([]);
+  const [learningObjectives, setLearningObjectives] = useState<LearningObjectiveSummary[]>([]);
+  const [taxonomyLoading, setTaxonomyLoading] = useState(false);
+  const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
+  const selectedQ = questions.find((question) => question.id === selectedQuestion);
+  const updateQuestion = useCallback((id: string, updates: Partial<Question>) => {
+    setQuestions((current) => current.map((question) => (
+      question.id === id ? { ...question, ...updates } : question
+    )));
+  }, []);
+
+  const mapQuestions = useCallback((persistedQuestions: Awaited<ReturnType<typeof questionService.getExamQuestions>>): Question[] =>
+    persistedQuestions.map((question) => {
+      const correctIndexes = question.options
+        .map((option, index) => option.is_correct ? index : -1)
+        .filter((index) => index >= 0);
+      return {
+        id: String(question.question_id),
+        type: question.question_type === 'MCQ' ? 'mcq' : question.question_type,
+        question: question.question_text,
+        points: Number(question.question_point),
+        difficulty: question.question_difficulties,
+        options: question.options.map((option) => option.options_text),
+        optionIds: question.options.map((option) => option.options_id),
+        correctAnswer: question.question_type === 'true-false'
+          ? (question.options[correctIndexes[0]]?.options_text.toLowerCase() ?? 'true')
+          : correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
+        hasMultipleCorrect: correctIndexes.length > 1,
+        chapterId: question.chapter_ids[0],
+        chapterIds: question.chapter_ids,
+        loIds: question.lo_ids,
+        status: question.question_status,
+      };
+    }), []);
 
   const loadQuestions = useCallback(async (questionToSelect?: string) => {
     if (!examId || examId.startsWith('new-')) {
@@ -228,43 +256,84 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       setLoadingQuestions(true);
       setLoadError(null);
       const persistedQuestions = await questionService.getExamQuestions(Number(examId));
-      const mappedQuestions: Question[] = persistedQuestions.map((question) => {
-        const correctIndexes = question.options
-          .map((option, index) => option.is_correct ? index : -1)
-          .filter((index) => index >= 0);
-        return {
-          id: String(question.question_id),
-          type: question.question_type === 'MCQ' ? 'mcq' : question.question_type,
-          question: question.question_text,
-          points: question.question_point,
-          difficulty: question.question_difficulties,
-          options: question.options.map((option) => option.options_text),
-          optionIds: question.options.map((option) => option.options_id),
-          correctAnswer: question.question_type === 'true-false'
-            ? (question.options[correctIndexes[0]]?.options_text.toLowerCase() ?? 'true')
-            : correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
-          hasMultipleCorrect: correctIndexes.length > 1,
-          chapterId: question.chapter_ids[0],
-          chapterIds: question.chapter_ids,
-          loIds: question.lo_ids,
-          status: question.question_status,
-        };
-      });
+      const mappedQuestions = mapQuestions(persistedQuestions);
       setQuestions(mappedQuestions);
       setSelectedQuestion(questionToSelect ?? mappedQuestions[0]?.id ?? null);
+      setSelectedIds(new Set());
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to load exam questions.');
     } finally {
       setLoadingQuestions(false);
     }
+  }, [examId, mapQuestions]);
+
+  const loadPoolConfig = useCallback(async () => {
+    if (!examId || examId.startsWith('new-')) {
+      setPoolConfig(null);
+      setIsPoolMode(false);
+      return;
+    }
+    const response = await questionService.getPoolConfig(Number(examId));
+    if ('config' in response && response.config === null) {
+      setPoolConfig(null);
+      setIsPoolMode(false);
+      return;
+    }
+    setPoolConfig(response as PoolConfig);
+    setIsPoolMode((response as PoolConfig).mode === 'pool');
   }, [examId]);
 
   // Update questions when examId changes
   useEffect(() => {
-    void loadQuestions();
-  }, [loadQuestions]);
+    void Promise.all([loadQuestions(), loadPoolConfig()]).catch((error: unknown) => {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load persisted exam configuration.');
+    });
+  }, [loadQuestions, loadPoolConfig]);
 
-  const selectedQ = questions.find((q) => q.id === selectedQuestion);
+  useEffect(() => {
+    let active = true;
+    const loadTaxonomy = async () => {
+      if (!subjectId) {
+        setChapters([]);
+        setLearningObjectives([]);
+        return;
+      }
+      try {
+        setTaxonomyLoading(true);
+        setTaxonomyError(null);
+        const chapterRows = await teacherQuestionBankService.listChapters(subjectId);
+        if (!active) return;
+        setChapters(chapterRows);
+        const validChapterIds = new Set(chapterRows.map((chapter) => chapter.chapter_id));
+        const selectedChapterIds = (selectedQ?.chapterIds ?? []).filter((chapterId) => validChapterIds.has(chapterId));
+        if (selectedQ && selectedChapterIds.length !== (selectedQ.chapterIds ?? []).length) {
+          updateQuestion(selectedQ.id, {
+            chapterIds: selectedChapterIds,
+            chapterId: selectedChapterIds[0],
+          });
+        }
+        const loGroups = await Promise.all(
+          selectedChapterIds.map((chapterId) => teacherQuestionBankService.listLearningObjectives(chapterId)),
+        );
+        if (!active) return;
+        const unique = new Map<number, LearningObjectiveSummary>();
+        loGroups.flat().forEach((lo) => unique.set(lo.lo_id, lo));
+        setLearningObjectives([...unique.values()]);
+        const validLoIds = new Set(unique.keys());
+        if (selectedQ && (selectedQ.loIds ?? []).some((loId) => !validLoIds.has(loId))) {
+          updateQuestion(selectedQ.id, {
+            loIds: (selectedQ.loIds ?? []).filter((loId) => validLoIds.has(loId)),
+          });
+        }
+      } catch (error) {
+        if (active) setTaxonomyError(error instanceof Error ? error.message : 'Unable to load taxonomy.');
+      } finally {
+        if (active) setTaxonomyLoading(false);
+      }
+    };
+    void loadTaxonomy();
+    return () => { active = false; };
+  }, [subjectId, selectedQuestion, selectedQ?.chapterIds?.join(',')]);
 
   const addQuestion = (type: Question['type']) => {
     const newQuestion: Question = {
@@ -305,16 +374,96 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     }
   };
 
+  const loadPoolRuleCandidates = async (ruleId: number, questionToSelect?: string) => {
+    if (!examId) return;
+    try {
+      setLoadingQuestions(true);
+      setLoadError(null);
+      const response = await questionService.getPoolRuleQuestions(Number(examId), ruleId);
+      const mapped = mapQuestions(response.questions.map((question) => ({
+        ...question,
+        question_point: 1,
+      })));
+      setQuestions(mapped);
+      setActivePoolRuleId(ruleId);
+      setSelectedQuestion(questionToSelect ?? mapped[0]?.id ?? null);
+      setSelectedIds(new Set());
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load pool candidates.');
+    } finally {
+      setLoadingQuestions(false);
+    }
+  };
+
+  const confirmBulkRemove = async () => {
+    if (!examId) return;
+    const persistedIds = [...selectedIds]
+      .filter((id) => !id.startsWith('new-'))
+      .map(Number);
+    try {
+      setBulkBusy(true);
+      if (persistedIds.length > 0) {
+        await questionService.bulkRemove(Number(examId), persistedIds);
+      }
+      const remaining = questions.filter((question) => !selectedIds.has(question.id));
+      const unsavedRemaining = remaining.filter((question) => question.id.startsWith('new-'));
+      const reconciled = persistedIds.length > 0
+        ? [
+            ...mapQuestions(await questionService.getExamQuestions(Number(examId))),
+            ...unsavedRemaining,
+          ]
+        : remaining;
+      setQuestions(reconciled);
+      setSelectedQuestion(reconciled[0]?.id ?? null);
+      setSelectedIds(new Set());
+      setBulkRemoveOpen(false);
+      toast.success(`${persistedIds.length} persisted question${persistedIds.length === 1 ? '' : 's'} removed from the exam.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to remove selected questions.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const confirmDistribute = async () => {
+    if (!examId) return;
+    try {
+      setBulkBusy(true);
+      await questionService.distributePoints(Number(examId));
+      setDistributeOpen(false);
+      await loadQuestions(selectedQuestion ?? undefined);
+      toast.success('Points distributed evenly and persisted.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to distribute points.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const confirmExitPool = async () => {
+    if (!examId) return;
+    try {
+      setBulkBusy(true);
+      const result = await questionService.exitPoolMode(Number(examId));
+      setExitPoolOpen(false);
+      setPoolConfig(null);
+      setIsPoolMode(false);
+      setActivePoolRuleId(null);
+      await loadQuestions();
+      toast.success(`${result.materialized_count} unique pool candidates converted to fixed questions.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to exit pool mode.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const duplicateQuestion = (id: string) => {
     const question = questions.find((q) => q.id === id);
     if (question) {
       const newQuestion = { ...question, id: `new-${Date.now()}`, optionIds: undefined };
       setQuestions([...questions, newQuestion]);
     }
-  };
-
-  const updateQuestion = (id: string, updates: Partial<Question>) => {
-    setQuestions(questions.map((q) => (q.id === id ? { ...q, ...updates } : q)));
   };
 
   const addOption = () => {
@@ -346,8 +495,8 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       setSaveError('Question text, subject, and difficulty are required.');
       return;
     }
-    if (!Number.isInteger(selectedQ.points) || selectedQ.points <= 0) {
-      setSaveError('Question points must be a positive integer.');
+    if (!Number.isFinite(selectedQ.points) || selectedQ.points <= 0) {
+      setSaveError('Question points must be a positive number.');
       return;
     }
 
@@ -378,7 +527,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           question_difficulties: selectedQ.difficulty,
           question_type: questionType,
           subject_id: subjectId,
-          chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
+          chapter_ids: selectedQ.chapterIds ?? [],
           lo_ids: selectedQ.loIds ?? [],
           question_status: selectedQ.status ?? 'draft',
           options,
@@ -387,18 +536,34 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
         });
         await loadQuestions(String(questionId));
       } else {
-        await questionService.updateInExam(Number(examId), Number(selectedQ.id), {
+        const payload = {
           question_text: selectedQ.question.trim(),
           question_difficulties: selectedQ.difficulty,
           question_type: questionType,
           subject_id: subjectId,
-          chapter_ids: selectedQ.chapterId ? [selectedQ.chapterId] : [],
+          chapter_ids: selectedQ.chapterIds ?? [],
           lo_ids: selectedQ.loIds ?? [],
           question_status: selectedQ.status ?? 'draft',
           question_point: selectedQ.points,
           options,
-        });
-        await loadQuestions(selectedQ.id);
+        };
+        if (isPoolMode && activePoolRuleId !== null) {
+          const result = await questionService.updatePoolCandidate(
+            Number(examId),
+            activePoolRuleId,
+            Number(selectedQ.id),
+            payload,
+          );
+          await loadPoolRuleCandidates(activePoolRuleId, String(result.question_id));
+          await loadPoolConfig();
+        } else {
+          const result = await questionService.updateInExam(
+            Number(examId),
+            Number(selectedQ.id),
+            payload,
+          );
+          await loadQuestions(String(result.question_id));
+        }
       }
       toast.success('Question saved successfully.');
     } catch (error) {
@@ -410,10 +575,16 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     }
   };
 
-  const handleAddPoolConfig = (config: PoolConfig) => {
+  const handleAddPoolConfig = async (config: PoolConfig) => {
     setPoolConfig(config);
-    setIsPoolMode(true);
-    setQuestions([]); // Clear fixed questions when using pool mode
+    setIsPoolMode(config.mode === 'pool');
+    setActivePoolRuleId(null);
+    if (config.mode === 'fixed_randomization') {
+      await loadQuestions();
+    } else {
+      setQuestions([]);
+      setSelectedQuestion(null);
+    }
   };
 
   return (
@@ -425,6 +596,18 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
             <h3 className="text-sm text-gray-700">
               {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length})`}
             </h3>
+            {!isPoolMode && questions.length > 0 && (
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <Checkbox
+                  aria-label="Select all exam questions"
+                  checked={selectedIds.size === questions.length ? true : selectedIds.size > 0 ? 'indeterminate' : false}
+                  onCheckedChange={(checked) => setSelectedIds(
+                    checked === true ? new Set(questions.map((question) => question.id)) : new Set(),
+                  )}
+                />
+                Select all
+              </label>
+            )}
           </div>
           {loadError && (
             <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
@@ -442,7 +625,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                     <strong>Pool Mode Active</strong>
                   </p>
                   <p className="text-xs text-purple-700 mt-1">
-                    {poolConfig.totalQuestions} questions per student
+                    {poolConfig.total_questions} questions per student
                   </p>
                   <p className="text-xs text-purple-600 mt-1">
                     Each student receives different questions
@@ -453,19 +636,16 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowStudentPreview(true)}
+                  onClick={() => poolConfig.rules[0] && void loadPoolRuleCandidates(poolConfig.rules[0].rule_id)}
                   className="flex-1 text-xs border-purple-300 hover:bg-purple-100"
                 >
                   <Eye className="size-3 mr-1" />
-                  Preview
+                  View Candidates
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setIsPoolMode(false);
-                    setPoolConfig(null);
-                  }}
+                  onClick={() => setExitPoolOpen(true)}
                   className="flex-1 text-xs border-purple-300 hover:bg-purple-100"
                 >
                   <X className="size-3 mr-1" />
@@ -476,6 +656,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           )}
 
           {!isPoolMode && (
+          <>
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -505,6 +686,15 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               Essay
             </Button>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="sm" variant="outline" onClick={() => setDistributeOpen(true)} disabled={questions.length === 0 || bulkBusy}>
+              <Shuffle className="mr-1 size-3" /> Distribute Points Evenly
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setBulkRemoveOpen(true)} disabled={selectedIds.size === 0 || bulkBusy} className="text-red-600">
+              <Trash2 className="mr-1 size-3" /> Remove Selected ({selectedIds.size})
+            </Button>
+          </div>
+          </>
           )}
 
           <Button
@@ -519,23 +709,23 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           </Button>
         </div>
 
-        {isPoolMode && poolConfig ? (
+        {isPoolMode && poolConfig && activePoolRuleId === null ? (
           /* Pool Configuration Summary */
           <div className="p-4 space-y-3 overflow-y-auto h-[calc(100vh-400px)]">
             <div className="space-y-2">
               <h4 className="text-xs text-gray-700 uppercase">Subject</h4>
               <Badge variant="outline" className="bg-white">
-                {poolConfig.subject === 'all' ? 'All Subjects' : poolConfig.subject}
+                {poolConfig.subject_id}
               </Badge>
             </div>
 
             <div className="space-y-2">
               <h4 className="text-xs text-gray-700 uppercase mb-2">Distribution</h4>
-              {poolConfig.rules.map((rule, idx) => (
-                <Card key={idx} className="shadow-sm">
+              {poolConfig.rules.map((rule) => (
+                <Card key={rule.rule_id} className={`cursor-pointer shadow-sm ${activePoolRuleId === rule.rule_id ? 'border-purple-500' : ''}`} onClick={() => void loadPoolRuleCandidates(rule.rule_id)}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-800">{rule.knowledgeDomain}</span>
+                      <span className="text-xs text-gray-800">{rule.chapter_name}{rule.lo_name ? ` · ${rule.lo_name}` : ' · All LOs'}</span>
                       <Badge
                         variant="outline"
                         className={
@@ -550,8 +740,8 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-600">
-                      <span>Draw {rule.count} questions</span>
-                      <span className="text-gray-500">from {rule.available}</span>
+                      <span>Draw {rule.draw_count} questions</span>
+                      <span className="text-gray-500">from {rule.available_count}</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -562,7 +752,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-teal-800">Total Per Student</span>
                 <Badge className="bg-gradient-to-r from-teal-500 to-blue-600">
-                  {poolConfig.totalQuestions}
+                  {poolConfig.total_questions}
                 </Badge>
               </div>
             </div>
@@ -585,6 +775,20 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                 }`}
               >
                 <div className="flex items-start gap-2">
+                  {!isPoolMode && (
+                    <Checkbox
+                      className="mt-1"
+                      aria-label={`Select question ${index + 1}`}
+                      checked={selectedIds.has(question.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={(checked) => setSelectedIds((current) => {
+                        const next = new Set(current);
+                        if (checked === true) next.add(question.id);
+                        else next.delete(question.id);
+                        return next;
+                      })}
+                    />
+                  )}
                   <GripVertical className="size-4 text-gray-400 mt-1 flex-shrink-0 cursor-move" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -606,8 +810,20 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                       {question.question || 'Untitled question'}
                     </p>
                     <p className="text-xs text-teal-600 mt-1 uppercase">{question.type}</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {(question.chapterIds ?? []).slice(0, 2).map((chapterId) => (
+                        <Badge key={chapterId} variant="outline" className="text-[10px]">
+                          {chapters.find((chapter) => chapter.chapter_id === chapterId)?.chapter_name ?? `Chapter ${chapterId}`}
+                        </Badge>
+                      ))}
+                      {(question.loIds ?? []).slice(0, 2).map((loId) => (
+                        <Badge key={loId} variant="outline" className="text-[10px] text-purple-700">
+                          {learningObjectives.find((lo) => lo.lo_id === loId)?.lo_name ?? `LO ${loId}`}
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-1 flex-shrink-0">
+                  {!isPoolMode && <div className="flex gap-1 flex-shrink-0">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -626,7 +842,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                     >
                       <Trash2 className="size-3 text-red-500" />
                     </button>
-                  </div>
+                  </div>}
                 </div>
               </div>
             );
@@ -733,18 +949,59 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                         updateQuestion(selectedQ.id, { points: Number(e.target.value) })
                       }
                       min="1"
+                      step="0.01"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="chapter-id">Chapter ID</Label>
-                  <Input
-                    id="chapter-id"
-                    type="number"
-                    min="1"
-                    value={selectedQ.chapterId ?? ''}
-                    onChange={(event) => updateQuestion(selectedQ.id, { chapterId: Number(event.target.value) || undefined })}
-                    placeholder="Enter the existing chapter ID"
-                  />
+                <div className="col-span-2 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Chapters (optional)</Label>
+                    <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border bg-gray-50 p-3">
+                      {taxonomyLoading ? <p className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="size-3 animate-spin" /> Loading chapters...</p>
+                        : chapters.length === 0 ? <p className="text-xs text-gray-500">No chapters are available for this subject.</p>
+                        : chapters.map((chapter) => (
+                          <label key={chapter.chapter_id} className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              aria-label={`Select chapter ${chapter.chapter_name}`}
+                              checked={(selectedQ.chapterIds ?? []).includes(chapter.chapter_id)}
+                              onCheckedChange={(checked) => {
+                                const current = selectedQ.chapterIds ?? [];
+                                const next = checked === true
+                                  ? [...new Set([...current, chapter.chapter_id])]
+                                  : current.filter((id) => id !== chapter.chapter_id);
+                                updateQuestion(selectedQ.id, { chapterIds: next, chapterId: next[0] });
+                              }}
+                            />
+                            {chapter.chapter_name}
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Learning Objectives (optional)</Label>
+                    <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border bg-gray-50 p-3">
+                      {(selectedQ.chapterIds ?? []).length === 0 ? <p className="text-xs text-gray-500">Select one or more chapters to load valid learning objectives.</p>
+                        : taxonomyLoading ? <p className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="size-3 animate-spin" /> Loading learning objectives...</p>
+                        : learningObjectives.length === 0 ? <p className="text-xs text-gray-500">No learning objectives are available for the selected chapters.</p>
+                        : learningObjectives.map((lo) => (
+                          <label key={lo.lo_id} className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              aria-label={`Select learning objective ${lo.lo_name}`}
+                              checked={(selectedQ.loIds ?? []).includes(lo.lo_id)}
+                              onCheckedChange={(checked) => {
+                                const current = selectedQ.loIds ?? [];
+                                updateQuestion(selectedQ.id, {
+                                  loIds: checked === true
+                                    ? [...new Set([...current, lo.lo_id])]
+                                    : current.filter((id) => id !== lo.lo_id),
+                                });
+                              }}
+                            />
+                            {lo.lo_name}
+                          </label>
+                        ))}
+                    </div>
+                    {taxonomyError && <p className="text-xs text-red-600">{taxonomyError}</p>}
+                  </div>
                 </div>
                 {saveError && <p className="text-sm text-red-600">{saveError}</p>}
                 </div>
@@ -891,80 +1148,15 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
         <QuestionPoolModal
           examId={Number(examId)}
           existingQuestionIds={questions.filter((question) => !question.id.startsWith('new-')).map((question) => Number(question.id))}
+          subjectId={subjectId}
+          initialPoolConfig={poolConfig}
           onClose={() => setShowQuestionPool(false)}
           onImported={async () => {
             setIsPoolMode(false);
+            setPoolConfig(null);
             await loadQuestions();
           }}
-        />
-      )}
-
-      {/* Student Question Preview */}
-      {showStudentPreview && poolConfig && (
-        <StudentQuestionPreview
-          poolConfig={poolConfig}
-          questionBank={[
-            // Mock question bank - in real app, this would come from API
-            {
-              id: 'q1',
-              type: 'mcq',
-              question: 'What is normalization in database design?',
-              subject: 'Database Systems',
-              knowledgeDomain: 'Database Design',
-              difficulty: 'medium',
-              points: 5,
-              options: [
-                'Process of organizing data to reduce redundancy',
-                'Process of creating backups',
-                'Process of encrypting data',
-                'Process of indexing tables',
-              ],
-              correctAnswer: 0,
-            },
-            {
-              id: 'q2',
-              type: 'mcq',
-              question: 'Which of the following are valid SQL aggregate functions?',
-              subject: 'Database Systems',
-              knowledgeDomain: 'SQL Queries',
-              difficulty: 'easy',
-              points: 4,
-              options: ['COUNT()', 'SUM()', 'AVG()', 'CONCAT()'],
-              correctAnswer: [0, 1, 2],
-              hasMultipleCorrect: true,
-            },
-            {
-              id: 'q3',
-              type: 'mcq',
-              question: 'Which normal form removes transitive dependencies?',
-              subject: 'Database Systems',
-              knowledgeDomain: 'Normalization',
-              difficulty: 'hard',
-              points: 6,
-              options: ['1NF', '2NF', '3NF', 'BCNF'],
-              correctAnswer: 2,
-            },
-            {
-              id: 'q4',
-              type: 'essay',
-              question: 'Explain the ACID properties in database transactions.',
-              subject: 'Database Systems',
-              knowledgeDomain: 'Transactions',
-              difficulty: 'hard',
-              points: 10,
-            },
-            {
-              id: 'q5',
-              type: 'true-false',
-              question: 'A foreign key can contain NULL values.',
-              subject: 'Database Systems',
-              knowledgeDomain: 'Database Design',
-              difficulty: 'medium',
-              points: 3,
-              correctAnswer: 'true',
-            },
-          ]}
-          onClose={() => setShowStudentPreview(false)}
+          onPoolSaved={handleAddPoolConfig}
         />
       )}
       <AlertDialog open={questionToDelete !== null} onOpenChange={(open) => { if (!open && !isDeleting) setQuestionToDelete(null); }}>
@@ -981,6 +1173,24 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               {isDeleting ? 'Removing...' : 'Remove question'}
             </AlertDialogAction>
           </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={bulkRemoveOpen} onOpenChange={(open) => { if (!bulkBusy) setBulkRemoveOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Remove {selectedIds.size} selected question{selectedIds.size === 1 ? '' : 's'}?</AlertDialogTitle><AlertDialogDescription>Only exam associations are removed. Reusable questions, options, chapters, and learning objectives remain intact.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} className="bg-red-600 hover:bg-red-700" onClick={(event) => { event.preventDefault(); void confirmBulkRemove(); }}>{bulkBusy ? 'Removing...' : 'Remove Selected'}</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={distributeOpen} onOpenChange={(open) => { if (!bulkBusy) setDistributeOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Distribute points evenly?</AlertDialogTitle><AlertDialogDescription>The persisted exam total will be divided across all fixed questions. The final question receives any two-decimal rounding remainder.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} onClick={(event) => { event.preventDefault(); void confirmDistribute(); }}>{bulkBusy ? 'Distributing...' : 'Distribute Points'}</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={exitPoolOpen} onOpenChange={(open) => { if (!bulkBusy) setExitPoolOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Exit Pool Mode?</AlertDialogTitle><AlertDialogDescription>Every unique saved pool candidate will become a normal fixed exam question. This can add more questions than each student previously received. Existing attempts remain unchanged.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} onClick={(event) => { event.preventDefault(); void confirmExitPool(); }}>{bulkBusy ? 'Converting...' : 'Exit Pool Mode'}</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>

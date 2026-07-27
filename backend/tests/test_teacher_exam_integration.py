@@ -186,6 +186,19 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.assertEqual((updated.total_points, updated.passing_score), (120, 72))
         self.assertEqual((updated.start_time, updated.end_time), (datetime(2026, 8, 3, 9, 15), datetime(2026, 8, 3, 17, 45)))
         self.assertEqual(updated.status.value, "archived")
+        teacher = self.db.query(User).filter_by(school_id="T1").one()
+        publish_question = Question(
+            question_text="Publish validation question",
+            question_difficulties="medium",
+            question_type="essay",
+            subject_id="DB",
+            created_by=teacher.id,
+            question_status=QuestionStatus.draft,
+        )
+        self.db.add(publish_question)
+        self.db.flush()
+        self.db.add(ExamQuestion(exam_id=exam.exam_id, question_id=publish_question.question_id, question_point=120))
+        self.db.commit()
         for exam_status in ("draft", "published", "archived"):
             update_exam_in_database(
                 exam.exam_id,
@@ -226,10 +239,18 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.assertEqual((reloaded["total_points"], reloaded["passing_score"]), (80, 48))
         self.assertEqual((reloaded["start_time"], reloaded["end_time"]), ("2026-09-10T08:00:00", "2026-09-12T18:30:00"))
         self.assertEqual(reloaded["status"], "draft")
-        for exam_status in ("draft", "published", "archived"):
+        for exam_status in ("draft", "archived"):
             status_request = request.model_copy(update={"examcode": f"STATUS-{exam_status}", "status": exam_status})
             status_result = add_exam_to_database(status_request, {"school_id": "T1"}, {}, self.db)
             self.assertEqual(status_result["status"], exam_status)
+        with self.assertRaises(HTTPException) as published_without_questions:
+            add_exam_to_database(
+                request.model_copy(update={"examcode": "STATUS-published", "status": "published"}),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(published_without_questions.exception.status_code, 422)
         with self.assertRaises(ValidationError):
             TeacherExamRequest(
                 title="Invalid",

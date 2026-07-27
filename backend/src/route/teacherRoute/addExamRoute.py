@@ -1,6 +1,9 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from decimal import Decimal
+
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,8 @@ from src.a_db_config import (
     Exam,
     ExamEvent,
     ExamQuestion,
+    ExamPoolConfig,
+    ExamPoolRule,
     MCQAnswer,
     StudentExam,
     Subject,
@@ -69,7 +74,41 @@ def _serialize(exam: Exam) -> dict:
         "schedule_status": schedule_status,
         "total_points": exam.total_points if exam.total_points is not None else 100,
         "passing_score": exam.passing_score if exam.passing_score is not None else 50,
+        "question_selection_mode": (
+            exam.question_selection_mode.value
+            if hasattr(exam.question_selection_mode, "value")
+            else exam.question_selection_mode
+        ),
     }
+
+
+def _validate_publishable(db: Session, exam: Exam, total_points: int) -> None:
+    mode = (
+        exam.question_selection_mode.value
+        if hasattr(exam.question_selection_mode, "value")
+        else exam.question_selection_mode
+    )
+    if mode == "pool":
+        config = db.query(ExamPoolConfig).filter_by(exam_id=exam.exam_id).first()
+        rule_count = (
+            db.query(func.count(ExamPoolRule.rule_id))
+            .filter(ExamPoolRule.pool_config_id == config.pool_config_id)
+            .scalar()
+            if config
+            else 0
+        )
+        if not config or not rule_count:
+            raise HTTPException(status_code=422, detail="A published pool exam requires a saved pool configuration")
+        return
+    links = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.exam_id).all()
+    if not links:
+        raise HTTPException(status_code=422, detail="A published exam requires at least one question")
+    assigned = sum((Decimal(str(link.question_point)) for link in links), Decimal("0.00"))
+    if assigned != Decimal(str(total_points)).quantize(Decimal("0.01")):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Assigned question points ({assigned}) must equal exam total points ({total_points})",
+        )
 
 
 @router.post("/add_exam", status_code=status.HTTP_201_CREATED)
@@ -99,6 +138,9 @@ def add_exam_to_database(
             passing_score=request.passing_score,
         )
         db.add(exam)
+        db.flush()
+        if request.status == "published":
+            _validate_publishable(db, exam, request.total_points)
         db.commit()
         db.refresh(exam)
         return _serialize(exam)
@@ -131,6 +173,8 @@ def update_exam_in_database(
         exam.subject_id = request.subject_id
         exam.start_time = request.start_time
         exam.end_time = request.end_time
+        if request.status == "published":
+            _validate_publishable(db, exam, request.total_points)
         exam.status = request.status
         exam.total_points = request.total_points
         exam.passing_score = request.passing_score

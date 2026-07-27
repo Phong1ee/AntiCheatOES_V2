@@ -40,6 +40,8 @@ class ExamController:
         if max_attempt is not None and int(max_attempt) > 0 and attempts_used >= int(max_attempt):
             raise Exception("Maximum attempts exceeded")
 
+        examModel.validateExamQuestionPoints(exam_id)
+
         return {
             "user": user,
             "exam": exam,
@@ -57,7 +59,9 @@ class ExamController:
 
 
     @staticmethod
-    def getExamWithQuestions(school_id: str, role: str, exam_id: int):
+    def getExamWithQuestions(
+        school_id: str, role: str, exam_id: int, attempt_id: int | None = None
+    ):
         """Get exam details and questions for an assigned student exam."""
         try:
             if role != "student":
@@ -67,7 +71,17 @@ class ExamController:
             if not exam:
                 raise Exception("Exam not found or not assigned to student")
 
-            questions = examModel.getExamQuestions(exam_id)
+            if attempt_id is not None:
+                attempt = examModel.getAttemptById(attempt_id)
+                user = userModel.getUserBySchoolId(school_id)
+                if (
+                    not attempt
+                    or not user
+                    or int(attempt["exam_id"]) != int(exam_id)
+                    or int(attempt["student_id"]) != int(user["id"])
+                ):
+                    raise Exception("Attempt does not belong to student")
+            questions = examModel.getExamQuestions(exam_id, attempt_id)
 
             return {
                 "success": True,

@@ -1,13 +1,14 @@
 // @ts-ignore: Allow side-effect CSS import without type declarations
 import './QuestionPoolModal.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, Database, Loader2, Search, X } from 'lucide-react';
+import { CheckCircle2, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, Database, Loader2, Search, Settings2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
   questionService,
   type QuestionImportCandidate,
   type QuestionImportCandidateResponse,
+  type PoolConfig,
 } from '../../../services/question.service';
 import type { QuestionDifficulty, QuestionStatus, QuestionType } from '../../../types/question-bank';
 import { Badge } from '../../ui/badge';
@@ -15,12 +16,16 @@ import { Button } from '../../ui/button';
 import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { PoolConfigurationBuilder } from './PoolConfigurationBuilder';
 
 interface QuestionPoolModalProps {
   examId: number;
   existingQuestionIds: number[];
+  subjectId: string;
+  initialPoolConfig: PoolConfig | null;
   onClose: () => void;
   onImported: () => Promise<void>;
+  onPoolSaved: (config: PoolConfig) => Promise<void>;
 }
 
 const statusClass: Record<QuestionImportCandidate['question_status'], string> = {
@@ -37,7 +42,8 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
   current_teacher_id: 0,
 };
 
-export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImported }: QuestionPoolModalProps) {
+export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
+  const [mode, setMode] = useState<'manual' | 'pool'>('manual');
   const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
   const [selectedPoints, setSelectedPoints] = useState<Record<number, number>>({});
   const [search, setSearch] = useState('');
@@ -61,6 +67,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
   const existingIds = useMemo(() => new Set(existingQuestionIds), [existingQuestionIds]);
 
   useEffect(() => {
+    if (mode !== 'manual') return;
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [search]);
@@ -97,7 +104,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
       }
     };
     void load();
-  }, [examId, debouncedSearch, questionType, difficulty, subjectId, questionStatus, createdBy, page, pageSize]);
+  }, [examId, debouncedSearch, questionType, difficulty, subjectId, questionStatus, createdBy, page, pageSize, mode]);
 
   useEffect(() => {
     questionListRef.current?.scrollTo({ top: 0, behavior: 'auto' });
@@ -139,8 +146,8 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
 
   const importQuestions = async () => {
     const payload = selectedIds.map((questionId) => ({ question_id: questionId, question_point: selectedPoints[questionId] }));
-    if (payload.some((item) => !Number.isInteger(item.question_point) || item.question_point <= 0)) {
-      setError('Every selected question must have a positive integer point value.');
+    if (payload.some((item) => !Number.isFinite(item.question_point) || item.question_point <= 0)) {
+      setError('Every selected question must have a positive point value.');
       return;
     }
     try {
@@ -168,6 +175,13 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
           <Button className="shrink-0" variant="ghost" size="sm" onClick={onClose} disabled={importing} aria-label="Close"><X className="size-5" /></Button>
         </div>
 
+        <div className="flex gap-2 border-b bg-gray-50 px-4 py-3 sm:px-6">
+          <Button type="button" size="sm" variant={mode === 'manual' ? 'default' : 'outline'} onClick={() => setMode('manual')}><Database className="mr-2 size-4" />Manual Selection</Button>
+          <Button type="button" size="sm" variant={mode === 'pool' ? 'default' : 'outline'} onClick={() => setMode('pool')}><Settings2 className="mr-2 size-4" />Pool Configuration</Button>
+        </div>
+
+        {mode === 'manual' ? (
+        <>
         <div className="question-pool-modal-toolbar space-y-3 border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4">
           <div className="relative">
             {!searchFocused && !search && <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />}
@@ -218,7 +232,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
                       {question.creator && <Badge variant="outline" className="max-w-full sm:max-w-44"><span className="truncate" title={creatorLabel}>{creatorLabel}</span></Badge>}
                       {alreadyAdded && <Badge variant="secondary">Already added</Badge>}
                     </div>
-                    {selected && <div className="ml-auto flex shrink-0 items-center gap-1.5"><label htmlFor={pointsInputId} className="text-xs text-gray-600">Points</label><Input id={pointsInputId} aria-label={`Points for question ${question.question_id}`} type="number" min="1" step="1" value={Number.isFinite(selectedPoints[question.question_id]) ? selectedPoints[question.question_id] : ''} onChange={(event) => updatePoints(question.question_id, event.target.value)} disabled={importing} className="h-8 w-16 px-2 text-center" /></div>}
+                    {selected && <div className="ml-auto flex shrink-0 items-center gap-1.5"><label htmlFor={pointsInputId} className="text-xs text-gray-600">Points</label><Input id={pointsInputId} aria-label={`Points for question ${question.question_id}`} type="number" min="0.01" step="0.01" value={Number.isFinite(selectedPoints[question.question_id]) ? selectedPoints[question.question_id] : ''} onChange={(event) => updatePoints(question.question_id, event.target.value)} disabled={importing} className="h-8 w-16 px-2 text-center" /></div>}
                   </div>
                   <p className="w-full whitespace-normal break-words text-sm text-gray-800">{question.question_text}</p>
                   {question.question_type === 'MCQ' && <p className="mt-1 text-xs text-gray-500">{question.option_count} options</p>}
@@ -231,6 +245,20 @@ export function QuestionPoolModal({ examId, existingQuestionIds, onClose, onImpo
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600"><span>Showing {firstShown}–{lastShown} of {total} questions</span><span>Page {totalPages === 0 ? 0 : page} of {totalPages}</span><div className="flex gap-1"><Button variant="outline" size="sm" aria-label="First page" onClick={() => setPage(1)} disabled={loading || page <= 1 || totalPages === 0}><ChevronsLeft className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Previous page" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1 || totalPages === 0}><ChevronLeft className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Next page" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={loading || totalPages === 0 || page >= totalPages}><ChevronRight className="size-4" /></Button><Button variant="outline" size="sm" aria-label="Last page" onClick={() => setPage(totalPages)} disabled={loading || totalPages === 0 || page >= totalPages}><ChevronsRight className="size-4" /></Button></div></div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm text-gray-600">{selectedIds.length} selected across all pages</span><div className="flex justify-end gap-2 sm:gap-3"><Button variant="outline" onClick={onClose} disabled={importing}>Cancel</Button><Button onClick={() => void importQuestions()} disabled={loading || importing || selectedIds.length === 0} className="bg-gradient-to-r from-teal-500 to-blue-600">{importing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}{importing ? 'Importing...' : `Import ${selectedIds.length || ''}`.trim()}</Button></div></div>
         </div>
+        </>
+        ) : (
+          <div className="question-pool-modal-list overflow-y-auto p-4 sm:p-6">
+            <PoolConfigurationBuilder
+              examId={examId}
+              subjectId={examSubjectId}
+              initialConfig={initialPoolConfig}
+              onSaved={async (config) => {
+                await onPoolSaved(config);
+                onClose();
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ export interface TeacherExamApi {
   result_visibility: "hidden" | "score-only" | "full" | null;
   total_points: number;
   passing_score: number;
+  question_selection_mode: "manual" | "fixed_randomization" | "pool";
 }
 
 export interface TeacherExamRequest {

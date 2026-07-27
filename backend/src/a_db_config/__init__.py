@@ -44,6 +44,12 @@ class ExamStatus(str, enum.Enum):
     archived = "archived"
 
 
+class QuestionSelectionMode(str, enum.Enum):
+    manual = "manual"
+    fixed_randomization = "fixed_randomization"
+    pool = "pool"
+
+
 result_visibility_enum = Enum(
     ResultVisibility,
     values_callable=lambda enum_class: [item.value for item in enum_class],
@@ -268,6 +274,11 @@ class Question(Base):
         Integer, ForeignKey("user.id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
+    source_question_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("question.question_id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     subject: Mapped[Optional["Subject"]] = relationship(
         back_populates="questions"
@@ -279,8 +290,12 @@ class Question(Base):
         secondary="chapter_question", back_populates="questions", viewonly=True
     )
     creator: Mapped[Optional["User"]] = relationship(back_populates="questions_created")
-    options: Mapped[list["Option"]] = relationship(back_populates="question")
-    lo_questions: Mapped[list["LOQuestion"]] = relationship(back_populates="question")
+    options: Mapped[list["Option"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
+    lo_questions: Mapped[list["LOQuestion"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="question")
     attempt_questions: Mapped[list["AttemptQuestion"]] = relationship(
         back_populates="question"
@@ -288,6 +303,12 @@ class Question(Base):
     revisions: Mapped[list["QuestionRevision"]] = relationship(
         back_populates="question",
         cascade="all, delete-orphan",
+    )
+    source_question: Mapped[Optional["Question"]] = relationship(
+        remote_side=[question_id], foreign_keys=[source_question_id]
+    )
+    pool_candidates: Mapped[list["ExamPoolQuestion"]] = relationship(
+        back_populates="question"
     )
 
 
@@ -367,7 +388,19 @@ class Exam(Base):
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="exam")
     total_points: Mapped[Optional[int]] = mapped_column(Integer, default=100)
     passing_score: Mapped[Optional[int]] = mapped_column(Integer, default=50)
+    question_selection_mode: Mapped[QuestionSelectionMode] = mapped_column(
+        Enum(QuestionSelectionMode),
+        nullable=False,
+        default=QuestionSelectionMode.manual,
+        server_default=QuestionSelectionMode.manual.value,
+    )
     settings: Mapped[Optional["ExamSetting"]] = relationship(
+        back_populates="exam",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+    pool_config: Mapped[Optional["ExamPoolConfig"]] = relationship(
         back_populates="exam",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -428,7 +461,7 @@ class ExamQuestion(Base):
     question_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("question.question_id", ondelete="CASCADE"), primary_key=True
     )
-    question_point: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_point: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
 
     exam: Mapped["Exam"] = relationship(back_populates="exam_questions")
     question: Mapped["Question"] = relationship(back_populates="exam_questions")
@@ -453,6 +486,9 @@ class StudentExam(Base):
 
 class Attempt(Base):
     __tablename__ = "attempt"
+    __table_args__ = (
+        UniqueConstraint("exam_id", "student_id", "attempt_no", name="uq_attempt_exam_student_no"),
+    )
 
     attempt_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     exam_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("exam.exam_id"))
@@ -481,6 +517,7 @@ class AttemptQuestion(Base):
         Integer, ForeignKey("question.question_id"), primary_key=True
     )
     display_order: Mapped[Optional[int]] = mapped_column(Integer)
+    question_point: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
 
     attempt: Mapped["Attempt"] = relationship(back_populates="attempt_questions")
     question: Mapped["Question"] = relationship(back_populates="attempt_questions")
@@ -490,6 +527,98 @@ class AttemptQuestion(Base):
     essay_answer: Mapped[Optional["EssayAnswer"]] = relationship(
         back_populates="attempt_question", uselist=False
     )
+
+
+class ExamPoolConfig(Base):
+    __tablename__ = "exam_pool_config"
+    __table_args__ = (
+        UniqueConstraint("exam_id", name="uq_exam_pool_config_exam"),
+    )
+
+    pool_config_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("exam.exam_id", ondelete="CASCADE"), nullable=False
+    )
+    subject_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("subject.subject_id", ondelete="RESTRICT"), nullable=False
+    )
+    fixed_randomization: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )
+
+    exam: Mapped["Exam"] = relationship(back_populates="pool_config")
+    rules: Mapped[list["ExamPoolRule"]] = relationship(
+        back_populates="config",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ExamPoolRule.rule_id",
+    )
+
+
+class ExamPoolRule(Base):
+    __tablename__ = "exam_pool_rule"
+    __table_args__ = (
+        UniqueConstraint(
+            "pool_config_id",
+            "chapter_id",
+            "lo_id",
+            "difficulty",
+            name="uq_exam_pool_rule_taxonomy",
+        ),
+        CheckConstraint("draw_count > 0", name="ck_exam_pool_rule_draw_positive"),
+    )
+
+    rule_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pool_config_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("exam_pool_config.pool_config_id", ondelete="CASCADE"), nullable=False
+    )
+    chapter_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chapter.chapter_id", ondelete="RESTRICT"), nullable=False
+    )
+    lo_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("lo.lo_id", ondelete="RESTRICT"), nullable=True
+    )
+    difficulty: Mapped[QuestionDifficulty] = mapped_column(
+        Enum(QuestionDifficulty), nullable=False
+    )
+    draw_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    config: Mapped["ExamPoolConfig"] = relationship(back_populates="rules")
+    chapter: Mapped["Chapter"] = relationship()
+    lo: Mapped[Optional["LO"]] = relationship()
+    candidates: Mapped[list["ExamPoolQuestion"]] = relationship(
+        back_populates="rule",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class ExamPoolQuestion(Base):
+    __tablename__ = "exam_pool_question"
+
+    rule_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exam_pool_rule.rule_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    question_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("question.question_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+    rule: Mapped["ExamPoolRule"] = relationship(back_populates="candidates")
+    question: Mapped["Question"] = relationship(back_populates="pool_candidates")
 
 
 class MCQAnswer(Base):

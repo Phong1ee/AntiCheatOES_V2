@@ -89,6 +89,48 @@ export interface ImportQuestionsResponse {
   imported_question_ids: number[];
 }
 
+export interface QuestionUpdateResponse {
+  success: boolean;
+  question_id: number;
+  cloned: boolean;
+  source_question_id?: number | null;
+}
+
+export interface PoolAvailabilityRow {
+  subject_id: string;
+  chapter_id: number;
+  chapter_name: string;
+  lo_id: number | null;
+  lo_name: string | null;
+  difficulty: QuestionDifficulty;
+  available_count: number;
+}
+
+export interface PoolRulePayload {
+  chapter_id: number;
+  lo_id: number | null;
+  difficulty: QuestionDifficulty;
+  draw_count: number;
+}
+
+export interface PoolRule extends PoolRulePayload {
+  rule_id: number;
+  chapter_name: string;
+  lo_name: string | null;
+  available_count: number;
+}
+
+export interface PoolConfig {
+  pool_config_id: number;
+  exam_id: number;
+  subject_id: string;
+  fixed_randomization: boolean;
+  version: number;
+  mode: "manual" | "fixed_randomization" | "pool";
+  total_questions: number;
+  rules: PoolRule[];
+}
+
 export const questionService = {
   async create(payload: CreateQuestionRequest): Promise<number> {
     const { data } = await apiClient.post<{ question_id: number }>("/api/teacher/add-question", payload);
@@ -100,8 +142,9 @@ export const questionService = {
     return data;
   },
 
-  async updateInExam(examId: number, questionId: number, payload: UpdateQuestionRequest): Promise<void> {
-    await apiClient.put(`/api/teacher/${examId}/update-question/${questionId}`, payload);
+  async updateInExam(examId: number, questionId: number, payload: UpdateQuestionRequest): Promise<QuestionUpdateResponse> {
+    const { data } = await apiClient.put<QuestionUpdateResponse>(`/api/teacher/${examId}/update-question/${questionId}`, payload);
+    return data;
   },
 
   async getExamQuestions(examId: number): Promise<ExamQuestionDetail[]> {
@@ -111,6 +154,78 @@ export const questionService = {
 
   async removeFromExam(examId: number, questionId: number): Promise<void> {
     await apiClient.delete(`/api/teacher/${examId}/delete-question/${questionId}`);
+  },
+
+  async bulkRemove(examId: number, questionIds: number[]) {
+    const { data } = await apiClient.post<{
+      success: boolean;
+      removed_count: number;
+      removed_question_ids: number[];
+    }>(`/api/teacher/${examId}/questions/bulk-remove`, { question_ids: questionIds });
+    return data;
+  },
+
+  async distributePoints(examId: number) {
+    const { data } = await apiClient.post<{
+      success: boolean;
+      total_points: string;
+      points: Array<{ question_id: number; question_point: string }>;
+    }>(`/api/teacher/${examId}/questions/distribute-points`);
+    return data;
+  },
+
+  async getPoolAvailability(examId: number, subjectId?: string) {
+    const { data } = await apiClient.get<{ subject_id: string; rows: PoolAvailabilityRow[] }>(
+      `/api/teacher/exams/${examId}/pool-availability`,
+      { params: subjectId ? { subject_id: subjectId } : undefined },
+    );
+    return data;
+  },
+
+  async getPoolConfig(examId: number): Promise<PoolConfig | { exam_id: number; mode: "manual"; config: null }> {
+    const { data } = await apiClient.get(`/api/teacher/exams/${examId}/pool-config`);
+    return data;
+  },
+
+  async savePoolConfig(
+    examId: number,
+    payload: { subject_id: string; fixed_randomization: boolean; rules: PoolRulePayload[] },
+  ): Promise<PoolConfig> {
+    const { data } = await apiClient.put<PoolConfig>(
+      `/api/teacher/exams/${examId}/pool-config`,
+      payload,
+    );
+    return data;
+  },
+
+  async getPoolRuleQuestions(examId: number, ruleId: number) {
+    const { data } = await apiClient.get<{ rule_id: number; questions: ExamQuestionDetail[] }>(
+      `/api/teacher/exams/${examId}/pool-rules/${ruleId}/questions`,
+    );
+    return data;
+  },
+
+  async updatePoolCandidate(
+    examId: number,
+    ruleId: number,
+    questionId: number,
+    payload: UpdateQuestionRequest,
+  ): Promise<QuestionUpdateResponse> {
+    const { data } = await apiClient.put<QuestionUpdateResponse>(
+      `/api/teacher/exams/${examId}/pool-rules/${ruleId}/questions/${questionId}`,
+      payload,
+    );
+    return data;
+  },
+
+  async exitPoolMode(examId: number) {
+    const { data } = await apiClient.post<{
+      success: boolean;
+      mode: "manual";
+      materialized_count: number;
+      question_ids: number[];
+    }>(`/api/teacher/exams/${examId}/pool-config/exit`);
+    return data;
   },
 
   async listImportCandidates(

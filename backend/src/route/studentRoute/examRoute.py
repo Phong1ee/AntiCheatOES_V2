@@ -123,18 +123,23 @@ async def submit_exam(
 
 
 @router.get("/{exam_id}")
-async def get_exam(exam_id: int, current_user: dict = Depends(verify_token)):
+async def get_exam(
+    exam_id: int,
+    attempt_id: int | None = None,
+    current_user: dict = Depends(verify_token),
+):
     """Get exam details with student-safe questions and options."""
     try:
         result = ExamController.getExamWithQuestions(
             current_user["school_id"],
             current_user["role"],
-            exam_id
+            exam_id,
+            attempt_id,
         )
         return result
     except Exception as e:
         detail = str(e)
-        if detail == "Only students can view assigned exams":
+        if detail in {"Only students can view assigned exams", "Attempt does not belong to student"}:
             raise HTTPException(status_code=403, detail=detail)
         if detail == "Exam not found or not assigned to student":
             raise HTTPException(status_code=404, detail=detail)

@@ -57,6 +57,11 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "subject": exam.subject.subject_name if exam.subject else None,
         "total_points": exam.total_points if exam.total_points is not None else 100,
         "passing_score": exam.passing_score if exam.passing_score is not None else 50,
+        "question_selection_mode": (
+            exam.question_selection_mode.value
+            if hasattr(exam.question_selection_mode, "value")
+            else exam.question_selection_mode
+        ),
     }
 
 

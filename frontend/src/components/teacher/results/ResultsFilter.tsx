@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Input } from '../../ui/input';
@@ -12,71 +12,40 @@ import {
 } from '../../ui/select';
 import { Search, Filter, X } from 'lucide-react';
 
+export interface ResultsFilterValue {
+  search: string;
+  status: string;
+}
+
 interface ResultsFilterProps {
-  onFilterChange: (filters: any) => void;
+  onFilterChange: (filters: ResultsFilterValue) => void;
 }
 
 export function ResultsFilter({ onFilterChange }: ResultsFilterProps) {
-  const [examId, setExamId] = useState('');
-  const [classGroup, setClassGroup] = useState('all');
   const [status, setStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  useEffect(() => {
+    onFilterChange({ search: searchQuery, status });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, status]);
+
   const clearFilters = () => {
-    setExamId('');
-    setClassGroup('all');
     setStatus('all');
     setSearchQuery('');
   };
 
-  const applyFilters = () => {
-    onFilterChange({ examId, classGroup, status, searchQuery });
-  };
-
-  const hasActiveFilters =
-    examId || classGroup !== 'all' || status !== 'all' || searchQuery;
+  const hasActiveFilters = status !== 'all' || searchQuery;
 
   return (
     <Card className="shadow-md rounded-2xl border-0">
       <CardContent className="p-5">
         <div className="flex items-center gap-2 mb-4">
           <Filter className="size-5 text-teal-600" />
-          <h3 className="text-gray-800">Filter Results</h3>
+          <h3 className="text-gray-800">Filter Student Results</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Exam Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="exam">Exam</Label>
-            <Select value={examId} onValueChange={setExamId}>
-              <SelectTrigger id="exam">
-                <SelectValue placeholder="Select exam" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="exam1">Database Midterm Exam</SelectItem>
-                <SelectItem value="exam2">Web Development Final</SelectItem>
-                <SelectItem value="exam3">Data Structures Quiz</SelectItem>
-                <SelectItem value="exam4">Algorithms Assessment</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Class/Group */}
-          <div className="space-y-2">
-            <Label htmlFor="class">Class</Label>
-            <Select value={classGroup} onValueChange={setClassGroup}>
-              <SelectTrigger id="class">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
-                <SelectItem value="cs301">CS301-A</SelectItem>
-                <SelectItem value="cs302">CS301-B</SelectItem>
-                <SelectItem value="cs401">CS401-A</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Status */}
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>
@@ -108,22 +77,15 @@ export function ResultsFilter({ onFilterChange }: ResultsFilterProps) {
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="space-y-2 flex flex-col justify-end">
-            <div className="flex gap-2">
-              <Button
-                onClick={applyFilters}
-                className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
-              >
-                Apply
+          {/* Clear */}
+          {hasActiveFilters && (
+            <div className="space-y-2 flex flex-col justify-end">
+              <Button variant="outline" onClick={clearFilters}>
+                <X className="size-4 mr-2" />
+                Clear Filters
               </Button>
-              {hasActiveFilters && (
-                <Button variant="outline" onClick={clearFilters} size="icon">
-                  <X className="size-4" />
-                </Button>
-              )}
             </div>
-          </div>
+          )}
         </div>
       </CardContent>
     </Card>

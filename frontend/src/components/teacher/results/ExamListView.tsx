@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
-import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import {
   Select,
@@ -22,109 +21,44 @@ import {
   AlertCircle,
   PenTool,
 } from 'lucide-react';
-
-interface ExamSummary {
-  id: string;
-  examName: string;
-  subject: string;
-  date: string;
-  duration: number;
-  totalQuestions: number;
-  totalStudents: number;
-  submittedCount: number;
-  avgScore: number;
-  status: 'completed' | 'in-progress' | 'scheduled';
-  hasEssayQuestions: boolean;
-  pendingEssayCount?: number;
-  totalEssayCount?: number;
-}
-
-const mockExams: ExamSummary[] = [
-  {
-    id: '1',
-    examName: 'Database Systems Midterm Exam',
-    subject: 'Database Systems',
-    date: '2025-11-14T09:00:00',
-    duration: 120,
-    totalQuestions: 20,
-    totalStudents: 25,
-    submittedCount: 23,
-    avgScore: 82.5,
-    status: 'completed',
-    hasEssayQuestions: true,
-    pendingEssayCount: 8,
-    totalEssayCount: 23,
-  },
-  {
-    id: '2',
-    examName: 'Data Structures Final Exam',
-    subject: 'Data Structures',
-    date: '2025-11-12T14:00:00',
-    duration: 180,
-    totalQuestions: 30,
-    totalStudents: 28,
-    submittedCount: 28,
-    avgScore: 78.3,
-    status: 'completed',
-    hasEssayQuestions: true,
-    pendingEssayCount: 0,
-    totalEssayCount: 28,
-  },
-  {
-    id: '3',
-    examName: 'Web Development Quiz #3',
-    subject: 'Web Development',
-    date: '2025-11-10T10:00:00',
-    duration: 60,
-    totalQuestions: 15,
-    totalStudents: 32,
-    submittedCount: 30,
-    avgScore: 85.7,
-    status: 'completed',
-    hasEssayQuestions: false,
-  },
-  {
-    id: '4',
-    examName: 'Algorithms Midterm',
-    subject: 'Algorithms',
-    date: '2025-11-08T13:00:00',
-    duration: 150,
-    totalQuestions: 25,
-    totalStudents: 24,
-    submittedCount: 24,
-    avgScore: 72.8,
-    status: 'completed',
-    hasEssayQuestions: true,
-    pendingEssayCount: 15,
-    totalEssayCount: 24,
-  },
-  {
-    id: '5',
-    examName: 'Machine Learning Quiz #2',
-    subject: 'Machine Learning',
-    date: '2025-11-15T09:00:00',
-    duration: 90,
-    totalQuestions: 20,
-    totalStudents: 18,
-    submittedCount: 12,
-    avgScore: 88.2,
-    status: 'in-progress',
-    hasEssayQuestions: false,
-  },
-];
+import { teacherResultsService } from '../../../services/teacher-results.service';
+import type { ExamResultSummary } from '../../../types/teacher-results';
 
 interface ExamListViewProps {
   onSelectExam: (examId: string) => void;
 }
 
 export function ExamListView({ onSelectExam }: ExamListViewProps) {
+  const [exams, setExams] = useState<ExamResultSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const subjects = Array.from(new Set(mockExams.map((exam) => exam.subject)));
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    teacherResultsService
+      .listExams()
+      .then((data) => {
+        if (!cancelled) setExams(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load exams');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const filteredExams = mockExams.filter((exam) => {
+  const subjects = Array.from(new Set(exams.map((exam) => exam.subject)));
+
+  const filteredExams = exams.filter((exam) => {
     const matchesSearch =
       exam.examName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       exam.subject.toLowerCase().includes(searchQuery.toLowerCase());
@@ -133,7 +67,8 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
     return matchesSearch && matchesSubject && matchesStatus;
   });
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return 'No date set';
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-US', {
       month: 'short',
@@ -220,7 +155,23 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
 
       {/* Exam List */}
       <div className="space-y-4">
-        {filteredExams.map((exam) => (
+        {loading && (
+          <Card className="shadow-md rounded-2xl border-0">
+            <CardContent className="p-12 text-center text-gray-500">Loading exams...</CardContent>
+          </Card>
+        )}
+
+        {!loading && error && (
+          <Card className="shadow-md rounded-2xl border-0">
+            <CardContent className="p-12 text-center">
+              <AlertCircle className="size-12 text-red-300 mx-auto mb-4" />
+              <h3 className="text-gray-600 mb-2">Failed to load exams</h3>
+              <p className="text-sm text-gray-500">{error}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {!loading && !error && filteredExams.map((exam) => (
           <Card
             key={exam.id}
             className="shadow-md rounded-2xl border-0 hover:shadow-lg transition-all cursor-pointer group"
@@ -240,7 +191,7 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
                     </div>
                     <div className="flex flex-col gap-2">
                       {getStatusBadge(exam.status)}
-                      {exam.hasEssayQuestions && exam.pendingEssayCount && exam.pendingEssayCount > 0 && (
+                      {exam.hasEssayQuestions && exam.pendingEssayCount > 0 && (
                         <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
                           <PenTool className="size-3 mr-1" />
                           {exam.pendingEssayCount} Essay{exam.pendingEssayCount > 1 ? 's' : ''} Pending
@@ -260,7 +211,7 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
                     {/* Duration */}
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Clock className="size-4 text-teal-600" />
-                      <span>{exam.duration} mins</span>
+                      <span>{exam.duration ?? '-'} mins</span>
                     </div>
 
                     {/* Questions */}
@@ -297,7 +248,7 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
           </Card>
         ))}
 
-        {filteredExams.length === 0 && (
+        {!loading && !error && filteredExams.length === 0 && (
           <Card className="shadow-md rounded-2xl border-0">
             <CardContent className="p-12 text-center">
               <FileText className="size-12 text-gray-300 mx-auto mb-4" />

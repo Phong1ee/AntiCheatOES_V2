@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import {
@@ -9,78 +10,8 @@ import {
   TableRow,
 } from '../../ui/table';
 import { CheckSquare, Circle, FileText, TrendingUp, TrendingDown } from 'lucide-react';
-
-interface QuestionStat {
-  questionNumber: number;
-  type: 'mcq' | 'true-false' | 'essay';
-  difficulty: 'easy' | 'medium' | 'hard';
-  correctRate: number;
-  totalAttempts: number;
-  optionStats?: {
-    option: string;
-    percentage: number;
-  }[];
-}
-
-const mockStats: QuestionStat[] = [
-  {
-    questionNumber: 1,
-    type: 'mcq',
-    difficulty: 'medium',
-    correctRate: 85,
-    totalAttempts: 20,
-    optionStats: [
-      { option: 'A', percentage: 85 },
-      { option: 'B', percentage: 10 },
-      { option: 'C', percentage: 5 },
-      { option: 'D', percentage: 0 },
-    ],
-  },
-  {
-    questionNumber: 2,
-    type: 'true-false',
-    difficulty: 'easy',
-    correctRate: 95,
-    totalAttempts: 20,
-    optionStats: [
-      { option: 'True', percentage: 5 },
-      { option: 'False', percentage: 95 },
-    ],
-  },
-  {
-    questionNumber: 3,
-    type: 'mcq',
-    difficulty: 'hard',
-    correctRate: 45,
-    totalAttempts: 20,
-    optionStats: [
-      { option: 'A', percentage: 45 },
-      { option: 'B', percentage: 30 },
-      { option: 'C', percentage: 20 },
-      { option: 'D', percentage: 5 },
-    ],
-  },
-  {
-    questionNumber: 4,
-    type: 'essay',
-    difficulty: 'hard',
-    correctRate: 70,
-    totalAttempts: 20,
-  },
-  {
-    questionNumber: 5,
-    type: 'mcq',
-    difficulty: 'medium',
-    correctRate: 75,
-    totalAttempts: 19, // One student skipped
-    optionStats: [
-      { option: 'A', percentage: 75 },
-      { option: 'B', percentage: 15 },
-      { option: 'C', percentage: 5 },
-      { option: 'D', percentage: 5 },
-    ],
-  },
-];
+import { teacherResultsService } from '../../../services/teacher-results.service';
+import type { QuestionStat } from '../../../types/teacher-results';
 
 const typeConfig = {
   mcq: { icon: CheckSquare, label: 'MCQ', color: 'bg-blue-100 text-blue-700' },
@@ -88,13 +19,58 @@ const typeConfig = {
   essay: { icon: FileText, label: 'Essay', color: 'bg-amber-100 text-amber-700' },
 };
 
-const difficultyConfig = {
+const difficultyConfig: Record<string, { label: string; color: string }> = {
   easy: { label: 'Easy', color: 'bg-green-100 text-green-700' },
   medium: { label: 'Medium', color: 'bg-amber-100 text-amber-700' },
   hard: { label: 'Hard', color: 'bg-red-100 text-red-700' },
 };
 
-export function QuestionStatistics() {
+interface QuestionStatisticsProps {
+  examId: number;
+  refreshKey: number;
+}
+
+export function QuestionStatistics({ examId, refreshKey }: QuestionStatisticsProps) {
+  const [stats, setStats] = useState<QuestionStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    teacherResultsService
+      .getStatistics(examId)
+      .then((data) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load question statistics');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examId, refreshKey]);
+
+  if (loading) {
+    return (
+      <Card className="shadow-md rounded-2xl border-0">
+        <CardContent className="p-12 text-center text-gray-500">Loading question statistics...</CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="shadow-md rounded-2xl border-0">
+        <CardContent className="p-12 text-center text-red-600">{error}</CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="shadow-md rounded-2xl border-0">
       <CardHeader>
@@ -118,10 +94,10 @@ export function QuestionStatistics() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {mockStats.map((stat) => {
+              {stats.map((stat) => {
                 const typeInfo = typeConfig[stat.type];
                 const TypeIcon = typeInfo.icon;
-                const difficultyInfo = difficultyConfig[stat.difficulty];
+                const difficultyInfo = difficultyConfig[stat.difficulty] ?? difficultyConfig.medium;
 
                 return (
                   <TableRow key={stat.questionNumber} className="hover:bg-gray-50">
@@ -224,42 +200,43 @@ export function QuestionStatistics() {
                   </TableRow>
                 );
               })}
+              {stats.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                    No questions found for this exam.
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>
 
         {/* Summary */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 bg-green-50 rounded-xl border border-green-200">
-            <p className="text-sm text-green-600 mb-1">High Performance</p>
-            <p className="text-2xl text-green-700">
-              {mockStats.filter((s) => s.correctRate >= 80).length}
-            </p>
-            <p className="text-xs text-gray-500">Questions with ≥80% correct</p>
+        {stats.length > 0 && (
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 bg-green-50 rounded-xl border border-green-200">
+              <p className="text-sm text-green-600 mb-1">High Performance</p>
+              <p className="text-2xl text-green-700">
+                {stats.filter((s) => s.correctRate >= 80).length}
+              </p>
+              <p className="text-xs text-gray-500">Questions with ≥80% correct</p>
+            </div>
+            <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+              <p className="text-sm text-amber-600 mb-1">Moderate Performance</p>
+              <p className="text-2xl text-amber-700">
+                {stats.filter((s) => s.correctRate >= 60 && s.correctRate < 80).length}
+              </p>
+              <p className="text-xs text-gray-500">Questions with 60-79% correct</p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+              <p className="text-sm text-red-600 mb-1">Needs Review</p>
+              <p className="text-2xl text-red-700">
+                {stats.filter((s) => s.correctRate < 60).length}
+              </p>
+              <p className="text-xs text-gray-500">Questions with {'<'}60% correct</p>
+            </div>
           </div>
-          <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-            <p className="text-sm text-amber-600 mb-1">Moderate Performance</p>
-            <p className="text-2xl text-amber-700">
-              {mockStats.filter((s) => s.correctRate >= 60 && s.correctRate < 80).length}
-            </p>
-            <p className="text-xs text-gray-500">Questions with 60-79% correct</p>
-          </div>
-          <div className="p-4 bg-red-50 rounded-xl border border-red-200">
-            <p className="text-sm text-red-600 mb-1">Needs Review</p>
-            <p className="text-2xl text-red-700">
-              {mockStats.filter((s) => s.correctRate < 60).length}
-            </p>
-            <p className="text-xs text-gray-500">Questions with {'<'}60% correct</p>
-          </div>
-        </div>
-
-        <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-          <p className="text-sm text-blue-800">
-            💡 <strong>Tip:</strong> Questions with low correct rates may need to be reviewed
-            for clarity or difficulty level. Consider revising questions with less than 60%
-            correct rate.
-          </p>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

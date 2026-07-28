@@ -19,4 +19,5 @@ dependencies = [
     "alembic>=1.18.5",
     "pymysql>=1.2.0",
     "pytest>=9.1.1",
+    "openpyxl>=3.1.5",
 ]

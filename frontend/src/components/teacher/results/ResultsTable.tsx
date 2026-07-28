@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -20,83 +20,16 @@ import {
 import {
   Eye,
   Download,
-  Mail,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
   MoreVertical,
 } from 'lucide-react';
+import { teacherResultsService, downloadCsv } from '../../../services/teacher-results.service';
+import type { StudentResult } from '../../../types/teacher-results';
+import type { ResultsFilterValue } from './ResultsFilter';
 
-interface StudentResult {
-  id: string;
-  studentId: string;
-  name: string;
-  score: number;
-  correctAnswers: number;
-  totalQuestions: number;
-  timeSpent: string; // in format "18m 23s"
-  status: 'submitted' | 'not-submitted' | 'late';
-  submittedAt?: string;
-}
-
-const mockResults: StudentResult[] = [
-  {
-    id: '1',
-    studentId: 'ST001',
-    name: 'Alice Johnson',
-    score: 95,
-    correctAnswers: 19,
-    totalQuestions: 20,
-    timeSpent: '18m 23s',
-    status: 'submitted',
-    submittedAt: '2025-11-14T10:30:00',
-  },
-  {
-    id: '2',
-    studentId: 'ST002',
-    name: 'Bob Smith',
-    score: 88,
-    correctAnswers: 17,
-    totalQuestions: 20,
-    timeSpent: '22m 15s',
-    status: 'submitted',
-    submittedAt: '2025-11-14T11:15:00',
-  },
-  {
-    id: '3',
-    studentId: 'ST003',
-    name: 'Carol Williams',
-    score: 76,
-    correctAnswers: 15,
-    totalQuestions: 20,
-    timeSpent: '25m 40s',
-    status: 'late',
-    submittedAt: '2025-11-14T14:20:00',
-  },
-  {
-    id: '4',
-    studentId: 'ST004',
-    name: 'David Brown',
-    score: 0,
-    correctAnswers: 0,
-    totalQuestions: 20,
-    timeSpent: '-',
-    status: 'not-submitted',
-  },
-  {
-    id: '5',
-    studentId: 'ST005',
-    name: 'Emma Davis',
-    score: 92,
-    correctAnswers: 18,
-    totalQuestions: 20,
-    timeSpent: '20m 08s',
-    status: 'submitted',
-    submittedAt: '2025-11-14T10:45:00',
-  },
-];
-
-const statusConfig = {
+const statusConfig: Record<StudentResult['status'], { label: string; color: string }> = {
   submitted: { label: 'Submitted', color: 'bg-green-100 text-green-700' },
   late: { label: 'Late', color: 'bg-amber-100 text-amber-700' },
   'not-submitted': { label: 'Not Submitted', color: 'bg-red-100 text-red-700' },
@@ -106,13 +39,78 @@ type SortField = 'name' | 'score' | 'timeSpent' | 'status';
 type SortOrder = 'asc' | 'desc' | null;
 
 interface ResultsTableProps {
-  onViewDetail: (studentId: string) => void;
+  examId: number;
+  examName: string;
+  refreshKey: number;
+  filters: ResultsFilterValue;
+  onViewDetail: (attemptId: number) => void;
 }
 
-export function ResultsTable({ onViewDetail }: ResultsTableProps) {
+const CSV_HEADERS = ['Student ID', 'Name', 'Score', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
+
+function toCsvRow(result: StudentResult): (string | number)[] {
+  return [
+    result.studentId,
+    result.name,
+    result.score,
+    result.correctAnswers,
+    result.totalQuestions,
+    result.timeSpent,
+    statusConfig[result.status].label,
+    result.submittedAt ?? '',
+  ];
+}
+
+export function ResultsTable({ examId, examName, refreshKey, filters, onViewDetail }: ResultsTableProps) {
+  const [results, setResults] = useState<StudentResult[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    teacherResultsService
+      .listStudents(examId)
+      .then((data) => {
+        if (!cancelled) setResults(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load student results');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examId, refreshKey]);
+
+  const filteredResults = useMemo(() => {
+    const search = filters.search.trim().toLowerCase();
+    return results.filter((result) => {
+      const matchesSearch =
+        !search ||
+        result.name.toLowerCase().includes(search) ||
+        result.studentId.toLowerCase().includes(search);
+      const matchesStatus = filters.status === 'all' || result.status === filters.status;
+      return matchesSearch && matchesStatus;
+    });
+  }, [results, filters]);
+
+  const sortedResults = useMemo(() => {
+    if (!sortField || !sortOrder) return filteredResults;
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    return [...filteredResults].sort((a, b) => {
+      if (sortField === 'name') return a.name.localeCompare(b.name) * direction;
+      if (sortField === 'score') return (a.score - b.score) * direction;
+      if (sortField === 'status') return a.status.localeCompare(b.status) * direction;
+      return a.timeSpent.localeCompare(b.timeSpent) * direction;
+    });
+  }, [filteredResults, sortField, sortOrder]);
 
   const toggleStudent = (id: string) => {
     setSelectedStudents((prev) =>
@@ -121,10 +119,10 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
   };
 
   const selectAll = () => {
-    if (selectedStudents.length === mockResults.length) {
+    if (selectedStudents.length === sortedResults.length) {
       setSelectedStudents([]);
     } else {
-      setSelectedStudents(mockResults.map((r) => r.id));
+      setSelectedStudents(sortedResults.map((r) => r.id));
     }
   };
 
@@ -149,6 +147,31 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
     return <ArrowUpDown className="size-4 text-gray-400" />;
   };
 
+  const exportSelected = () => {
+    const rows = sortedResults.filter((r) => selectedStudents.includes(r.id)).map(toCsvRow);
+    downloadCsv(`${examName.replace(/[^a-z0-9_-]+/gi, '_')}_selected_results.csv`, CSV_HEADERS, rows);
+  };
+
+  const exportOne = (result: StudentResult) => {
+    downloadCsv(`${result.studentId}_result.csv`, CSV_HEADERS, [toCsvRow(result)]);
+  };
+
+  if (loading) {
+    return (
+      <Card className="shadow-md rounded-2xl border-0">
+        <CardContent className="p-12 text-center text-gray-500">Loading student results...</CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="shadow-md rounded-2xl border-0">
+        <CardContent className="p-12 text-center text-red-600">{error}</CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="shadow-md rounded-2xl border-0">
       <CardContent className="p-0">
@@ -160,13 +183,9 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
                 {selectedStudents.length} student(s) selected
               </p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={exportSelected}>
                   <Download className="size-4 mr-2" />
                   Export Selected
-                </Button>
-                <Button variant="outline" size="sm">
-                  <Mail className="size-4 mr-2" />
-                  Send Email
                 </Button>
               </div>
             </div>
@@ -181,8 +200,8 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
                 <TableHead className="w-12">
                   <Checkbox
                     checked={
-                      mockResults.length > 0 &&
-                      selectedStudents.length === mockResults.length
+                      sortedResults.length > 0 &&
+                      selectedStudents.length === sortedResults.length
                     }
                     onCheckedChange={selectAll}
                   />
@@ -229,7 +248,7 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {mockResults.map((result) => {
+              {sortedResults.map((result) => {
                 const statusInfo = statusConfig[result.status];
                 return (
                   <TableRow
@@ -276,11 +295,11 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-2">
-                        {result.status !== 'not-submitted' && (
+                        {result.attemptId !== null && (
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onViewDetail(result.id)}
+                            onClick={() => onViewDetail(result.attemptId as number)}
                           >
                             <Eye className="size-4 mr-1" />
                             View
@@ -293,19 +312,15 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {result.status !== 'not-submitted' && (
-                              <DropdownMenuItem onClick={() => onViewDetail(result.id)}>
+                            {result.attemptId !== null && (
+                              <DropdownMenuItem onClick={() => onViewDetail(result.attemptId as number)}>
                                 <Eye className="size-4 mr-2" />
                                 View Details
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => exportOne(result)}>
                               <Download className="size-4 mr-2" />
                               Export Result
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Mail className="size-4 mr-2" />
-                              Send Email
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -314,6 +329,13 @@ export function ResultsTable({ onViewDetail }: ResultsTableProps) {
                   </TableRow>
                 );
               })}
+              {sortedResults.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
+                    No students match the current filters.
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>

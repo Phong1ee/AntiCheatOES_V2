@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from src.a_db_config import (
+    Attempt,
+    AttemptQuestion,
     Chapter,
     ChapterLO,
     ChapterQuestion,
@@ -335,6 +337,13 @@ def _replace_options(db: Session, question: Question, payload: RevisionSnapshotP
         raise HTTPException(status_code=400, detail="An option ID does not belong to this question")
 
     deleted_ids = set(existing) - set(requested_ids)
+    if deleted_ids and (
+        db.query(AttemptQuestion)
+        .join(Attempt, Attempt.attempt_id == AttemptQuestion.attempt_id)
+        .filter(AttemptQuestion.question_id == question.question_id, Attempt.status == "in_progress")
+        .first()
+    ):
+        raise HTTPException(status_code=409, detail="Options cannot be removed while an attempt is in progress")
     if deleted_ids and db.query(MCQAnswer.mcq_answer_id).filter(MCQAnswer.selected_option_id.in_(deleted_ids)).first():
         raise HTTPException(status_code=409, detail="An option is already used by an attempt and cannot be removed")
 

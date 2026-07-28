@@ -43,6 +43,17 @@ class ExamStatus(str, enum.Enum):
     published = "published"
     archived = "archived"
 
+class AttemptStatus(str, enum.Enum):
+    in_progress = "in_progress"
+    submitted = "submitted"
+    terminated = "terminated"
+
+
+attempt_status_enum = Enum(
+    AttemptStatus,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="attemptstatus",
+)
 
 class QuestionSelectionMode(str, enum.Enum):
     manual = "manual"
@@ -505,6 +516,23 @@ class Attempt(Base):
         back_populates="attempt"
     )
     exam_events: Mapped[list["ExamEvent"]] = relationship(back_populates="attempt")
+    
+    status: Mapped[AttemptStatus] = mapped_column(
+        attempt_status_enum,
+        nullable=False,
+        default=AttemptStatus.in_progress,
+        server_default=AttemptStatus.in_progress.value,
+    )
+
+    last_saved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    termination_reason: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
 
 
 class AttemptQuestion(Base):
@@ -526,6 +554,26 @@ class AttemptQuestion(Base):
     )
     essay_answer: Mapped[Optional["EssayAnswer"]] = relationship(
         back_populates="attempt_question", uselist=False
+    )
+    
+    question_text_snapshot: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    question_type_snapshot: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    question_point_snapshot: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    options_snapshot: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
     )
 
 
@@ -626,7 +674,20 @@ class MCQAnswer(Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["attempt_id", "question_id"],
-            ["attempt_question.attempt_id", "attempt_question.question_id"],
+            [
+                "attempt_question.attempt_id",
+                "attempt_question.question_id",
+            ],
+        ),
+        Index(
+            "ix_mcq_answers_attempt_question",
+            "attempt_id",
+            "question_id",
+        ),
+        UniqueConstraint(
+            "attempt_id",
+            "question_id",
+            name="uq_mcq_answers_attempt_question",
         ),
     )
 

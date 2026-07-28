@@ -18,20 +18,9 @@ import {
 } from "../ui/select";
 import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
+import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
 
-const API_BASE_URL = "http://localhost:8000";
-
-interface Exam {
-  id: string;
-  title: string;
-  subject: string;
-  start_time: string;
-  end_time: string;
-  duration: string;
-  status: "upcoming" | "open" | "completed" | "closed";
-  maxAttempts: number;
-  attemptsUsed: number;
-}
+type Exam = StudentExamListItem;
 
 const statusConfig = {
   upcoming: {
@@ -73,36 +62,10 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
         setLoading(true);
         setLoadError(null);
 
-        const token = localStorage.getItem("token");
-
-        const res = await fetch(`${API_BASE_URL}/api/exams`, {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        });
-
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-          throw new Error(data.message || "Failed to load exams");
-        }
-
-        const apiExams: Exam[] = (data.exams || []).map((exam: any) => ({
-          id: String(exam.exam_id),
-          title: exam.title,
-          subject: exam.description ?? "General",
-          start_time: exam.start_time,
-          end_time: exam.end_time,
-          duration: exam.duration_minutes ? `${exam.duration_minutes} min` : "90 min",
-          status: exam.status as "upcoming" | "open" | "completed" | "closed",
-          maxAttempts: Number(exam.max_attempt ?? 1),
-          attemptsUsed: Number(exam.attempts_used ?? 0),
-        }));
-
-        setExams(apiExams);
-      } catch (err: any) {
+        setExams(await studentExamService.list());
+      } catch (err) {
         console.error(err);
-        setLoadError(err.message || "Error loading exams");
+        setLoadError(err instanceof Error ? err.message : "Error loading exams");
       } finally {
         setLoading(false);
       }
@@ -131,47 +94,48 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
     setCodeOpen(true);
   };
 
-  const handleCodeSubmit = async (code: string): Promise<boolean> => {
-    if (!selectedExam) return false;
+  const handleCodeVerify = async (code: string) => {
+    if (!selectedExam) throw new Error("No exam selected");
+    return studentExamService.verifyCode(selectedExam.id, code);
+  };
 
+  const handleCodeStart = async (code: string) => {
+    if (!selectedExam) throw new Error("No exam selected");
     try {
-      const token = localStorage.getItem("token");
-
-      const res = await fetch(
-        `${API_BASE_URL}/api/exams/${selectedExam.id}/start`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-          body: JSON.stringify({ code }),
-        }
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        return false;
-      }
+      const data = await studentExamService.start(selectedExam.id, code);
 
       localStorage.setItem(
         "current_exam_attempt",
         JSON.stringify({
           examId: selectedExam.id,
-          attemptId: data.attempt_id,
-          attemptNo: data.attempt_no,
-          durationMinutes: data.duration_minutes,
+          attemptId: data.attemptId,
+          attemptNo: data.attemptNo,
+          durationMinutes: data.durationMinutes,
         })
       );
 
       setCodeOpen(false);
       handleEnterExam(selectedExam.id);
-      return true;
     } catch (err) {
       console.error(err);
       throw err;
     }
+  };
+
+  const handleResume = async (exam: Exam) => {
+    if (!exam.openAttemptId) return;
+    setLoadError(null);
+    try {
+      if (exam.requiresFullscreen && !document.fullscreenElement) {
+        // This runs directly from the Resume Exam button click.
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      setLoadError("Fullscreen permission is required to resume this exam.");
+      return;
+    }
+    localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
+    onEnterExam?.(exam.id);
   };
 
   if (loading) {
@@ -224,7 +188,7 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
       <div className="space-y-4">
         {filteredExams.map((exam) => {
           const reachedMaxAttempts =
-            exam.maxAttempts > 0 && exam.attemptsUsed >= exam.maxAttempts;
+            exam.maxAttempts !== null && exam.maxAttempts > 0 && exam.attemptsUsed >= exam.maxAttempts;
 
           return (
             <Card
@@ -253,8 +217,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                   <div className="flex items-center gap-2">
                     <Calendar className="size-4 text-teal-600" />
                     <span>
-                      {exam.start_time
-                        ? new Date(exam.start_time).toLocaleDateString("en-US", {
+                      {exam.startTime
+                        ? new Date(exam.startTime).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
@@ -266,8 +230,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 text-teal-600" />
                     <span>
-                      {exam.start_time
-                        ? new Date(exam.start_time).toLocaleTimeString("en-US", {
+                      {exam.startTime
+                        ? new Date(exam.startTime).toLocaleTimeString("en-US", {
                             hour: "2-digit",
                             minute: "2-digit",
                           })
@@ -277,19 +241,23 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
 
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 text-teal-600" />
-                    <span>Duration: {exam.duration}</span>
+                    <span>Duration: {exam.durationMinutes} min</span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <RefreshCw className="size-4 text-teal-600" />
                     <span>
-                      Attempts: {exam.attemptsUsed}/{exam.maxAttempts}
+                      Attempts: {exam.attemptsUsed}/{exam.maxAttempts ?? "Unlimited"}
                     </span>
                   </div>
                 </div>
 
                 {exam.status === "open" && (
-                  reachedMaxAttempts ? (
+                  exam.canResume ? (
+                    <Button className="w-full bg-gradient-to-r from-teal-500 to-blue-600" onClick={() => handleResume(exam)}>
+                      Resume Exam
+                    </Button>
+                  ) : reachedMaxAttempts ? (
                     <Button
                       variant="outline"
                       className="w-full"
@@ -371,7 +339,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
         exam={selectedExam}
         open={codeOpen}
         onOpenChange={setCodeOpen}
-        onSubmit={handleCodeSubmit}
+        onVerify={handleCodeVerify}
+        onStart={handleCodeStart}
       />
     </div>
   );

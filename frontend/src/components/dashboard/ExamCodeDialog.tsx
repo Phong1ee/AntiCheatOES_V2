@@ -1,165 +1,95 @@
-import { useEffect, useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { AlertCircle, Lock } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { AlertCircle, Lock, Maximize } from "lucide-react";
+import { Button } from "../ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import type { VerifyCodeResult } from "../../services/student-exam.service";
 
 interface ExamCodeDialogProps {
-  exam: {
-    id: string;
-    title: string;
-  } | null;
+  exam: { id: string; title: string } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-
-  // ✅ parent trả về true nếu code đúng, false nếu sai
-  onSubmit: (code: string) => Promise<boolean>;
+  onVerify: (code: string) => Promise<VerifyCodeResult>;
+  onStart: (code: string) => Promise<void>;
 }
 
-export function ExamCodeDialog({ exam, open, onOpenChange, onSubmit }: ExamCodeDialogProps) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState('');
-  const [verifying, setVerifying] = useState(false);
+export function ExamCodeDialog({ exam, open, onOpenChange, onVerify, onStart }: ExamCodeDialogProps) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [working, setWorking] = useState(false);
+  const [phase, setPhase] = useState<"code" | "fullscreen">("code");
 
-  // reset khi đổi exam hoặc đóng dialog
   useEffect(() => {
     if (!open) {
-      setCode('');
-      setError('');
-      setVerifying(false);
+      setCode("");
+      setError("");
+      setWorking(false);
+      setPhase("code");
     }
   }, [open, exam?.id]);
 
   if (!exam) return null;
 
-  const handleSubmit = async () => {
-    if (verifying) return;
-
+  const verify = async () => {
     const trimmed = code.trim();
-
-    if (!trimmed) {
-      setError('Please enter the exam code');
-      return;
-    }
-
-    if (trimmed.length < 6) {
-      setError('Exam code must be at least 6 characters');
-      return;
-    }
-
-    setError('');
-    setVerifying(true);
-
+    if (!trimmed) return setError("Please enter the exam code");
+    if (trimmed.length < 6) return setError("Exam code must be at least 6 characters");
+    setError("");
+    setWorking(true);
     try {
-      const ok = await onSubmit(trimmed);
-
-      if (!ok) {
-        setError('Incorrect exam code. Please try again.');
-        return;
-      }
-
-      // đúng code -> đóng dialog + reset
-      setCode('');
-      setError('');
-      onOpenChange(false);
-    } catch (e) {
-      setError('Unable to verify exam code. Please try again.');
+      const verified = await onVerify(trimmed);
+      if (verified.requiresFullscreen) setPhase("fullscreen");
+      else await onStart(trimmed);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to verify exam code. Please try again.");
     } finally {
-      setVerifying(false);
+      setWorking(false);
     }
   };
 
-  const handleOpenChange = (newOpen: boolean) => {
-    if (!newOpen) {
-      setCode('');
-      setError('');
-      setVerifying(false);
+  const startInFullscreen = async () => {
+    setError("");
+    setWorking(true);
+    try {
+      // The browser accepts fullscreen only from this direct button action.
+      await document.documentElement.requestFullscreen();
+    } catch (error) {
+      setError("Fullscreen permission is required to start this exam.");
+      setWorking(false);
+      return;
     }
-    onOpenChange(newOpen);
+    try {
+      await onStart(code.trim());
+    } catch (error) {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      setError(error instanceof Error ? error.message : "Unable to start the exam.");
+    } finally {
+      setWorking(false);
+    }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Lock className="size-5 text-teal-600" />
-            Enter Exam Code
-          </DialogTitle>
-          <DialogDescription>
-            Please enter the exam code provided by your instructor to access the exam.
-          </DialogDescription>
-        </DialogHeader>
+  const close = () => onOpenChange(false);
 
-        <div className="space-y-4 mt-4">
-          <div className="space-y-2">
-            <Label htmlFor="exam-code">Exam Code</Label>
-            <Input
-              id="exam-code"
-              type="text"
-              placeholder="Enter your exam code"
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value.toUpperCase());
-                setError('');
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-              className="uppercase"
-              disabled={verifying}
-            />
-
-            {error && (
-              <p className="text-sm text-red-600 flex items-center gap-1">
-                <AlertCircle className="size-4" />
-                {error}
-              </p>
-            )}
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex gap-2">
-              <AlertCircle className="size-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-blue-800">
-                <p className="font-medium mb-1">Where to find your exam code?</p>
-                <ul className="list-disc list-inside space-y-0.5 text-blue-700">
-                  <li>View the "Exam Codes" widget on dashboard</li>
-                  <li>Contact your instructor if not received</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => handleOpenChange(false)}
-              disabled={verifying}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
-              onClick={handleSubmit}
-              disabled={verifying}
-            >
-              {verifying ? 'Verifying...' : 'Verify & Enter'}
-            </Button>
-          </div>
+  return <Dialog open={open} onOpenChange={(next) => !next && close()}>
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><Lock className="size-5 text-teal-600" />Enter Exam Code</DialogTitle>
+        <DialogDescription>{phase === "code" ? "Please enter the exam code provided by your instructor to access the exam." : "Confirm fullscreen access before your attempt is created."}</DialogDescription>
+      </DialogHeader>
+      {phase === "code" ? <div className="mt-4 space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="exam-code">Exam Code</Label>
+          <Input id="exam-code" value={code} onChange={(event) => { setCode(event.target.value.toUpperCase()); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void verify(); } }} className="uppercase" disabled={working} />
+          {error && <p className="flex items-center gap-1 text-sm text-red-600"><AlertCircle className="size-4" />{error}</p>}
         </div>
-      </DialogContent>
-    </Dialog>
-  );
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">Enter the code supplied by your instructor. It is verified before an attempt is started.</div>
+        <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={close} disabled={working}>Cancel</Button><Button className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600" onClick={() => void verify()} disabled={working}>{working ? "Verifying..." : "Verify & Enter"}</Button></div>
+      </div> : <div className="mt-4 space-y-4">
+        <div className="rounded-xl border border-teal-200 bg-teal-50 p-5 text-center"><Maximize className="mx-auto mb-3 size-8 text-teal-700" /><p className="font-medium text-teal-900">This exam requires fullscreen mode.</p><p className="mt-2 text-sm text-teal-800">Leaving fullscreen will be recorded as a violation.</p></div>
+        {error && <p className="flex items-center gap-1 text-sm text-red-600"><AlertCircle className="size-4" />{error}</p>}
+        <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={() => setPhase("code")} disabled={working}>Back</Button><Button className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600" onClick={() => void startInFullscreen()} disabled={working}>{working ? "Starting..." : "Enter Fullscreen & Start Exam"}</Button></div>
+      </div>}
+    </DialogContent>
+  </Dialog>;
 }

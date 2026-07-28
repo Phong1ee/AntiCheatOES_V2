@@ -2,21 +2,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-
-interface Question {
-  id: number;
-  text: string;
-  type: 'multiple-choice' | 'true-false' | 'essay';
-  options?: string[];
-  answer?: string;
-}
+import type { StudentAnswer, StudentQuestion } from '../../types/student-exam';
 
 interface QuestionAreaProps {
-  question: Question;
+  question: StudentQuestion;
   currentQuestion: number;
   totalQuestions: number;
-  answer?: string;
-  onAnswerChange: (questionId: number, answer: string) => void;
+  answer?: StudentAnswer;
+  onAnswerChange: (questionId: number, answer: StudentAnswer) => void;
   onPrevious: () => void;
   onNext: () => void;
 }
@@ -47,11 +40,11 @@ export function QuestionArea({
             <div className="space-y-3">
               {question.options.map((option, index) => {
                 const optionLabel = String.fromCharCode(65 + index); // A, B, C, D
-                const isSelected = answer === option;
+                const isSelected = 'selectedOptionId' in (answer ?? {}) && answer.selectedOptionId === option.id;
 
                 return (
                   <label
-                    key={index}
+                    key={option.id}
                     className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
                       isSelected
                         ? 'border-teal-500 bg-teal-50'
@@ -61,16 +54,16 @@ export function QuestionArea({
                     <input
                       type="radio"
                       name={`question-${question.id}`}
-                      value={option}
+                      value={option.id}
                       checked={isSelected}
-                      onChange={(e) => onAnswerChange(question.id, e.target.value)}
+                      onChange={() => onAnswerChange(question.id, { selectedOptionId: option.id })}
                       className="mt-1"
                     />
                     <div className="flex-1">
                       <span className="inline-flex items-center justify-center size-6 rounded-full bg-gray-200 text-sm mr-3">
                         {optionLabel}
                       </span>
-                      <span className="text-gray-800">{option}</span>
+                      <span className="text-gray-800">{option.text}</span>
                     </div>
                   </label>
                 );
@@ -81,13 +74,13 @@ export function QuestionArea({
           {question.type === 'essay' && (
             <div>
               <Textarea
-                value={answer || ''}
-                onChange={(e) => onAnswerChange(question.id, e.target.value)}
+                value={answer && 'answerText' in answer ? answer.answerText : ''}
+                onChange={(e) => onAnswerChange(question.id, { answerText: e.target.value })}
                 placeholder="Type your answer here..."
                 className="min-h-[200px] text-base"
               />
               <p className="text-sm text-gray-500 mt-2">
-                {answer?.length || 0} characters
+                {answer && 'answerText' in answer ? answer.answerText.length : 0} characters
               </p>
             </div>
           )}

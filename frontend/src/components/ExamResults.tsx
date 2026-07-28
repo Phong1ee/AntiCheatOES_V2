@@ -18,8 +18,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { ExamResultsStats } from "./exam-results/ExamResultsStats";
-
-const API_BASE_URL = "http://localhost:8000";
+import { apiClient } from "../services/api-client";
 
 interface ExamResult {
   id: string;
@@ -36,6 +35,8 @@ interface ExamResult {
   allowViewDetails: boolean;
   attemptNumber?: number;
   maxAttempts?: number;
+  attemptStatus?: "submitted" | "terminated";
+  terminated?: boolean;
 }
 
 interface ExamResultsProps {
@@ -75,24 +76,11 @@ export function ExamResults({ onViewDetails }: ExamResultsProps) {
         setLoading(true);
         setLoadError(null);
 
-        const token = localStorage.getItem("token");
-
-        const res = await fetch(`${API_BASE_URL}/api/results`, {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || "Failed to load results");
-        }
-
-        const data = await res.json();
+        const { data } = await apiClient.get<{ results?: ExamResult[] }>("/api/results");
         setResults(data.results || []);
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
-        setLoadError(err.message || "Error loading results");
+        setLoadError(err instanceof Error ? err.message : "Error loading results");
       } finally {
         setLoading(false);
       }

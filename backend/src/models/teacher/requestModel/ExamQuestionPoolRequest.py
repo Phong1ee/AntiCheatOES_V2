@@ -17,6 +17,19 @@ class PoolConfigRequest(BaseModel):
     rules: list[PoolRuleRequest] = Field(min_length=1)
 
 
+class PoolCandidateSelectionRequest(BaseModel):
+    included_question_ids: list[int]
+
+    @field_validator("included_question_ids")
+    @classmethod
+    def unique_candidate_ids(cls, value: list[int]) -> list[int]:
+        if any(item <= 0 for item in value):
+            raise ValueError("included_question_ids must contain positive integers")
+        if len(value) != len(set(value)):
+            raise ValueError("included_question_ids must not contain duplicates")
+        return value
+
+
 class BulkQuestionIdsRequest(BaseModel):
     question_ids: list[int] = Field(min_length=1)
 

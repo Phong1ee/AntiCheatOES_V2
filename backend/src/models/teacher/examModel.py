@@ -531,10 +531,18 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 for rule_id in sorted(selected)
                 for question_id in selected[rule_id]
             ]
-            rng = seeded_random("order", exam_id, student_id, attempt_no, int(config[1]))
-            rng.shuffle(selected_ids)
+            if shuffle_questions:
+                seeded_random(
+                    "question-order", exam_id, student_id, attempt_no, int(config[1])
+                ).shuffle(selected_ids)
             point_map = distribute_points(exam_row[1], selected_ids)
         else:
+            cursor.execute(
+                "SELECT version FROM exam_pool_config WHERE exam_id = %s",
+                (exam_id,),
+            )
+            fixed_config = cursor.fetchone()
+            selection_version = int(fixed_config[0]) if fixed_config else 0
             cursor.execute(
                 """
                 SELECT question_id, question_point
@@ -553,7 +561,9 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 for question_id, question_point in fixed_rows
             }
             if shuffle_questions:
-                seeded_random("question-order", exam_id, student_id, attempt_no).shuffle(selected_ids)
+                seeded_random(
+                    "question-order", exam_id, student_id, attempt_no, selection_version
+                ).shuffle(selected_ids)
 
         question_snapshot_map: dict[int, tuple[str, str]] = {}
         options_snapshot_map: dict[int, list[dict[str, object]]] = {}
@@ -580,7 +590,14 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 for index, (option_id, option_text, is_correct) in enumerate(cursor.fetchall(), start=1)
             ]
             if shuffle_options:
-                seeded_random("option-order", exam_id, student_id, attempt_no, question_id).shuffle(option_snapshot)
+                seeded_random(
+                    "option-order",
+                    exam_id,
+                    student_id,
+                    attempt_no,
+                    question_id,
+                    selection_version if mode != "pool" else int(config[1]),
+                ).shuffle(option_snapshot)
                 for index, option in enumerate(option_snapshot, start=1):
                     option["displayOrder"] = index
             options_snapshot_map[question_id] = option_snapshot

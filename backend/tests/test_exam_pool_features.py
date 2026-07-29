@@ -14,6 +14,7 @@ from src.a_db_config import (
     ChapterQuestion,
     Exam,
     ExamPoolConfig,
+    ExamPoolQuestion,
     ExamQuestion,
     LO,
     LOQuestion,
@@ -26,6 +27,7 @@ from src.a_db_config import (
 )
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import (
     BulkQuestionIdsRequest,
+    PoolCandidateSelectionRequest,
     PoolConfigRequest,
     PoolRuleRequest,
 )
@@ -39,7 +41,9 @@ from src.route.teacherRoute.addQuestionsRoute import (
 from src.route.teacherRoute.examPoolRoute import (
     get_pool_availability,
     get_pool_config,
+    get_pool_rule_questions,
     put_pool_config,
+    replace_pool_rule_candidates,
 )
 from src.service.exam_pool_service import (
     distribute_points,
@@ -136,7 +140,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
             question_type="MCQ",
             question_difficulties=difficulty,
             subject_id="DB",
-            created_by=teacher.id,
+            created_by=teacher.school_id,
             question_status=question_status,
         )
         self.db.add(question)
@@ -204,7 +208,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
         self.assertEqual([item.lo_id for item in unchanged.lo_questions], [1])
         cloned = self.db.get(Question, response["question_id"])
         self.assertEqual((cloned.created_by, cloned.question_status), (
-            self.db.query(User).filter_by(school_id="T1").one().id,
+            self.db.query(User).filter_by(school_id="T1").one().school_id,
             QuestionStatus.draft,
         ))
         self.assertEqual({item.lo_id for item in cloned.lo_questions}, {1, 2})
@@ -479,6 +483,67 @@ class ExamPoolFeatureTests(unittest.TestCase):
             Decimal("100.00"),
         )
         self.assertTrue(first_ids.issubset({question.question_id for question in questions}))
+
+    def test_pool_candidate_exclusion_is_atomic_and_reversible(self):
+        questions = [self._question(f"Candidate {index}") for index in range(3)]
+        self.db.commit()
+        exam = self.db.query(Exam).one()
+        saved = put_pool_config(
+            exam.exam_id,
+            PoolConfigRequest(
+                subject_id="DB",
+                fixed_randomization=False,
+                rules=[PoolRuleRequest(chapter_id=1, lo_id=1, difficulty="easy", draw_count=2)],
+            ),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        rule_id = saved["rules"][0]["rule_id"]
+        kept_ids = [questions[0].question_id, questions[1].question_id]
+        updated = replace_pool_rule_candidates(
+            exam.exam_id,
+            rule_id,
+            PoolCandidateSelectionRequest(included_question_ids=kept_ids),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertEqual(updated["rules"][0]["included_count"], 2)
+        response = get_pool_rule_questions(
+            exam.exam_id, rule_id, {"school_id": "T1"}, {}, self.db
+        )
+        inclusion = {item["question_id"]: item["included"] for item in response["questions"]}
+        self.assertFalse(inclusion[questions[2].question_id])
+        self.assertIsNotNone(self.db.get(Question, questions[2].question_id))
+
+        with self.assertRaises(HTTPException) as insufficient:
+            replace_pool_rule_candidates(
+                exam.exam_id,
+                rule_id,
+                PoolCandidateSelectionRequest(included_question_ids=[questions[0].question_id]),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(insufficient.exception.status_code, 422)
+        self.assertEqual(
+            self.db.query(ExamPoolQuestion).filter_by(rule_id=rule_id).count(), 2
+        )
+
+        replace_pool_rule_candidates(
+            exam.exam_id,
+            rule_id,
+            PoolCandidateSelectionRequest(
+                included_question_ids=[question.question_id for question in questions]
+            ),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertEqual(
+            self.db.query(ExamPoolQuestion).filter_by(rule_id=rule_id).count(), 3
+        )
 
     def test_selection_algorithm_is_reproducible_unique_and_exact(self):
         first = select_unique_candidates(

@@ -192,7 +192,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             question_difficulties="medium",
             question_type="essay",
             subject_id="DB",
-            created_by=teacher.id,
+            created_by=teacher.school_id,
             question_status=QuestionStatus.draft,
         )
         self.db.add(publish_question)
@@ -295,7 +295,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             question_difficulties=difficulty,
             question_type=question_type,
             subject_id=subject_id,
-            created_by=teacher.id,
+            created_by=teacher.school_id,
             question_status=status,
         )
         self.db.add(question)
@@ -341,7 +341,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             {"difficulty": "hard"},
             {"subject_id": "DB", "search": "Unique"},
             {"status_filter": "approved", "search": "Unique"},
-            {"created_by": teacher_two.id, "search": "Unique"},
+            {"created_by": teacher_two.school_id, "search": "Unique"},
         ]
         for filter_values in filters:
             result = get_question_import_candidates(

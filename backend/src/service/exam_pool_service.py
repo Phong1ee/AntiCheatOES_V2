@@ -7,7 +7,7 @@ from typing import Iterable, Mapping, Sequence
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.a_db_config import (
     Chapter,
@@ -166,6 +166,53 @@ def eligible_question_ids(
             ),
         )
     return [row[0] for row in query.distinct().order_by(Question.question_id).all()]
+
+
+def eligible_question_ids_by_rule(
+    db: Session,
+    teacher: User,
+    subject_id: str,
+    rules: Sequence[ExamPoolRule],
+) -> dict[int, list[int]]:
+    """Load candidate taxonomy once and evaluate every saved rule without N+1 queries."""
+    difficulties = {
+        rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty
+        for rule in rules
+    }
+    questions = (
+        db.query(Question)
+        .options(
+            selectinload(Question.chapter_questions),
+            selectinload(Question.lo_questions),
+        )
+        .filter(
+            Question.subject_id == subject_id,
+            Question.question_difficulties.in_(difficulties),
+            authorized_question_filter(teacher),
+        )
+        .order_by(Question.question_id)
+        .all()
+    )
+    result = {rule.rule_id: [] for rule in rules}
+    for question in questions:
+        chapter_ids = {item.chapter_id for item in question.chapter_questions}
+        lo_ids = {item.lo_id for item in question.lo_questions}
+        difficulty = (
+            question.question_difficulties.value
+            if hasattr(question.question_difficulties, "value")
+            else question.question_difficulties
+        )
+        for rule in rules:
+            rule_difficulty = (
+                rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty
+            )
+            if (
+                difficulty == rule_difficulty
+                and rule.chapter_id in chapter_ids
+                and (rule.lo_id is None or rule.lo_id in lo_ids)
+            ):
+                result[rule.rule_id].append(question.question_id)
+    return result
 
 
 def saved_rule_candidates(config_rules: Iterable[ExamPoolRule]) -> dict[int, list[int]]:

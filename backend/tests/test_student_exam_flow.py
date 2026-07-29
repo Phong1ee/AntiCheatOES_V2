@@ -85,6 +85,74 @@ class _CreateConnection:
         pass
 
 
+class _SelectionCursor:
+    def __init__(self, mode: str, shuffle_questions: bool, shuffle_options: bool):
+        self.mode = mode
+        self.shuffle_questions = shuffle_questions
+        self.shuffle_options = shuffle_options
+        self.last_query = ""
+        self.last_params = ()
+        self.lastrowid = 20
+        self.inserted_rows = []
+
+    def execute(self, query, params=()):
+        self.last_query = " ".join(query.split())
+        self.last_params = params
+
+    def executemany(self, _query, rows):
+        self.inserted_rows = list(rows)
+
+    def fetchone(self):
+        if "FROM attempt" in self.last_query:
+            return None
+        if "question_selection_mode" in self.last_query:
+            return (self.mode, 10)
+        if "FROM exam_setting" in self.last_query:
+            return (self.shuffle_questions, self.shuffle_options)
+        if "SELECT pool_config_id, version" in self.last_query:
+            return (1, 4)
+        if "SELECT version FROM exam_pool_config" in self.last_query:
+            return (4,)
+        if "SELECT question_text, question_type" in self.last_query:
+            question_id = int(self.last_params[0])
+            return (f"Question {question_id}", "MCQ")
+        return None
+
+    def fetchall(self):
+        if "FROM exam_pool_rule" in self.last_query:
+            return [(1, 2), (2, 1)]
+        if "FROM exam_pool_question" in self.last_query:
+            return [(1,), (2,), (3,)] if int(self.last_params[0]) == 1 else [(3,), (4,)]
+        if "FROM exam_question" in self.last_query:
+            return [(1, 4), (2, 3), (3, 3)]
+        if "FROM options" in self.last_query:
+            return [(101, "A", True), (102, "B", False), (103, "C", False), (104, "D", False)]
+        return []
+
+    def close(self):
+        pass
+
+
+class _SelectionConnection:
+    def __init__(self, mode: str, shuffle_questions: bool, shuffle_options: bool):
+        self.cursor_instance = _SelectionCursor(mode, shuffle_questions, shuffle_options)
+
+    def cursor(self, **_kwargs):
+        return self.cursor_instance
+
+    def start_transaction(self):
+        pass
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class StudentExamFlowTests(unittest.TestCase):
     def test_verify_code_returns_only_fullscreen_related_settings(self):
         with (
@@ -129,7 +197,7 @@ class StudentExamFlowTests(unittest.TestCase):
             patch.object(examModel, "countStudentAttempts", return_value=1),
             patch.object(examModel, "validateExamQuestionPoints") as validate_points,
             patch.object(examModel, "get_database_now", return_value=datetime(2026, 7, 28, 5, 0)),
-            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7}),
+            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7, "school_id": "S1"}),
         ):
             result = ExamController.startExam("S1", "student", 5, "code")
 
@@ -180,6 +248,60 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(inserted[4:7], ("Snapshot text", "MCQ", 3))
         self.assertIn('"isCorrect": true', inserted[7])
 
+    def _snapshot_rows(self, mode: str, student_id: str, shuffle_questions: bool, shuffle_options: bool):
+        connection = _SelectionConnection(mode, shuffle_questions, shuffle_options)
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            examModel.createAttempt(5, student_id, 1)
+        return connection.cursor_instance.inserted_rows
+
+    def test_fixed_randomization_shuffle_matrix_persists_independent_orders(self):
+        canonical_a = self._snapshot_rows("fixed_randomization", "S1", False, False)
+        canonical_b = self._snapshot_rows("fixed_randomization", "S2", False, False)
+        self.assertEqual([row[1] for row in canonical_a], [1, 2, 3])
+        self.assertEqual([row[1] for row in canonical_a], [row[1] for row in canonical_b])
+        self.assertEqual(canonical_a[0][7], canonical_b[0][7])
+
+        question_orders = {
+            tuple(row[1] for row in self._snapshot_rows("fixed_randomization", f"SQ{index}", True, False))
+            for index in range(8)
+        }
+        self.assertTrue(all(set(order) == {1, 2, 3} for order in question_orders))
+        self.assertGreater(len(question_orders), 1)
+        self.assertEqual(
+            self._snapshot_rows("fixed_randomization", "S1", True, False)[0][7],
+            canonical_a[0][7],
+        )
+
+        option_orders = {
+            self._snapshot_rows("fixed_randomization", f"SO{index}", False, True)[0][7]
+            for index in range(8)
+        }
+        self.assertGreater(len(option_orders), 1)
+        both_orders = {
+            (
+                tuple(row[1] for row in rows),
+                rows[0][7],
+            )
+            for index in range(8)
+            for rows in [self._snapshot_rows("fixed_randomization", f"SB{index}", True, True)]
+        }
+        self.assertGreater(len(both_orders), 1)
+
+    def test_pure_pool_draw_is_structural_without_shuffle_and_uses_only_candidates(self):
+        first = self._snapshot_rows("pool", "S1", False, False)
+        restored_seed = self._snapshot_rows("pool", "S1", False, False)
+        self.assertEqual(first, restored_seed)
+        question_ids = [row[1] for row in first]
+        self.assertEqual(len(question_ids), 3)
+        self.assertEqual(len(set(question_ids)), 3)
+        self.assertTrue(set(question_ids).issubset({1, 2, 3, 4}))
+        self.assertEqual(sum(row[3] for row in first), 10)
+        shuffled_orders = {
+            tuple(row[1] for row in self._snapshot_rows("pool", f"S{index}", True, False))
+            for index in range(8)
+        }
+        self.assertGreater(len(shuffled_orders), 1)
+
     def test_my_exams_marks_an_open_attempt_as_resumable(self):
         row = {
             "exam_id": 5,
@@ -209,7 +331,7 @@ class StudentExamFlowTests(unittest.TestCase):
 
     def test_restore_rejects_another_students_attempt(self):
         with (
-            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7}),
+            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7, "school_id": "S1"}),
             patch.object(examModel, "getAssignedExamById", return_value={"exam_id": 5}),
             patch.object(examModel, "getAttemptById", return_value={"exam_id": 5, "student_id": 9}),
         ):
@@ -221,13 +343,13 @@ class StudentExamFlowTests(unittest.TestCase):
             "attempt_id": 10,
             "attempt_no": 1,
             "exam_id": 5,
-            "student_id": 7,
+            "student_id": "S1",
             "status": "in_progress",
             "start_time": datetime.now(),
             "last_saved_at": None,
         }
         with (
-            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7}),
+            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7, "school_id": "S1"}),
             patch.object(examModel, "getAssignedExamById", return_value={"exam_id": 5, "duration_minutes": 60, "end_time": None}),
             patch.object(examModel, "getAttemptById", return_value=attempt),
             patch.object(examModel, "getExamQuestions", return_value=[]),
@@ -243,7 +365,7 @@ class StudentExamFlowTests(unittest.TestCase):
     def test_submit_allows_unanswered_questions_and_finalizes_once(self):
         exam = {"exam_id": 5, "duration_minutes": 60, "end_time": None}
         attempt = {
-            "attempt_id": 10, "exam_id": 5, "student_id": 7, "status": "in_progress",
+            "attempt_id": 10, "exam_id": 5, "student_id": "S1", "status": "in_progress",
             "submitted_at": None, "end_time": None, "start_time": datetime.now(),
         }
         finalized = {"score": 3, "essayPending": False, "status": "submitted", "idempotent": False}
@@ -260,7 +382,7 @@ class StudentExamFlowTests(unittest.TestCase):
     def test_expired_attempt_does_not_save_new_answer(self):
         exam = {"exam_id": 5, "duration_minutes": 1, "end_time": None}
         attempt = {
-            "attempt_id": 10, "exam_id": 5, "student_id": 7, "status": "in_progress",
+            "attempt_id": 10, "exam_id": 5, "student_id": "S1", "status": "in_progress",
             "submitted_at": None, "end_time": None, "start_time": datetime.now() - timedelta(minutes=2),
         }
         with (
@@ -277,7 +399,7 @@ class StudentExamFlowTests(unittest.TestCase):
         save.assert_not_called()
 
     def test_terminate_finalizes_latest_answers_once(self):
-        attempt = {"attempt_id": 10, "exam_id": 5, "student_id": 7, "status": "in_progress", "start_time": datetime.now(), "submitted_at": None, "end_time": None}
+        attempt = {"attempt_id": 10, "exam_id": 5, "student_id": "S1", "status": "in_progress", "start_time": datetime.now(), "submitted_at": None, "end_time": None}
         finalized = {"score": 2, "essayPending": False, "status": "terminated", "idempotent": False}
         with (
             patch.object(ExamController, "_owned_attempt", return_value=({"duration_minutes": 60, "end_time": None}, attempt)),

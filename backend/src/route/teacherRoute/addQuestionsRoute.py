@@ -233,7 +233,7 @@ def _can_edit_exam_draft_in_place(
     db: Session,
     question: Question,
     exam_id: int,
-    teacher_id: int,
+    teacher_id: str,
 ) -> bool:
     return (
         question.created_by == teacher_id
@@ -277,7 +277,7 @@ def _replace_taxonomy_rows(
 def _clone_question(
     db: Session,
     source: Question,
-    teacher_id: int,
+    teacher_id: str,
     request: QuestionUpdateRequest,
     chapters: list[Chapter],
     los: list[LO],
@@ -350,7 +350,7 @@ def add_question_to_database(
             question_difficulties=request.question_difficulties,
             question_type=request.question_type,
             subject_id=request.subject_id,
-            created_by=creator.id,
+            created_by=creator.school_id,
             question_status="draft",
         )
         db.add(question)
@@ -668,7 +668,7 @@ def get_question_import_candidates(
         Literal["draft", "pending", "approved", "rejected"] | None,
         Query(alias="status"),
     ] = None,
-    created_by: Annotated[int | None, Query(ge=1)] = None,
+    created_by: Annotated[str | None, Query(max_length=30)] = None,
 ):
     """List approved questions plus the current teacher's draft/pending questions."""
     del role_check
@@ -731,7 +731,7 @@ def get_question_import_candidates(
                 )
             ],
             "creators": [
-                {"id": row.id, "school_id": row.school_id, "full_name": row.full_name}
+                {"school_id": row.school_id, "full_name": row.full_name}
                 for row in (
                     db.query(User.school_id, User.full_name)
                     .join(Question, Question.created_by == User.school_id)
@@ -750,7 +750,7 @@ def get_question_import_candidates(
                 )
             ],
             "statuses": ["approved", "draft", "pending"],
-            "current_teacher_id": teacher.school_id,
+            "current_teacher_school_id": teacher.school_id,
         },
     }
 

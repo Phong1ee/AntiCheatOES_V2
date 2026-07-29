@@ -55,7 +55,7 @@ def _time_taken(start_time, end_time, submitted_at):
 
 
 def _latest_attempts_by_student(db: Session, exam_id: int) -> dict:
-    """Map student_id (user.id) -> their best attempt (prefer submitted, then highest attempt_no)."""
+    """Map student school IDs to their best attempt (prefer submitted, then highest attempt_no)."""
     attempts = db.query(Attempt).filter(Attempt.exam_id == exam_id).all()
     latest: dict = {}
     for attempt in attempts:
@@ -128,7 +128,7 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
     scores = []
     submitted_count = 0
     for _student_exam, user in roster:
-        attempt = latest_attempts.get(user.id)
+        attempt = latest_attempts.get(user.school_id)
         if attempt and attempt.submitted_at is not None:
             submitted_count += 1
             if attempt.score is not None:
@@ -163,7 +163,7 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
     latest_attempts = _latest_attempts_by_student(db, exam.exam_id)
     rows = []
     for _student_exam, user in roster:
-        attempt = latest_attempts.get(user.id)
+        attempt = latest_attempts.get(user.school_id)
         correct, total_questions = _attempt_breakdown(db, attempt.attempt_id) if attempt else (0, 0)
         rows.append({
             "id": str(attempt.attempt_id) if attempt else user.school_id,
@@ -351,7 +351,7 @@ def get_student_attempt_detail(
     attempt = db.query(Attempt).filter(Attempt.attempt_id == attempt_id, Attempt.exam_id == exam_id).first()
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    student = db.query(User).filter(User.id == attempt.student_id).first()
+    student = db.query(User).filter(User.school_id == attempt.student_id).first()
 
     links = (
         db.query(AttemptQuestion)
@@ -456,7 +456,7 @@ def list_essay_answers(
             & (AttemptQuestion.question_id == EssayAnswer.question_id),
         )
         .join(Question, Question.question_id == EssayAnswer.question_id)
-        .join(User, User.id == Attempt.student_id)
+        .join(User, User.school_id == Attempt.student_id)
         .filter(Attempt.exam_id == exam_id)
         .order_by(User.full_name)
         .all()

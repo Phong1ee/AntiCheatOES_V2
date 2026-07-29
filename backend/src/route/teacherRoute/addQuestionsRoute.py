@@ -119,7 +119,7 @@ def _import_candidate_query(db: Session, teacher: User):
             or_(
                 Question.question_status == QuestionStatus.approved,
                 and_(
-                    Question.created_by == teacher.id,
+                    Question.created_by == teacher.school_id,
                     Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                 ),
             )
@@ -451,7 +451,7 @@ def update_question_in_exam(
         chapters, los = _validate_taxonomy(db, target_subject, chapter_ids, lo_ids)
 
         can_edit_in_place = _can_edit_exam_draft_in_place(
-            db, question, exam_id, teacher.id
+            db, question, exam_id, teacher.school_id
         )
         if can_edit_in_place:
             if request.question_text is not None:
@@ -473,7 +473,7 @@ def update_question_in_exam(
             effective_question = question
         else:
             effective_question = _clone_question(
-                db, question, teacher.id, request, chapters, los
+                db, question, teacher.school_id, request, chapters, los
             )
             preserved_point = request.question_point
             db.delete(link)
@@ -617,7 +617,7 @@ def delete_question_from_database(
         question = db.query(Question).filter(Question.question_id == question_id).first()
         if not question:
             raise HTTPException(status_code=404, detail="Question not found in the database")
-        if question.created_by != teacher.id:
+        if question.created_by != teacher.school_id:
             raise HTTPException(status_code=403, detail="You do not own this question")
         db.delete(question)
         db.commit()
@@ -720,7 +720,7 @@ def get_question_import_candidates(
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
-                                Question.created_by == teacher.id,
+                                Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
                         )
@@ -733,13 +733,13 @@ def get_question_import_candidates(
             "creators": [
                 {"id": row.id, "school_id": row.school_id, "full_name": row.full_name}
                 for row in (
-                    db.query(User.id, User.school_id, User.full_name)
-                    .join(Question, Question.created_by == User.id)
+                    db.query(User.school_id, User.full_name)
+                    .join(Question, Question.created_by == User.school_id)
                     .filter(
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
-                                Question.created_by == teacher.id,
+                                Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
                         )
@@ -750,7 +750,7 @@ def get_question_import_candidates(
                 )
             ],
             "statuses": ["approved", "draft", "pending"],
-            "current_teacher_id": teacher.id,
+            "current_teacher_id": teacher.school_id,
         },
     }
 
@@ -784,7 +784,7 @@ def add_questions_to_exam_from_question_bank(
             if not (
                 _status_value(question) == "approved"
                 or (
-                    question.created_by == teacher.id
+                    question.created_by == teacher.school_id
                     and _status_value(question) in {"draft", "pending"}
                 )
             )

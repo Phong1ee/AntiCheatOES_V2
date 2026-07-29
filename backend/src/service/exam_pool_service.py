@@ -106,7 +106,7 @@ def authorized_question_filter(teacher: User):
     return or_(
         Question.question_status == QuestionStatus.approved,
         and_(
-            Question.created_by == teacher.id,
+            Question.created_by == teacher.school_id,
             Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
         ),
     )

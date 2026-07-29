@@ -47,7 +47,7 @@ export function TeacherPermissionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<"grant" | "edit" | null>(null);
   const [selected, setSelected] = useState<TeacherPermissions | null>(null);
-  const [teacherId, setTeacherId] = useState<number | null>(null);
+  const [teacherId, setTeacherId] = useState<string | null>(null);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<TeacherPermissions | null>(null);
@@ -90,10 +90,9 @@ export function TeacherPermissionsPage() {
       Object.values(
         assignments
           .filter((item) => item.is_active)
-          .reduce<Record<number, TeacherPermissions>>((result, item) => {
-            result[item.teacher_id] ??= {
+          .reduce<Record<string, TeacherPermissions>>((result, item) => {
+            result[item.teacher_school_id] ??= {
               teacher: {
-                id: item.teacher_id,
                 school_id: item.teacher_school_id,
                 full_name: item.teacher_full_name,
                 email: item.teacher_email,
@@ -101,7 +100,7 @@ export function TeacherPermissionsPage() {
               assignments: [],
             };
 
-            result[item.teacher_id].assignments.push(item);
+            result[item.teacher_school_id].assignments.push(item);
 
             return result;
           }, {}),
@@ -112,7 +111,7 @@ export function TeacherPermissionsPage() {
   const availableTeachers = useMemo(
     () =>
       teachers.filter(
-        (teacher) => !groups.some((group) => group.teacher.id === teacher.id),
+        (teacher) => !groups.some((group) => group.teacher.school_id === teacher.school_id),
       ),
     [groups, teachers],
   );
@@ -149,7 +148,7 @@ export function TeacherPermissionsPage() {
   };
 
   const save = async () => {
-    const id = modal === "grant" ? teacherId : selected?.teacher.id;
+    const id = modal === "grant" ? teacherId : selected?.teacher.school_id;
 
     if (!id || selectedSubjectIds.length === 0) {
       toast.error("Select a teacher and at least one subject.");
@@ -184,7 +183,7 @@ export function TeacherPermissionsPage() {
 
   const revoke = async (item: TeacherPermissionAssignment) => {
     try {
-      await teacherPermissionService.revoke(item.teacher_id, item.subject_id);
+      await teacherPermissionService.revoke(item.teacher_school_id, item.subject_id);
 
       toast.success("Access removed");
 
@@ -200,7 +199,7 @@ export function TeacherPermissionsPage() {
     if (!removeTarget) return;
     setSaving(true); setRemoveError(null);
     try {
-      await teacherPermissionService.removeAllAccess(removeTarget.teacher.id);
+      await teacherPermissionService.removeAllAccess(removeTarget.teacher.school_id);
       toast.success("All access removed");
       setRemoveTarget(null);
       await load();
@@ -289,7 +288,7 @@ export function TeacherPermissionsPage() {
           <div className="space-y-3">
             {groups.map((group) => (
               <Card
-                key={group.teacher.id}
+                key={group.teacher.school_id}
                 className="border border-gray-200 bg-white p-5 shadow-sm"
               >
                 <div className="flex items-start justify-between gap-4">
@@ -403,9 +402,9 @@ export function TeacherPermissionsPage() {
                     </label>
 
                     <Select
-                      value={teacherId !== null ? String(teacherId) : undefined}
+                      value={teacherId ?? undefined}
                       onValueChange={(value: string) =>
-                        setTeacherId(Number(value))
+                        setTeacherId(value)
                       }
                       disabled={availableTeachers.length === 0 || saving}
                     >
@@ -421,8 +420,8 @@ export function TeacherPermissionsPage() {
                       >
                         {availableTeachers.map((teacher) => (
                           <SelectItem
-                            key={teacher.id}
-                            value={String(teacher.id)}
+                            key={teacher.school_id}
+                            value={teacher.school_id}
                             className="mx-2 my-1 w-auto cursor-pointer rounded-lg px-3 py-2.5 text-sm focus:bg-gray-100 focus:text-gray-900"
                           >
                             {teacher.full_name}

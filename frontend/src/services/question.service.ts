@@ -55,7 +55,7 @@ export interface QuestionImportCandidate {
   learning_objectives: LearningObjectiveSummary[];
   option_count: number;
   already_added: boolean;
-  creator: { id: number; school_id: string; full_name: string } | null;
+  creator: { school_id: string; full_name: string } | null;
 }
 
 export interface QuestionImportCandidateParams {
@@ -64,7 +64,7 @@ export interface QuestionImportCandidateParams {
   difficulty?: QuestionDifficulty;
   subject_id?: string;
   status?: QuestionStatus;
-  created_by?: number;
+  created_by?: string;
   page?: number;
   page_size?: 10 | 20;
 }
@@ -77,9 +77,9 @@ export interface QuestionImportCandidateResponse {
   total_pages: number;
   filter_options: {
     subjects: SubjectSummary[];
-    creators: Array<{ id: number; school_id: string; full_name: string }>;
+    creators: Array<{ school_id: string; full_name: string }>;
     statuses: QuestionStatus[];
-    current_teacher_id: number;
+    current_teacher_school_id: string;
   };
 }
 

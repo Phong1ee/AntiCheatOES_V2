@@ -78,7 +78,7 @@ def getStudentExams(school_id: str):
         ON es.exam_id = e.exam_id
     LEFT JOIN attempt a
         ON a.exam_id = e.exam_id
-        AND a.student_id = u.id
+        AND a.student_id = u.school_id
     WHERE se.student_id = %s
     GROUP BY
         e.exam_id,
@@ -163,7 +163,7 @@ def getAssignedExamById(school_id: str, exam_id: int):
         ON e.exam_id = se.exam_id
     LEFT JOIN attempt a
         ON a.exam_id = e.exam_id
-        AND a.student_id = u.id
+        AND a.student_id = u.school_id
     WHERE se.student_id = %s
       AND e.exam_id = %s
     GROUP BY
@@ -383,7 +383,7 @@ def isStudentAssignedToExam(school_id: str, exam_id: int):
         cnx.close()
 
 
-def countStudentAttempts(exam_id: int, student_id: int):
+def countStudentAttempts(exam_id: int, student_id: str):
     """Count attempts for a student on a specific exam."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
@@ -403,7 +403,7 @@ def countStudentAttempts(exam_id: int, student_id: int):
         cnx.close()
 
 
-def getOpenAttempt(exam_id: int, student_id: int):
+def getOpenAttempt(exam_id: int, student_id: str):
     """Get an existing open attempt for the same exam and student."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -428,7 +428,7 @@ def getOpenAttempt(exam_id: int, student_id: int):
         cnx.close()
 
 
-def createAttempt(exam_id: int, student_id: int, attempt_no: int):
+def createAttempt(exam_id: int, student_id: str, attempt_no: int):
     """Create an attempt and immutable question/point snapshot in one transaction."""
     cnx = get_db_connection()
     cursor = cnx.cursor()

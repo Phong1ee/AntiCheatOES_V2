@@ -73,8 +73,8 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.admin = self.db.query(User).filter_by(school_id="A1").one()
         self.db.add_all(
             [
-                TeacherSubject(teacher_id=self.teacher_one.id, subject_id="DB", is_active=True),
-                TeacherSubject(teacher_id=self.teacher_two.id, subject_id="DB", is_active=True),
+                TeacherSubject(teacher_id=self.teacher_one.school_id, subject_id="DB", is_active=True),
+                TeacherSubject(teacher_id=self.teacher_two.school_id, subject_id="DB", is_active=True),
                 Chapter(chapter_id=1, chapter_name="Normalization", chapter_description="DB", subject_id="DB"),
                 Chapter(chapter_id=2, chapter_name="Transactions", chapter_description="DB", subject_id="DB"),
                 Chapter(chapter_id=3, chapter_name="HTML", chapter_description="WEB", subject_id="WEB"),

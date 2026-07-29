@@ -79,7 +79,7 @@ def _teacher(db: Session, school_id: str) -> User:
     return teacher
 
 
-def _active_subject_ids(db: Session, teacher_id: int) -> set[str]:
+def _active_subject_ids(db: Session, teacher_id: str) -> set[str]:
     return {
         row[0]
         for row in db.query(TeacherSubject.subject_id)
@@ -89,7 +89,7 @@ def _active_subject_ids(db: Session, teacher_id: int) -> set[str]:
 
 
 def _require_subject_permission(db: Session, teacher: User, subject_id: str | None) -> None:
-    if not subject_id or subject_id not in _active_subject_ids(db, teacher.id):
+    if not subject_id or subject_id not in _active_subject_ids(db, teacher.school_id):
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
 
 
@@ -107,7 +107,7 @@ def _lo_summary(link: LOQuestion) -> dict:
     return {"lo_id": link.lo.lo_id, "lo_name": link.lo.lo_name}
 
 
-def _revision_metadata(db: Session, question_id: int, teacher_id: int) -> dict:
+def _revision_metadata(db: Session, question_id: int, teacher_id: str) -> dict:
     revisions = (
         db.query(QuestionRevision)
         .filter(QuestionRevision.question_id == question_id, QuestionRevision.edited_by == teacher_id)
@@ -128,7 +128,7 @@ def _revision_metadata(db: Session, question_id: int, teacher_id: int) -> dict:
 
 
 def _permission_flags(question: Question, teacher: User, bank: bool, can_manage_subject: bool, has_pending_revision: bool) -> dict:
-    owner = question.created_by == teacher.id
+    owner = question.created_by == teacher.school_id
     question_status = _status(question)
     can_propose_approved_edit = can_manage_subject and question_status == "approved"
     can_manage_private_question = not bank and owner and can_manage_subject and question_status in {"draft", "pending", "rejected"}
@@ -143,8 +143,8 @@ def _permission_flags(question: Question, teacher: User, bank: bool, can_manage_
 
 
 def _serialize_item(question: Question, teacher: User, bank: bool, db: Session, subject_ids: set[str] | None = None) -> dict:
-    subject_ids = subject_ids if subject_ids is not None else _active_subject_ids(db, teacher.id)
-    revision_data = _revision_metadata(db, question.question_id, teacher.id)
+    subject_ids = subject_ids if subject_ids is not None else _active_subject_ids(db, teacher.school_id)
+    revision_data = _revision_metadata(db, question.question_id, teacher.school_id)
     option_count = len([option for option in question.options if option.options_text.strip()])
     return {
         "question_id": question.question_id,
@@ -407,7 +407,7 @@ def _locked_question(db: Session, question_id: int) -> Question:
 
 def _locked_owned_question(db: Session, question_id: int, teacher: User) -> Question:
     question = _locked_question(db, question_id)
-    if question.created_by != teacher.id:
+    if question.created_by != teacher.school_id:
         raise HTTPException(status_code=404, detail="Question not found")
     return question
 
@@ -443,7 +443,7 @@ def list_approved_question_bank(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.id)
+    subject_ids = _active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
     query = _apply_filters(_base_question_query(db).filter(Question.question_status == QuestionStatus.approved), subject_id, chapter_id, lo_id, search, question_type, difficulty)
@@ -462,26 +462,26 @@ def list_my_questions(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.id)
+    subject_ids = _active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
-    query = _base_question_query(db).filter(Question.created_by == teacher.id)
+    query = _base_question_query(db).filter(Question.created_by == teacher.school_id)
     query = query.filter(Question.subject_id.in_(subject_ids))
     if status_filter:
         pending_revision_exists = db.query(QuestionRevision.revision_id).filter(
             QuestionRevision.question_id == Question.question_id,
-            QuestionRevision.edited_by == teacher.id,
+            QuestionRevision.edited_by == teacher.school_id,
             QuestionRevision.question_status == "pending",
         ).exists()
         rejected_revision = aliased(QuestionRevision)
         newer_revision = aliased(QuestionRevision)
         latest_rejected_revision_exists = db.query(rejected_revision.revision_id).filter(
             rejected_revision.question_id == Question.question_id,
-            rejected_revision.edited_by == teacher.id,
+            rejected_revision.edited_by == teacher.school_id,
             rejected_revision.question_status == "rejected",
             ~db.query(newer_revision.revision_id).filter(
                 newer_revision.question_id == rejected_revision.question_id,
-                newer_revision.edited_by == teacher.id,
+                newer_revision.edited_by == teacher.school_id,
                 newer_revision.version_number > rejected_revision.version_number,
             ).exists(),
         ).exists()
@@ -520,8 +520,8 @@ def list_my_questions(
 def list_subject_counts(scope: Literal["bank", "mine"] = "bank", current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.id)
-    filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [Question.created_by == teacher.id]
+    subject_ids = _active_subject_ids(db, teacher.school_id)
+    filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [Question.created_by == teacher.school_id]
     rows = db.query(Subject.subject_id, Subject.subject_name, Subject.subject_description, func.count(Question.question_id).label("question_count")).filter(Subject.subject_id.in_(subject_ids)).outerjoin(Question, (Subject.subject_id == Question.subject_id) & filters[0]).group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description).order_by(Subject.subject_name).all()
     total = db.query(func.count(Question.question_id)).filter(*filters, Question.subject_id.in_(subject_ids)).scalar() or 0
     no_subject_count = 0
@@ -555,14 +555,14 @@ def get_question_edit_payload(
     teacher = _teacher(db, current_user["school_id"])
     question = _refresh_question(db, question_id)
     question_status = _status(question)
-    if question_status != "approved" and question.created_by != teacher.id:
+    if question_status != "approved" and question.created_by != teacher.school_id:
         raise HTTPException(status_code=404, detail="Question not found")
     _require_subject_permission(db, teacher, question.subject_id)
     if isinstance(revision_id, int):
         revision = db.query(QuestionRevision).filter(
             QuestionRevision.revision_id == revision_id,
             QuestionRevision.question_id == question_id,
-            QuestionRevision.edited_by == teacher.id,
+            QuestionRevision.edited_by == teacher.school_id,
         ).first()
         if not revision:
             raise HTTPException(status_code=404, detail="Question revision not found")
@@ -573,7 +573,7 @@ def get_question_edit_payload(
     if question_status == "approved":
         latest_revision = db.query(QuestionRevision).filter(
             QuestionRevision.question_id == question_id,
-            QuestionRevision.edited_by == teacher.id,
+            QuestionRevision.edited_by == teacher.school_id,
             QuestionRevision.question_status.in_(["pending", "rejected"]),
         ).order_by(QuestionRevision.version_number.desc(), QuestionRevision.revision_id.desc()).first()
         if latest_revision:
@@ -587,7 +587,7 @@ def get_question_detail(question_id: int, current_user: dict = Depends(verify_to
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     question = _refresh_question(db, question_id)
-    if _status(question) != "approved" and question.created_by != teacher.id:
+    if _status(question) != "approved" and question.created_by != teacher.school_id:
         raise HTTPException(status_code=404, detail="Question not found")
     _require_subject_permission(db, teacher, question.subject_id)
     return _serialize_detail(question, teacher, db)
@@ -600,7 +600,7 @@ def create_draft_question(payload: QuestionBankPayload, current_user: dict = Dep
         teacher = _teacher(db, current_user["school_id"])
         _require_subject_permission(db, teacher, payload.subject_id)
         chapters, los = _validate_taxonomy_for_payload(db, payload)
-        question = Question(question_text=payload.question_text.strip(), question_type=payload.question_type, question_difficulties=payload.question_difficulties, subject_id=payload.subject_id, created_by=teacher.id, question_status=QuestionStatus.draft)
+        question = Question(question_text=payload.question_text.strip(), question_type=payload.question_type, question_difficulties=payload.question_difficulties, subject_id=payload.subject_id, created_by=teacher.school_id, question_status=QuestionStatus.draft)
         db.add(question)
         db.flush()
         _replace_taxonomy(db, question, chapters, los)
@@ -632,7 +632,7 @@ def update_question(
         if isinstance(expected_status, str) and question_status != expected_status:
             raise HTTPException(status_code=409, detail="Question status changed before the update could be applied")
         if question_status in {"draft", "pending", "rejected"}:
-            if question.created_by != teacher.id:
+            if question.created_by != teacher.school_id:
                 raise HTTPException(status_code=404, detail="Question not found")
             chapters, los = _ensure_direct_question_write(db, teacher, question, payload, question_status == "pending")
             _apply_payload(question, payload)
@@ -643,7 +643,7 @@ def update_question(
             _require_subject_permission(db, teacher, payload.subject_id)
             _validate_taxonomy_for_payload(db, payload)
             _validate_submit_payload(payload)
-            pending = db.query(QuestionRevision).filter(QuestionRevision.question_id == question.question_id, QuestionRevision.edited_by == teacher.id, QuestionRevision.question_status == "pending").with_for_update().first()
+            pending = db.query(QuestionRevision).filter(QuestionRevision.question_id == question.question_id, QuestionRevision.edited_by == teacher.school_id, QuestionRevision.question_status == "pending").with_for_update().first()
             values = _revision_values(payload)
             if pending:
                 for key, value in values.items():
@@ -651,7 +651,7 @@ def update_question(
                 pending.updated_at = datetime.now()
             else:
                 next_version = (db.query(func.max(QuestionRevision.version_number)).filter(QuestionRevision.question_id == question.question_id).scalar() or 0) + 1
-                db.add(QuestionRevision(question_id=question.question_id, version_number=next_version, question_status="pending", edited_by=teacher.id, approved_by=None, approved_at=None, rejection_reason=None, **values))
+                db.add(QuestionRevision(question_id=question.question_id, version_number=next_version, question_status="pending", edited_by=teacher.school_id, approved_by=None, approved_at=None, rejection_reason=None, **values))
         else:
             raise HTTPException(status_code=409, detail="Question cannot be edited")
         db.commit()
@@ -737,9 +737,9 @@ def delete_pending_revision(question_id: int, current_user: dict = Depends(verif
         question = _locked_question(db, question_id)
         if _status(question) != "approved":
             raise HTTPException(status_code=409, detail="Active question is no longer approved")
-        pending = db.query(QuestionRevision).filter(QuestionRevision.question_id == question_id, QuestionRevision.edited_by == teacher.id, QuestionRevision.question_status == "pending").with_for_update().first()
+        pending = db.query(QuestionRevision).filter(QuestionRevision.question_id == question_id, QuestionRevision.edited_by == teacher.school_id, QuestionRevision.question_status == "pending").with_for_update().first()
         if not pending:
-            latest = db.query(QuestionRevision).filter(QuestionRevision.question_id == question_id, QuestionRevision.edited_by == teacher.id).order_by(QuestionRevision.version_number.desc()).first()
+            latest = db.query(QuestionRevision).filter(QuestionRevision.question_id == question_id, QuestionRevision.edited_by == teacher.school_id).order_by(QuestionRevision.version_number.desc()).first()
             if latest:
                 raise HTTPException(status_code=409, detail="Pending revision is no longer pending")
             raise HTTPException(status_code=404, detail="Pending revision not found")

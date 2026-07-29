@@ -34,12 +34,12 @@ class ExamController:
         if exam["examcode"].strip().lower() != code.strip().lower():
             raise Exception("Incorrect exam code")
 
-        open_attempt = examModel.getOpenAttempt(exam_id, user["id"])
+        open_attempt = examModel.getOpenAttempt(exam_id, user.get("school_id", school_id))
         if open_attempt and ExamController._timer_payload(exam, open_attempt, now_time)["remainingSeconds"] <= 0:
             # The row lock in finalizeAttempt makes racing Start/auto-submit requests idempotent.
             examModel.finalizeAttempt(open_attempt["attempt_id"], exam_id, [])
             open_attempt = None
-        attempts_used = examModel.countStudentAttempts(exam_id, user["id"])
+        attempts_used = examModel.countStudentAttempts(exam_id, user.get("school_id", school_id))
         max_attempt = exam["max_attempt"]
 
         if not open_attempt and max_attempt is not None and int(max_attempt) > 0 and attempts_used >= int(max_attempt):
@@ -98,7 +98,7 @@ class ExamController:
             raise Exception("User not found")
         if not exam:
             raise Exception("Exam not found or not assigned to student")
-        if not attempt or int(attempt["exam_id"]) != int(exam_id) or int(attempt["student_id"]) != int(user["id"]):
+        if not attempt or int(attempt["exam_id"]) != int(exam_id) or attempt["student_id"] != user.get("school_id", school_id):
             raise Exception("Attempt does not belong to student")
         return exam, attempt
 
@@ -141,7 +141,7 @@ class ExamController:
                     not attempt
                     or not user
                     or int(attempt["exam_id"]) != int(exam_id)
-                    or int(attempt["student_id"]) != int(user["id"])
+                    or attempt["student_id"] != user.get("school_id", school_id)
                 ):
                     raise Exception("Attempt does not belong to student")
             questions = examModel.getExamQuestions(exam_id, attempt_id)
@@ -193,7 +193,7 @@ class ExamController:
                 return ExamController._start_response(exam, open_attempt, resumed=True, database_now=validated["database_now"])
 
             attempt_no = attempts_used + 1
-            attempt_id = examModel.createAttempt(exam_id, user["id"], attempt_no)
+            attempt_id = examModel.createAttempt(exam_id, user.get("school_id", school_id), attempt_no)
             attempt = examModel.getAttemptById(attempt_id)
             if not attempt:
                 raise Exception("Attempt not found")
@@ -216,7 +216,7 @@ class ExamController:
             not user
             or not attempt
             or int(attempt["exam_id"]) != int(exam_id)
-            or int(attempt["student_id"]) != int(user["id"])
+            or attempt["student_id"] != user.get("school_id", school_id)
         ):
             raise Exception("Attempt does not belong to student")
 

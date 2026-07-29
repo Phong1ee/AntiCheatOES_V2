@@ -124,9 +124,9 @@ class User(Base):
         nullable=True,
     )
 
-    locked_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    locked_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -135,9 +135,9 @@ class User(Base):
         nullable=True,
     )
 
-    deleted_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    deleted_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -241,8 +241,8 @@ class CourseClass(Base):
     subject_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("subject.subject_id"), nullable=False
     )
-    teacher_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("user.id"), nullable=False
+    teacher_id: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id"), nullable=False
     )
 
     subject: Mapped["Subject"] = relationship(back_populates="classes")
@@ -253,8 +253,8 @@ class CourseClass(Base):
 class StudentClass(Base):
     __tablename__ = "student_class"
 
-    student_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("user.id"), primary_key=True
+    student_id: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id"), primary_key=True
     )
     class_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("class.class_id"), primary_key=True
@@ -281,8 +281,8 @@ class Question(Base):
         ForeignKey("subject.subject_id", ondelete="RESTRICT"),
         nullable=True,
     )
-    created_by: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("user.id", ondelete="SET NULL")
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
     source_question_id: Mapped[Optional[int]] = mapped_column(
@@ -503,7 +503,7 @@ class Attempt(Base):
 
     attempt_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     exam_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("exam.exam_id"))
-    student_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("user.id"))
+    student_id: Mapped[Optional[str]] = mapped_column(String(30), ForeignKey("user.school_id"))
     attempt_no: Mapped[Optional[int]] = mapped_column(Integer)
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -750,9 +750,9 @@ class ExamEvent(Base):
 class TeacherSubject(Base):
     __tablename__ = "teacher_subject"
 
-    teacher_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="CASCADE"),
+    teacher_id: Mapped[str] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="CASCADE"),
         primary_key=True,
     )
 
@@ -762,9 +762,9 @@ class TeacherSubject(Base):
         primary_key=True,
     )
 
-    assigned_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    assigned_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -878,15 +878,15 @@ class QuestionRevision(Base):
         nullable=True,
     )
 
-    edited_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    edited_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    approved_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    approved_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 

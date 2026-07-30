@@ -8,6 +8,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { AlertTriangle, XCircle } from 'lucide-react';
+import { Button } from '../ui/button';
 
 interface ViolationWarningDialogProps {
   open: boolean;
@@ -15,6 +16,7 @@ interface ViolationWarningDialogProps {
   violationType: 'copy-paste' | 'tab-switch' | 'fullscreen-exit' | 'final';
   violationCount: number;
   threshold?: number;
+  onReturnToFullscreen?: () => void;
 }
 
 export function ViolationWarningDialog({
@@ -23,6 +25,7 @@ export function ViolationWarningDialog({
   violationType,
   violationCount,
   threshold = 3,
+  onReturnToFullscreen,
 }: ViolationWarningDialogProps) {
   const isFinalWarning = violationCount >= threshold - 1;
   const isTermination = violationType === 'final';
@@ -39,7 +42,7 @@ export function ViolationWarningDialog({
 
   const getMessage = () => {
     if (isTermination) {
-      return 'Your exam has been automatically submitted due to multiple violations. You have been returned to the exam list.';
+      return 'Your exam was terminated after the anti-cheat policy threshold was reached.';
     }
 
     if (violationType === 'copy-paste') {
@@ -118,7 +121,14 @@ export function ViolationWarningDialog({
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogAction
+          {onReturnToFullscreen ? (
+            <Button
+              onClick={onReturnToFullscreen}
+              className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
+            >
+              Return to Fullscreen
+            </Button>
+          ) : <AlertDialogAction
             onClick={() => onOpenChange(false)}
             className={
               isTermination
@@ -129,7 +139,7 @@ export function ViolationWarningDialog({
             }
           >
             {isTermination ? 'Understood' : isFinalWarning ? 'I Understand' : 'Continue Exam'}
-          </AlertDialogAction>
+          </AlertDialogAction>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

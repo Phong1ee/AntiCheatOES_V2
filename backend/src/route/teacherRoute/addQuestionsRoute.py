@@ -119,7 +119,7 @@ def _import_candidate_query(db: Session, teacher: User):
             or_(
                 Question.question_status == QuestionStatus.approved,
                 and_(
-                    Question.created_by == teacher.id,
+                    Question.created_by == teacher.school_id,
                     Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                 ),
             )
@@ -233,7 +233,7 @@ def _can_edit_exam_draft_in_place(
     db: Session,
     question: Question,
     exam_id: int,
-    teacher_id: int,
+    teacher_id: str,
 ) -> bool:
     return (
         question.created_by == teacher_id
@@ -277,7 +277,7 @@ def _replace_taxonomy_rows(
 def _clone_question(
     db: Session,
     source: Question,
-    teacher_id: int,
+    teacher_id: str,
     request: QuestionUpdateRequest,
     chapters: list[Chapter],
     los: list[LO],
@@ -350,7 +350,7 @@ def add_question_to_database(
             question_difficulties=request.question_difficulties,
             question_type=request.question_type,
             subject_id=request.subject_id,
-            created_by=creator.id,
+            created_by=creator.school_id,
             question_status="draft",
         )
         db.add(question)
@@ -451,7 +451,7 @@ def update_question_in_exam(
         chapters, los = _validate_taxonomy(db, target_subject, chapter_ids, lo_ids)
 
         can_edit_in_place = _can_edit_exam_draft_in_place(
-            db, question, exam_id, teacher.id
+            db, question, exam_id, teacher.school_id
         )
         if can_edit_in_place:
             if request.question_text is not None:
@@ -473,7 +473,7 @@ def update_question_in_exam(
             effective_question = question
         else:
             effective_question = _clone_question(
-                db, question, teacher.id, request, chapters, los
+                db, question, teacher.school_id, request, chapters, los
             )
             preserved_point = request.question_point
             db.delete(link)
@@ -617,7 +617,7 @@ def delete_question_from_database(
         question = db.query(Question).filter(Question.question_id == question_id).first()
         if not question:
             raise HTTPException(status_code=404, detail="Question not found in the database")
-        if question.created_by != teacher.id:
+        if question.created_by != teacher.school_id:
             raise HTTPException(status_code=403, detail="You do not own this question")
         db.delete(question)
         db.commit()
@@ -668,7 +668,7 @@ def get_question_import_candidates(
         Literal["draft", "pending", "approved", "rejected"] | None,
         Query(alias="status"),
     ] = None,
-    created_by: Annotated[int | None, Query(ge=1)] = None,
+    created_by: Annotated[str | None, Query(max_length=30)] = None,
 ):
     """List approved questions plus the current teacher's draft/pending questions."""
     del role_check
@@ -720,7 +720,7 @@ def get_question_import_candidates(
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
-                                Question.created_by == teacher.id,
+                                Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
                         )
@@ -731,26 +731,29 @@ def get_question_import_candidates(
                 )
             ],
             "creators": [
-                {"id": row.id, "school_id": row.school_id, "full_name": row.full_name}
+                {"school_id": row.school_id, "full_name": row.full_name}
                 for row in (
-                    db.query(User.id, User.school_id, User.full_name)
-                    .join(Question, Question.created_by == User.id)
+                    db.query(User.school_id, User.full_name)
+                    .join(Question, Question.created_by == User.school_id)
                     .filter(
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
-                                Question.created_by == teacher.id,
+                                Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
                         )
                     )
                     .distinct()
-                    .order_by(User.full_name, User.id)
+                    # MySQL requires every ORDER BY expression to be present in
+                    # the SELECT list when DISTINCT is used. school_id is both
+                    # selected and the current Question.created_by key.
+                    .order_by(User.full_name, User.school_id)
                     .all()
                 )
             ],
             "statuses": ["approved", "draft", "pending"],
-            "current_teacher_id": teacher.id,
+            "current_teacher_school_id": teacher.school_id,
         },
     }
 
@@ -784,7 +787,7 @@ def add_questions_to_exam_from_question_bank(
             if not (
                 _status_value(question) == "approved"
                 or (
-                    question.created_by == teacher.id
+                    question.created_by == teacher.school_id
                     and _status_value(question) in {"draft", "pending"}
                 )
             )

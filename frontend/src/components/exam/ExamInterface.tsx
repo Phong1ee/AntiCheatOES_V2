@@ -1,558 +1,297 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ExamTopBar } from './ExamTopBar';
-import { QuestionArea } from './QuestionArea';
-import { QuestionPanel } from './QuestionPanel';
-import { SubmitConfirmDialog } from './SubmitConfirmDialog';
-import { ExamSubmitted } from './ExamSubmitted';
-import { WebcamMonitor } from './WebcamMonitor';
-import { ViolationWarningDialog } from './ViolationWarningDialog';
-import { ExamSettings, defaultExamSettings } from '../../types/examSettings';
-
-const API_BASE_URL = 'http://localhost:8000';
-
-interface Question {
-  id: number;
-  text: string;
-  type: 'multiple-choice' | 'true-false' | 'essay';
-  options?: string[];
-  answer?: string;
-}
-
-interface ApiQuestionOption {
-  id: number;
-  text: string;
-}
-
-interface ApiQuestion {
-  id: number;
-  text: string;
-  type: 'multiple-choice' | 'true-false' | 'essay';
-  options?: ApiQuestionOption[];
-  answer?: string;
-}
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ExamTopBar } from "./ExamTopBar";
+import { QuestionArea } from "./QuestionArea";
+import { QuestionPanel } from "./QuestionPanel";
+import { SubmitConfirmDialog } from "./SubmitConfirmDialog";
+import { ExamSubmitted } from "./ExamSubmitted";
+import { ViolationWarningDialog } from "./ViolationWarningDialog";
+import { studentExamService } from "../../services/student-exam.service";
+import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
 interface ExamInterfaceProps {
   examId: string;
   onExit: () => void;
-  settings?: ExamSettings;
 }
 
-export function ExamInterface({
-  examId,
-  onExit,
-  settings = defaultExamSettings,
-}: ExamInterfaceProps) {
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [examTitle, setExamTitle] = useState('Exam');
+const attemptKey = "current_exam_attempt";
+const draftKey = (attemptId: number) => `exam_attempt_draft_${attemptId}`;
+
+const isAnswered = (answer: StudentAnswer | undefined) =>
+  Boolean(answer && ("selectedOptionId" in answer || answer.answerText.trim()));
+
+export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
+  const [questions, setQuestions] = useState<StudentQuestion[]>([]);
+  const [answers, setAnswers] = useState<StudentAnswers>({});
+  const [attemptId, setAttemptId] = useState<number | null>(null);
+  const [examTitle, setExamTitle] = useState("Exam");
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [showSubmitDialog, setShowSubmitDialog] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [warnings, setWarnings] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [saveStatus, setSaveStatus] = useState("Ready");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [attemptId, setAttemptId] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Lưu lại tổng thời gian ban đầu của bài thi (giây)
-  const initialTimeRef = useRef<number>(0);
-
-  // Anti-cheating states
-  const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [copyPasteCount, setCopyPasteCount] = useState(0);
-  const [fullscreenExitCount, setFullscreenExitCount] = useState(0);
-  const [showViolationWarning, setShowViolationWarning] = useState(false);
-  const [violationType, setViolationType] = useState<
-    'copy-paste' | 'tab-switch' | 'fullscreen-exit' | 'final'
-  >('copy-paste');
+  const [showSubmitDialog, setShowSubmitDialog] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isTerminating, setIsTerminating] = useState(false);
+  const [terminationFailed, setTerminationFailed] = useState(false);
+  const [attemptStatus, setAttemptStatus] = useState("initializing");
+  const [timerReady, setTimerReady] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
-  const warningTimeoutRef = useRef<number | null>(null);
+  const [warnings, setWarnings] = useState(0);
+  const [violationType, setViolationType] = useState<"copy-paste" | "tab-switch" | "fullscreen-exit" | "final">("copy-paste");
+  const [violationCount, setViolationCount] = useState(0);
+  const [showViolationWarning, setShowViolationWarning] = useState(false);
+  const [fullscreenLocked, setFullscreenLocked] = useState(false);
+  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, tabSwitchThreshold: 0, copyPasteThreshold: 0, fullscreenExitThreshold: 0 });
 
-  useEffect(() => {
-    const rawAttempt = localStorage.getItem('current_exam_attempt');
-    if (!rawAttempt) return;
+  const answersRef = useRef<StudentAnswers>({});
+  const dirtyRef = useRef(new Set<number>());
+  const sequenceRef = useRef(new Map<number, number>());
+  const essayTimersRef = useRef(new Map<number, number>());
+  const expiresAtRef = useRef(0);
+  const serverOffsetRef = useRef(0);
+  const serverOffsetInitializedRef = useRef(false);
+  const autoSubmitRef = useRef(false);
+  const hadPositiveTimerRef = useRef(false);
+  const terminateRef = useRef(false);
+  const lastTabViolationRef = useRef(0);
+  const fullscreenArmedRef = useRef(false);
+  const intentionalFullscreenExitRef = useRef(false);
 
+  const exitFullscreenIntentionally = useCallback(async () => {
+    if (!document.fullscreenElement) return;
+    intentionalFullscreenExitRef.current = true;
     try {
-      const parsed = JSON.parse(rawAttempt);
-      if (String(parsed.examId) === String(examId) && parsed.attemptId) {
-        setAttemptId(Number(parsed.attemptId));
-      }
-    } catch (err) {
-      console.error('Failed to parse current exam attempt:', err);
+      await document.exitFullscreen();
+    } finally {
+      window.setTimeout(() => { intentionalFullscreenExitRef.current = false; }, 0);
     }
-  }, [examId]);
-
-  // ====== FETCH EXAM & QUESTIONS FROM BACKEND ======
-  useEffect(() => {
-    const fetchExam = async () => {
-      try {
-        setLoading(true);
-        setLoadError(null);
-
-        const token = localStorage.getItem('token');
-
-        const storedAttempt = localStorage.getItem('current_exam_attempt');
-        let persistedAttemptId: number | null = null;
-        if (storedAttempt) {
-          try {
-            const parsedAttempt = JSON.parse(storedAttempt) as {
-              examId?: string | number;
-              attemptId?: number;
-            };
-            if (String(parsedAttempt.examId) === String(examId) && parsedAttempt.attemptId) {
-              persistedAttemptId = Number(parsedAttempt.attemptId);
-            }
-          } catch {
-            persistedAttemptId = null;
-          }
-        }
-        const attemptQuery = persistedAttemptId ? `?attempt_id=${persistedAttemptId}` : '';
-        const res = await fetch(`${API_BASE_URL}/api/exams/${examId}${attemptQuery}`, {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : '',
-          },
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.detail || data.message || 'Failed to load exam');
-        }
-
-        const data = await res.json();
-
-        setExamTitle(data.exam.title);
-
-        // duration_minutes từ DB -> giây
-        const dur = (data.exam.duration_minutes || 20) * 60;
-        initialTimeRef.current = dur;
-        setTimeRemaining(dur);
-
-        const normalizedQuestions: Question[] = (data.questions || []).map((question: ApiQuestion) => ({
-          id: question.id,
-          text: question.text,
-          type: question.type,
-          answer: question.answer,
-          options: (question.options || []).map((option) => option.text),
-        }));
-
-        setQuestions(normalizedQuestions);
-      } catch (err: any) {
-        console.error(err);
-        setLoadError(err.message || 'Error loading exam');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchExam();
-  }, [examId]);
-
-  // ---------- HANDLE VIOLATIONS (ngưỡng = 2) ----------
-  const handleViolation = useCallback(
-    (type: 'copy-paste' | 'tab-switch' | 'fullscreen-exit') => {
-      if (isSubmitted || isTerminated) return;
-
-      const MAX_VIOLATIONS = 2; // ✅ ngưỡng chung cho mọi loại
-
-      let newCount = 0;
-
-      if (type === 'copy-paste') {
-        newCount = copyPasteCount + 1;
-        setCopyPasteCount(newCount);
-      } else if (type === 'tab-switch') {
-        newCount = tabSwitchCount + 1;
-        setTabSwitchCount(newCount);
-      } else if (type === 'fullscreen-exit') {
-        newCount = fullscreenExitCount + 1;
-        setFullscreenExitCount(newCount);
-      }
-
-      // tăng tổng warnings (để show ở ExamTopBar)
-      setWarnings((prev) => prev + 1);
-
-      setViolationType(type);
-
-      if (newCount >= MAX_VIOLATIONS) {
-        // ✅ đủ 2 lần -> final, terminate & auto out
-        setViolationType('final');
-        setShowViolationWarning(true);
-        setIsTerminated(true);
-
-        const timeoutId = window.setTimeout(async () => {
-          if (document.fullscreenElement) {
-            await document.exitFullscreen();
-          }
-          onExit();
-        }, 3000);
-
-        warningTimeoutRef.current = timeoutId;
-      } else {
-        // chỉ cảnh báo, vẫn cho làm tiếp
-        setShowViolationWarning(true);
-      }
-    },
-    [
-      isSubmitted,
-      isTerminated,
-      copyPasteCount,
-      tabSwitchCount,
-      fullscreenExitCount,
-      onExit,
-    ]
-  );
-
-  const handleAutoSubmit = () => {
-    // Auto submit khi hết giờ
-    confirmSubmit();
-  };
-
-  // Timer
-  useEffect(() => {
-    if (!timeRemaining) return;
-    const timer = window.setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(timer);
-          handleAutoSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [timeRemaining]);
-
-  // Fullscreen detection
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isCurrentlyFullscreen);
-
-      if (!isCurrentlyFullscreen && !isSubmitted && !isTerminated && settings.fullscreen) {
-        handleViolation('fullscreen-exit');
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [isSubmitted, isTerminated, settings.fullscreen, handleViolation]);
-
-  // ✅ Sau khi đóng warning của fullscreen-exit (nhưng chưa bị final),
-  // tự vào lại fullscreen mode
-  useEffect(() => {
-    const reenterFullscreen = async () => {
-      if (!settings.fullscreen || isSubmitted || isTerminated) return;
-      try {
-        if (!document.fullscreenElement) {
-          await document.documentElement.requestFullscreen();
-        }
-      } catch (err) {
-        console.error('Failed to re-enter fullscreen:', err);
-      }
-    };
-
-    if (
-      !showViolationWarning &&                 // dialog vừa đóng
-      !isSubmitted &&
-      !isTerminated &&
-      violationType === 'fullscreen-exit'      // chỉ cho case fullscreen-exit
-    ) {
-      reenterFullscreen();
-    }
-  }, [
-    showViolationWarning,
-    isSubmitted,
-    isTerminated,
-    violationType,
-    settings.fullscreen,
-  ]);
-
-  // Auto-save answers (demo – hiện chỉ log)
-  useEffect(() => {
-    const autoSave = window.setInterval(() => {
-      console.log('Auto-saving answers...', answers);
-    }, 30000);
-    return () => window.clearInterval(autoSave);
-  }, [answers]);
-
-  // Detect copy/paste attempts
-  useEffect(() => {
-    if (!settings.disableCopyPaste) return;
-
-    const handleCopy = (e: ClipboardEvent) => {
-      e.preventDefault();
-      handleViolation('copy-paste');
-      return false;
-    };
-
-    const handlePaste = (e: ClipboardEvent) => {
-      e.preventDefault();
-      handleViolation('copy-paste');
-      return false;
-    };
-
-    const handleCut = (e: ClipboardEvent) => {
-      e.preventDefault();
-      handleViolation('copy-paste');
-      return false;
-    };
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      handleViolation('copy-paste');
-      return false;
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
-        e.preventDefault();
-        handleViolation('copy-paste');
-        return false;
-      }
-
-      if (
-        e.key === 'F5' ||
-        (e.ctrlKey && e.key === 'r') ||
-        (e.ctrlKey && e.shiftKey && e.key === 'I') ||
-        (e.ctrlKey && e.shiftKey && e.key === 'J') ||
-        (e.ctrlKey && e.key === 'u')
-      ) {
-        e.preventDefault();
-        return false;
-      }
-    };
-
-    document.addEventListener('copy', handleCopy);
-    document.addEventListener('paste', handlePaste);
-    document.addEventListener('cut', handleCut);
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('copy', handleCopy);
-      document.removeEventListener('paste', handlePaste);
-      document.removeEventListener('cut', handleCut);
-      document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [settings.disableCopyPaste, handleViolation]);
-
-  // Detect tab switching and window blur
-  useEffect(() => {
-    if (settings.tabSwitchAction === 'none') return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden && !isSubmitted && !isTerminated) {
-        handleViolation('tab-switch');
-      }
-    };
-
-    const handleBlur = () => {
-      if (!isSubmitted && !isTerminated) {
-        handleViolation('tab-switch');
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-    };
-  }, [isSubmitted, isTerminated, settings.tabSwitchAction, handleViolation]);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (warningTimeoutRef.current !== null) {
-        window.clearTimeout(warningTimeoutRef.current);
-      }
-    };
   }, []);
 
-  // Enter fullscreen on mount
-  useEffect(() => {
-    const enterFullscreen = async () => {
-      if (!settings.fullscreen) return;
-      try {
-        await document.documentElement.requestFullscreen();
-      } catch (err) {
-        console.error('Failed to enter fullscreen:', err);
-      }
-    };
+  const handleNormalExit = useCallback(() => {
+    void exitFullscreenIntentionally().finally(onExit);
+  }, [exitFullscreenIntentionally, onExit]);
 
-    enterFullscreen();
-  }, [settings.fullscreen]);
+  const persistDraft = useCallback((id: number, nextAnswers: StudentAnswers) => {
+    localStorage.setItem(draftKey(id), JSON.stringify(nextAnswers));
+  }, []);
 
-  const handleAnswerChange = (questionId: number, answer: string) => {
-    setAnswers((prev) => ({ ...prev, [questionId]: answer }));
-  };
+  const stopAutoSave = useCallback((message?: string) => {
+    essayTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    essayTimersRef.current.clear();
+    dirtyRef.current.clear();
+    setTimerReady(false);
+    if (message) setSubmitError(message);
+  }, []);
 
-  const handleSubmit = () => {
-    setShowSubmitDialog(true);
-  };
-
-  const confirmSubmit = async () => {
-    setShowSubmitDialog(false);
-    setSubmitError(null);
-
+  const saveQuestion = useCallback(async (questionId: number) => {
+    if (!attemptId || attemptStatus !== "in_progress" || !dirtyRef.current.has(questionId) || !navigator.onLine) return;
+    const answer = answersRef.current[questionId];
+    if (!answer) return;
+    const sequence = (sequenceRef.current.get(questionId) ?? 0) + 1;
+    sequenceRef.current.set(questionId, sequence);
+    setSaveStatus("Saving");
     try {
-      const token = localStorage.getItem('token');
-      const answersPayload = Object.entries(answers).map(([qId, ans]) => ({
-        questionId: Number(qId),
-        answerText: ans,
-      }));
-
-      const total = initialTimeRef.current;
-      const timeSpentSeconds =
-        total > 0 ? Math.max(0, total - timeRemaining) : 0;
-
-      const res = await fetch(`${API_BASE_URL}/api/exams/${examId}/submit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
-        },
-        body: JSON.stringify({
-          attemptId,
-          answers: answersPayload,
-          timeSpentSeconds,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        console.error('Submit failed:', data);
-        setSubmitError(data.detail || data.message || 'Submit failed');
-        return;
-      } else {
-        console.log('Submit success:', data);
+      const result = await studentExamService.saveAnswer(examId, attemptId, questionId, answer);
+      if (sequenceRef.current.get(questionId) === sequence) {
+        dirtyRef.current.delete(questionId);
+        setSaveStatus(dirtyRef.current.size ? "Saving" : "Saved");
       }
-    } catch (err) {
-      console.error('Submit error:', err);
-      setSubmitError('Submit failed');
-      return;
-    }
-
-    localStorage.removeItem('current_exam_attempt');
-    setIsSubmitted(true);
-  };
-
-  const handleExitSubmitted = async () => {
-    localStorage.removeItem('current_exam_attempt');
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    }
-    onExit();
-  };
-
-  // ====== LOADING / ERROR / SUBMITTED STATES ======
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-gray-700">Loading exam...</p>
-      </div>
-    );
-  }
-
-  if (loadError || questions.length === 0) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-        <p className="text-red-600 mb-4">
-          {loadError || 'No questions found for this exam.'}
-        </p>
-        <button
-          className="px-4 py-2 bg-teal-600 text-white rounded-lg"
-          onClick={onExit}
-        >
-          Back
-        </button>
-      </div>
-    );
-  }
-
-  if (isSubmitted) {
-    return <ExamSubmitted onExit={handleExitSubmitted} />;
-  }
-
-  const answeredCount = Object.keys(answers).length;
-  const unansweredQuestions = questions
-    .filter((q) => !answers[q.id])
-    .map((q) => q.id);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
-      <ExamTopBar
-        examTitle={examTitle}
-        timeRemaining={timeRemaining}
-        onSubmit={handleSubmit}
-        warnings={warnings}
-      />
-
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-6">
-          <QuestionArea
-            question={questions[currentQuestion]}
-            currentQuestion={currentQuestion}
-            totalQuestions={questions.length}
-            answer={answers[questions[currentQuestion].id]}
-            onAnswerChange={handleAnswerChange}
-            onPrevious={() =>
-              setCurrentQuestion((prev) => Math.max(0, prev - 1))
-            }
-            onNext={() =>
-              setCurrentQuestion((prev) =>
-                Math.min(questions.length - 1, prev + 1)
-              )
-            }
-          />
-        </div>
-
-        <QuestionPanel
-          questions={questions}
-          currentQuestion={currentQuestion}
-          answers={answers}
-          onQuestionSelect={setCurrentQuestion}
-          answeredCount={answeredCount}
-          unansweredQuestions={unansweredQuestions}
-        />
-      </div>
-
-      <SubmitConfirmDialog
-        open={showSubmitDialog}
-        onOpenChange={setShowSubmitDialog}
-        onConfirm={confirmSubmit}
-        answeredCount={answeredCount}
-        totalQuestions={questions.length}
-      />
-
-      {submitError && (
-        <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">
-          {submitError}
-        </div>
-      )}
-
-      {/* <WebcamMonitor /> */}
-
-      <ViolationWarningDialog
-        open={showViolationWarning}
-        onOpenChange={setShowViolationWarning}
-        violationType={violationType}
-        violationCount={
-          violationType === 'copy-paste'
-            ? copyPasteCount
-            : violationType === 'tab-switch'
-            ? tabSwitchCount
-            : violationType === 'fullscreen-exit'
-            ? fullscreenExitCount
-            : 0
+    } catch (error) {
+      if (sequenceRef.current.get(questionId) === sequence) {
+        setSaveStatus("Save failed");
+        const message = error instanceof Error ? error.message : "Save failed";
+        if (message === "Attempt has expired" || message === "Attempt is no longer in progress") {
+          setAttemptStatus("expired");
+          stopAutoSave(message);
+        } else {
+          setSubmitError(message);
         }
-        threshold={2} // ✅ hiển thị đúng ngưỡng 2
-      />
-    </div>
-  );
+      }
+    }
+  }, [attemptId, attemptStatus, examId, stopAutoSave]);
+
+  const flushDirty = useCallback(async () => {
+    await Promise.all([...dirtyRef.current].map(saveQuestion));
+  }, [saveQuestion]);
+
+  const submit = useCallback(async (automatic = false) => {
+    if (!attemptId || attemptStatus !== "in_progress" || isSubmitted || isTerminating || terminationFailed) return;
+    setSubmitError(null);
+    await flushDirty();
+    try {
+      await studentExamService.submit(examId, attemptId, answersRef.current);
+      localStorage.removeItem(attemptKey);
+      localStorage.removeItem(draftKey(attemptId));
+      setAttemptStatus("submitted");
+      stopAutoSave();
+      setIsSubmitted(true);
+      void exitFullscreenIntentionally();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : automatic ? "Auto-submit failed" : "Submit failed");
+    }
+  }, [attemptId, attemptStatus, examId, exitFullscreenIntentionally, flushDirty, isSubmitted, isTerminating, terminationFailed, stopAutoSave]);
+
+  const terminate = useCallback(async (type: string) => {
+    if (!attemptId || terminateRef.current) return;
+    terminateRef.current = true;
+    setIsTerminating(true);
+    setTerminationFailed(false);
+    setSubmitError(null);
+    await flushDirty();
+    try {
+      await studentExamService.terminate(examId, attemptId, "anti_cheat", type, answersRef.current);
+      localStorage.removeItem(attemptKey);
+      localStorage.removeItem(draftKey(attemptId));
+      setAttemptStatus("terminated");
+      stopAutoSave();
+      setIsTerminated(true);
+      setViolationType("final");
+      setShowViolationWarning(true);
+      void exitFullscreenIntentionally();
+      window.setTimeout(handleNormalExit, 1500);
+    } catch (error) {
+      terminateRef.current = false;
+      setTerminationFailed(true);
+      setSubmitError(error instanceof Error ? error.message : "Termination failed. Retry while the exam remains locked.");
+    } finally {
+      setIsTerminating(false);
+    }
+  }, [attemptId, examId, exitFullscreenIntentionally, flushDirty, handleNormalExit, stopAutoSave]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(attemptKey);
+    if (!raw) { setLoadError("No active attempt was selected. Resume it from My Exams."); setLoading(false); return; }
+    try {
+      const hint = JSON.parse(raw) as { examId?: string | number; attemptId?: number };
+      if (String(hint.examId) !== String(examId) || !hint.attemptId) throw new Error();
+      const load = async () => {
+        const restored = await studentExamService.restore(examId, hint.attemptId!);
+        setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
+        const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
+        const local = localStorage.getItem(draftKey(restored.attempt.attemptId));
+        const draft = local ? JSON.parse(local) as StudentAnswers : {};
+        answersRef.current = { ...saved, ...draft }; setAnswers(answersRef.current);
+        setSettings(restored.settings);
+        fullscreenArmedRef.current = Boolean(document.fullscreenElement);
+        setFullscreenLocked(restored.settings.fullscreenExitThreshold > 0 && !document.fullscreenElement);
+        const serverTime = Date.parse(restored.serverTime);
+        const expiresAt = Date.parse(restored.expiresAt);
+        if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt) || expiresAt <= 0) throw new Error("Invalid server timer response");
+        serverOffsetRef.current = serverTime - Date.now();
+        serverOffsetInitializedRef.current = true;
+        expiresAtRef.current = expiresAt;
+        setTimeRemaining(restored.remainingSeconds);
+        autoSubmitRef.current = false;
+        hadPositiveTimerRef.current = restored.remainingSeconds > 0;
+        setTimerReady(restored.attempt.status === "in_progress");
+        if (restored.attempt.status !== "in_progress") stopAutoSave("Attempt is no longer in progress");
+      };
+      load().catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Failed to restore attempt")).finally(() => setLoading(false));
+    } catch { setLoadError("Invalid active attempt. Resume it from My Exams."); setLoading(false); }
+  }, [examId, stopAutoSave]);
+
+  useEffect(() => {
+    if (!timerReady || loading || attemptId === null || attemptStatus !== "in_progress" || !serverOffsetInitializedRef.current || !Number.isFinite(expiresAtRef.current) || expiresAtRef.current <= 0) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((expiresAtRef.current - (Date.now() + serverOffsetRef.current)) / 1000));
+      setTimeRemaining(remaining);
+      if (remaining > 0) hadPositiveTimerRef.current = true;
+      if (remaining === 0 && hadPositiveTimerRef.current && !autoSubmitRef.current) { autoSubmitRef.current = true; void submit(true); }
+    };
+    tick(); const timer = window.setInterval(tick, 1000); return () => window.clearInterval(timer);
+  }, [attemptId, attemptStatus, loading, submit, timerReady]);
+
+  useEffect(() => {
+    if (attemptStatus !== "in_progress") return;
+    const online = () => { setIsOnline(true); setSaveStatus("Saving"); void flushDirty(); };
+    const offline = () => { setIsOnline(false); setSaveStatus("Offline - changes pending"); };
+    window.addEventListener("online", online); window.addEventListener("offline", offline);
+    const flushTimer = window.setInterval(() => void flushDirty(), 30_000);
+    return () => { window.removeEventListener("online", online); window.removeEventListener("offline", offline); window.clearInterval(flushTimer); };
+  }, [attemptStatus, flushDirty]);
+
+  const handleAnswerChange = (questionId: number, answer: StudentAnswer) => {
+    if (attemptStatus !== "in_progress" || isTerminating || terminationFailed || fullscreenLocked) return;
+    const next = { ...answersRef.current, [questionId]: answer };
+    answersRef.current = next; setAnswers(next); dirtyRef.current.add(questionId);
+    if (attemptId) persistDraft(attemptId, next);
+    if (!navigator.onLine) { setSaveStatus("Offline - changes pending"); return; }
+    const question = questions.find((item) => item.id === questionId);
+    if (question?.type === "essay") {
+      const previous = essayTimersRef.current.get(questionId); if (previous) window.clearTimeout(previous);
+      essayTimersRef.current.set(questionId, window.setTimeout(() => void saveQuestion(questionId), 800));
+    } else { void saveQuestion(questionId); }
+  };
+
+  const handleViolation = useCallback((type: "copy-paste" | "tab-switch" | "fullscreen-exit") => {
+    const threshold = type === "copy-paste" ? settings.copyPasteThreshold : type === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold;
+    if (!threshold || isSubmitted || isTerminated || isTerminating || terminationFailed) return;
+    setWarnings((value) => value + 1); setViolationType(type);
+    setViolationCount((value) => { const next = value + 1; if (next >= threshold) void terminate(type); else setShowViolationWarning(true); return next; });
+  }, [isSubmitted, isTerminated, isTerminating, terminationFailed, settings, terminate]);
+
+  const returnToFullscreen = async () => {
+    setSubmitError(null);
+    try {
+      // This is called only by an explicit user action from the blocking gate.
+      await document.documentElement.requestFullscreen();
+      fullscreenArmedRef.current = true;
+      setFullscreenLocked(false);
+      setShowViolationWarning(false);
+    } catch {
+      setFullscreenLocked(true);
+      setSubmitError("Fullscreen permission is required to continue this exam.");
+    }
+  };
+
+  const fullscreenRequired = settings.fullscreenExitThreshold > 0;
+
+  useEffect(() => {
+    const fullscreen = () => {
+      if (document.fullscreenElement) {
+        if (fullscreenRequired && attemptStatus === "in_progress") {
+          fullscreenArmedRef.current = true;
+          setFullscreenLocked(false);
+        }
+        return;
+      }
+      if (intentionalFullscreenExitRef.current || !fullscreenRequired || !fullscreenArmedRef.current || attemptStatus !== "in_progress") return;
+      setFullscreenLocked(true);
+      handleViolation("fullscreen-exit");
+    };
+    document.addEventListener("fullscreenchange", fullscreen);
+    return () => document.removeEventListener("fullscreenchange", fullscreen);
+  }, [attemptStatus, fullscreenRequired, handleViolation]);
+
+  useEffect(() => {
+    const tabEvent = () => { if (document.hidden || document.hasFocus() === false) { const now = Date.now(); if (now - lastTabViolationRef.current > 750) { lastTabViolationRef.current = now; handleViolation("tab-switch"); } } };
+    document.addEventListener("visibilitychange", tabEvent); window.addEventListener("blur", tabEvent);
+    return () => { document.removeEventListener("visibilitychange", tabEvent); window.removeEventListener("blur", tabEvent); };
+  }, [handleViolation]);
+
+  useEffect(() => {
+    const copy = (event: ClipboardEvent) => { event.preventDefault(); handleViolation("copy-paste"); };
+    document.addEventListener("copy", copy); document.addEventListener("paste", copy); document.addEventListener("cut", copy);
+    return () => { document.removeEventListener("copy", copy); document.removeEventListener("paste", copy); document.removeEventListener("cut", copy); };
+  }, [handleViolation]);
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
+  if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
+  if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} />;
+
+  if (fullscreenLocked && fullscreenRequired) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Fullscreen required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen to continue answering. Leaving fullscreen is recorded as an exam violation.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} /></div>;
+
+  const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
+  const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
+  const current = questions[currentQuestion];
+  return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
+    <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} warnings={warnings} />
+    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1))} /></div>
+      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} /></div>
+    <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
+    {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}{terminationFailed && <button className="ml-3 underline" onClick={() => void terminate(violationType)}>Retry termination</button>}</div>}
+    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={violationType === "copy-paste" ? settings.copyPasteThreshold : violationType === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} />
+  </div>;
 }

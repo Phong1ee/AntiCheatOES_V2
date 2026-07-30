@@ -55,7 +55,7 @@ export interface QuestionImportCandidate {
   learning_objectives: LearningObjectiveSummary[];
   option_count: number;
   already_added: boolean;
-  creator: { id: number; school_id: string; full_name: string } | null;
+  creator: { school_id: string; full_name: string } | null;
 }
 
 export interface QuestionImportCandidateParams {
@@ -64,7 +64,7 @@ export interface QuestionImportCandidateParams {
   difficulty?: QuestionDifficulty;
   subject_id?: string;
   status?: QuestionStatus;
-  created_by?: number;
+  created_by?: string;
   page?: number;
   page_size?: 10 | 20;
 }
@@ -77,9 +77,9 @@ export interface QuestionImportCandidateResponse {
   total_pages: number;
   filter_options: {
     subjects: SubjectSummary[];
-    creators: Array<{ id: number; school_id: string; full_name: string }>;
+    creators: Array<{ school_id: string; full_name: string }>;
     statuses: QuestionStatus[];
-    current_teacher_id: number;
+    current_teacher_school_id: string;
   };
 }
 
@@ -118,17 +118,60 @@ export interface PoolRule extends PoolRulePayload {
   chapter_name: string;
   lo_name: string | null;
   available_count: number;
+  eligible_count: number;
+  included_count: number;
+  excluded_count: number;
 }
 
 export interface PoolConfig {
   pool_config_id: number;
   exam_id: number;
   subject_id: string;
+  subject_name: string;
   fixed_randomization: boolean;
   version: number;
   mode: "manual" | "fixed_randomization" | "pool";
   total_questions: number;
+  total_included_candidates: number;
   rules: PoolRule[];
+}
+
+export interface PoolCandidate {
+  question_id: number;
+  question_text: string;
+  question_type: QuestionType;
+  question_difficulties: QuestionDifficulty;
+  subject_id: string;
+  question_status: QuestionStatus;
+  included: boolean;
+  chapters: ChapterSummary[];
+  learning_objectives: LearningObjectiveSummary[];
+  chapter_ids: number[];
+  lo_ids: number[];
+  creator: { school_id: string; full_name: string } | null;
+  options: Array<{ options_id: number; options_text: string; is_correct: boolean }>;
+}
+
+export interface PoolCandidateResponse {
+  rule: PoolRule;
+  questions: PoolCandidate[];
+}
+
+export interface PoolPreview {
+  exam_id: number;
+  seed: string;
+  total_questions: number;
+  groups: Array<{
+    rule_id: number;
+    chapter_name: string | null;
+    lo_name: string | null;
+    difficulty: QuestionDifficulty;
+    questions: Array<{
+      question_id: number;
+      question_text: string;
+      question_type: QuestionType;
+    }>;
+  }>;
 }
 
 export const questionService = {
@@ -198,9 +241,29 @@ export const questionService = {
     return data;
   },
 
-  async getPoolRuleQuestions(examId: number, ruleId: number) {
-    const { data } = await apiClient.get<{ rule_id: number; questions: ExamQuestionDetail[] }>(
+  async getPoolRuleQuestions(examId: number, ruleId: number): Promise<PoolCandidateResponse> {
+    const { data } = await apiClient.get<PoolCandidateResponse>(
       `/api/teacher/exams/${examId}/pool-rules/${ruleId}/questions`,
+    );
+    return data;
+  },
+
+  async savePoolRuleCandidates(
+    examId: number,
+    ruleId: number,
+    includedQuestionIds: number[],
+  ): Promise<PoolConfig> {
+    const { data } = await apiClient.put<PoolConfig>(
+      `/api/teacher/exams/${examId}/pool-rules/${ruleId}/candidates`,
+      { included_question_ids: includedQuestionIds },
+    );
+    return data;
+  },
+
+  async previewPool(examId: number, seed?: string): Promise<PoolPreview> {
+    const { data } = await apiClient.get<PoolPreview>(
+      `/api/teacher/exams/${examId}/pool-preview`,
+      { params: seed ? { seed } : undefined },
     );
     return data;
   },

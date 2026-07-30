@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
@@ -10,18 +10,23 @@ from src.a_db_config import (
     AttemptQuestion,
     Chapter,
     ChapterLO,
+    ChapterQuestion,
     Exam,
     ExamPoolConfig,
     ExamPoolQuestion,
     ExamPoolRule,
     ExamQuestion,
     LO,
+    LOQuestion,
     Question,
     QuestionSelectionMode,
     User,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
-from src.models.teacher.requestModel.ExamQuestionPoolRequest import PoolConfigRequest
+from src.models.teacher.requestModel.ExamQuestionPoolRequest import (
+    PoolCandidateSelectionRequest,
+    PoolConfigRequest,
+)
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.route.teacherRoute.addQuestionsRoute import (
     _clone_question,
@@ -33,6 +38,8 @@ from src.route.teacherRoute.addQuestionsRoute import (
 from src.service.exam_pool_service import (
     distribute_points,
     eligible_question_ids,
+    eligible_question_ids_by_rule,
+    ensure_pool_satisfiable,
     seeded_random,
     select_unique_candidates,
     validate_rule_taxonomy,
@@ -60,14 +67,23 @@ def _config_query(db: Session, exam_id: int):
             selectinload(ExamPoolConfig.rules).selectinload(ExamPoolRule.chapter),
             selectinload(ExamPoolConfig.rules).selectinload(ExamPoolRule.lo),
             selectinload(ExamPoolConfig.rules).selectinload(ExamPoolRule.candidates),
+            selectinload(ExamPoolConfig.exam).selectinload(Exam.subject),
         )
         .filter(ExamPoolConfig.exam_id == exam_id)
     )
 
 
-def _serialize_config(config: ExamPoolConfig, mode: str) -> dict:
+def _serialize_config(db: Session, teacher: User, config: ExamPoolConfig, mode: str) -> dict:
     rules = []
+    eligible_by_rule = eligible_question_ids_by_rule(
+        db, teacher, config.subject_id, config.rules
+    )
     for rule in sorted(config.rules, key=lambda item: item.rule_id):
+        difficulty = (
+            rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty
+        )
+        eligible_count = len(eligible_by_rule[rule.rule_id])
+        included_count = len(rule.candidates)
         rules.append(
             {
                 "rule_id": rule.rule_id,
@@ -75,21 +91,26 @@ def _serialize_config(config: ExamPoolConfig, mode: str) -> dict:
                 "chapter_name": rule.chapter.chapter_name if rule.chapter else None,
                 "lo_id": rule.lo_id,
                 "lo_name": rule.lo.lo_name if rule.lo else None,
-                "difficulty": rule.difficulty.value
-                if hasattr(rule.difficulty, "value")
-                else rule.difficulty,
+                "difficulty": difficulty,
                 "draw_count": rule.draw_count,
-                "available_count": len(rule.candidates),
+                "available_count": included_count,
+                "eligible_count": eligible_count,
+                "included_count": included_count,
+                "excluded_count": max(0, eligible_count - included_count),
             }
         )
     return {
         "pool_config_id": config.pool_config_id,
         "exam_id": config.exam_id,
         "subject_id": config.subject_id,
+        "subject_name": config.exam.subject.subject_name
+        if config.exam and config.exam.subject
+        else config.subject_id,
         "fixed_randomization": config.fixed_randomization,
         "version": config.version,
         "mode": mode,
         "total_questions": sum(rule["draw_count"] for rule in rules),
+        "total_included_candidates": sum(rule["included_count"] for rule in rules),
         "rules": rules,
     }
 
@@ -154,7 +175,7 @@ def get_pool_config(
     db: Session = Depends(get_db),
 ):
     del role_check
-    _, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+    teacher, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
     config = _config_query(db, exam_id).first()
     if not config:
         return {
@@ -169,7 +190,7 @@ def get_pool_config(
         if hasattr(exam.question_selection_mode, "value")
         else exam.question_selection_mode
     )
-    return _serialize_config(config, mode)
+    return _serialize_config(db, teacher, config, mode)
 
 
 @router.put("/exams/{exam_id}/pool-config")
@@ -280,7 +301,7 @@ def put_pool_config(
             if hasattr(exam.question_selection_mode, "value")
             else exam.question_selection_mode
         )
-        return _serialize_config(saved, mode)
+        return _serialize_config(db, teacher, saved, mode)
     except HTTPException:
         db.rollback()
         raise
@@ -316,7 +337,7 @@ def get_pool_rule_questions(
     db: Session = Depends(get_db),
 ):
     del role_check
-    _teacher_and_exam(db, exam_id, current_user["school_id"])
+    teacher, _ = _teacher_and_exam(db, exam_id, current_user["school_id"])
     rule = (
         db.query(ExamPoolRule)
         .join(ExamPoolConfig)
@@ -336,28 +357,208 @@ def get_pool_rule_questions(
     )
     if not rule:
         raise HTTPException(status_code=404, detail="Pool rule not found")
+    difficulty = rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty
+    eligible_ids = eligible_question_ids(
+        db,
+        teacher,
+        rule.config.subject_id,
+        rule.chapter_id,
+        rule.lo_id,
+        difficulty,
+    )
+    included_ids = {candidate.question_id for candidate in rule.candidates}
+    questions = (
+        db.query(Question)
+        .options(
+            selectinload(Question.options),
+            selectinload(Question.chapter_questions).selectinload(ChapterQuestion.chapter),
+            selectinload(Question.lo_questions).selectinload(LOQuestion.lo),
+            selectinload(Question.creator),
+        )
+        .filter(Question.question_id.in_(eligible_ids or [-1]))
+        .order_by(Question.question_id)
+        .all()
+    )
     return {
-        "rule_id": rule_id,
+        "rule": {
+            "rule_id": rule.rule_id,
+            "chapter_id": rule.chapter_id,
+            "chapter_name": rule.chapter.chapter_name if rule.chapter else None,
+            "lo_id": rule.lo_id,
+            "lo_name": rule.lo.lo_name if rule.lo else None,
+            "difficulty": difficulty,
+            "draw_count": rule.draw_count,
+            "eligible_count": len(eligible_ids),
+            "included_count": len(included_ids & set(eligible_ids)),
+            "excluded_count": len(set(eligible_ids) - included_ids),
+        },
         "questions": [
             {
-                "question_id": candidate.question.question_id,
-                "question_text": candidate.question.question_text,
-                "question_type": candidate.question.question_type.value,
-                "question_difficulties": candidate.question.question_difficulties.value,
-                "subject_id": candidate.question.subject_id,
-                "chapter_ids": [item.chapter_id for item in candidate.question.chapter_questions],
-                "lo_ids": [item.lo_id for item in candidate.question.lo_questions],
-                "question_status": candidate.question.question_status.value,
+                "question_id": question.question_id,
+                "question_text": question.question_text,
+                "question_type": question.question_type.value,
+                "question_difficulties": question.question_difficulties.value,
+                "subject_id": question.subject_id,
+                "included": question.question_id in included_ids,
+                "chapters": [
+                    {
+                        "chapter_id": item.chapter_id,
+                        "chapter_name": item.chapter.chapter_name if item.chapter else str(item.chapter_id),
+                    }
+                    for item in question.chapter_questions
+                ],
+                "learning_objectives": [
+                    {
+                        "lo_id": item.lo_id,
+                        "lo_name": item.lo.lo_name if item.lo else str(item.lo_id),
+                    }
+                    for item in question.lo_questions
+                ],
+                "chapter_ids": [item.chapter_id for item in question.chapter_questions],
+                "lo_ids": [item.lo_id for item in question.lo_questions],
+                "question_status": question.question_status.value,
+                "creator": {
+                    "school_id": question.creator.school_id,
+                    "full_name": question.creator.full_name,
+                } if question.creator else None,
                 "options": [
                     {
                         "options_id": option.options_id,
                         "options_text": option.options_text,
                         "is_correct": option.is_correct,
                     }
-                    for option in sorted(candidate.question.options, key=lambda item: item.options_id)
+                    for option in sorted(question.options, key=lambda item: item.options_id)
                 ],
             }
-            for candidate in sorted(rule.candidates, key=lambda item: item.question_id)
+            for question in questions
+        ],
+    }
+
+
+@router.put("/exams/{exam_id}/pool-rules/{rule_id}/candidates")
+def replace_pool_rule_candidates(
+    exam_id: int,
+    rule_id: int,
+    request: PoolCandidateSelectionRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        teacher, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        mode = (
+            exam.question_selection_mode.value
+            if hasattr(exam.question_selection_mode, "value")
+            else exam.question_selection_mode
+        )
+        if mode != "pool":
+            raise HTTPException(status_code=409, detail="Candidate inclusion is available only in pure pool mode")
+        config = _config_query(db, exam_id).first()
+        rule = next((item for item in config.rules if item.rule_id == rule_id), None) if config else None
+        if not rule:
+            raise HTTPException(status_code=404, detail="Pool rule not found")
+        difficulty = rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty
+        eligible_ids = set(
+            eligible_question_ids(
+                db, teacher, config.subject_id, rule.chapter_id, rule.lo_id, difficulty
+            )
+        )
+        requested_ids = set(request.included_question_ids)
+        unauthorized = sorted(requested_ids - eligible_ids)
+        if unauthorized:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "One or more questions are not eligible for this rule", "question_ids": unauthorized},
+            )
+        if len(requested_ids) < rule.draw_count:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Included candidates cannot be fewer than the rule draw count",
+                    "draw_count": rule.draw_count,
+                    "included_count": len(requested_ids),
+                },
+            )
+        current_ids = {candidate.question_id for candidate in rule.candidates}
+        removed_ids = current_ids - requested_ids
+        added_ids = requested_ids - current_ids
+        if removed_ids:
+            db.query(ExamPoolQuestion).filter(
+                ExamPoolQuestion.rule_id == rule_id,
+                ExamPoolQuestion.question_id.in_(removed_ids),
+            ).delete(synchronize_session="fetch")
+        db.add_all(
+            ExamPoolQuestion(rule_id=rule_id, question_id=question_id)
+            for question_id in sorted(added_ids)
+        )
+        db.flush()
+        db.expire_all()
+        refreshed = _config_query(db, exam_id).one()
+        ensure_pool_satisfiable(
+            refreshed.rules,
+            seed=("candidate-update", exam_id, refreshed.version, rule_id),
+        )
+        refreshed.version += 1
+        db.commit()
+        saved = _config_query(db, exam_id).one()
+        return _serialize_config(db, teacher, saved, mode)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.get("/exams/{exam_id}/pool-preview")
+def preview_pool_draw(
+    exam_id: int,
+    seed: str = Query(default="preview", max_length=100),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    teacher, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+    config = _config_query(db, exam_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Pool configuration not found")
+    selected = select_unique_candidates(
+        {
+            rule.rule_id: [candidate.question_id for candidate in rule.candidates]
+            for rule in config.rules
+        },
+        {rule.rule_id: rule.draw_count for rule in config.rules},
+        seeded_random("pool-preview", exam_id, config.version, seed),
+    )
+    question_ids = [question_id for rule_id in sorted(selected) for question_id in selected[rule_id]]
+    question_map = {
+        question.question_id: question
+        for question in db.query(Question)
+        .filter(Question.question_id.in_(question_ids or [-1]))
+        .all()
+    }
+    return {
+        "exam_id": exam.exam_id,
+        "seed": seed,
+        "total_questions": len(question_ids),
+        "groups": [
+            {
+                "rule_id": rule.rule_id,
+                "chapter_name": rule.chapter.chapter_name if rule.chapter else None,
+                "lo_name": rule.lo.lo_name if rule.lo else None,
+                "difficulty": rule.difficulty.value if hasattr(rule.difficulty, "value") else rule.difficulty,
+                "questions": [
+                    {
+                        "question_id": question_id,
+                        "question_text": question_map[question_id].question_text,
+                        "question_type": question_map[question_id].question_type.value,
+                    }
+                    for question_id in selected[rule.rule_id]
+                ],
+            }
+            for rule in sorted(config.rules, key=lambda item: item.rule_id)
         ],
     }
 
@@ -455,7 +656,7 @@ def update_pool_candidate(
             .all()
         }
         safe_in_place = (
-            question.created_by == teacher.id
+            question.created_by == teacher.school_id
             and (
                 question.question_status.value
                 if hasattr(question.question_status, "value")
@@ -485,7 +686,7 @@ def update_pool_candidate(
             effective = question
         else:
             effective = _clone_question(
-                db, question, teacher.id, request, chapters, los
+                db, question, teacher.school_id, request, chapters, los
             )
             affected_rule_ids = [rule.rule_id for rule in current_config_rules]
             db.query(ExamPoolQuestion).filter(

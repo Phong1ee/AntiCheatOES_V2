@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 from src.a_db_config.config import get_db_connection
@@ -56,6 +57,12 @@ def _result_flags(result_visibility, pending_essay_count):
     return status, score_visible, allow_view_details
 
 
+def _snapshot_options(value):
+    if isinstance(value, str):
+        return json.loads(value)
+    return value or []
+
+
 def get_student_results(user_id: int):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -68,6 +75,7 @@ def get_student_results(user_id: int):
         a.start_time,
         a.end_time,
         a.submitted_at,
+        a.status AS attempt_status,
         e.title,
         e.description,
         e.duration_minutes,
@@ -75,8 +83,7 @@ def get_student_results(user_id: int):
         e.result_visibility,
         COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
         COUNT(DISTINCT aq.question_id) AS total_questions,
-        COALESCE(SUM(CASE WHEN o.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_answers,
-        COALESCE(SUM(CASE WHEN q.question_type = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
+        COALESCE(SUM(CASE WHEN COALESCE(aq.question_type_snapshot, q.question_type) = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
     FROM attempt a
     JOIN exam e
         ON e.exam_id = a.exam_id
@@ -89,8 +96,6 @@ def get_student_results(user_id: int):
     LEFT JOIN mcq_answers ma
         ON ma.attempt_id = aq.attempt_id
         AND ma.question_id = aq.question_id
-    LEFT JOIN options o
-        ON o.options_id = ma.selected_option_id
     LEFT JOIN essay_answers ea
         ON ea.attempt_id = aq.attempt_id
         AND ea.question_id = aq.question_id
@@ -104,6 +109,7 @@ def get_student_results(user_id: int):
         a.start_time,
         a.end_time,
         a.submitted_at,
+        a.status,
         e.title,
         e.description,
         e.duration_minutes,
@@ -124,8 +130,13 @@ def get_student_results(user_id: int):
                 row["result_visibility"],
                 pending_essay_count,
             )
-            correct_answers = int(row["correct_answers"] or 0)
             total_questions = int(row["total_questions"] or 0)
+            correct_answers = None
+            if allow_view_details:
+                detail_questions = _get_attempt_questions(cursor, row["attempt_id"])
+                correct_answers = sum(1 for question in detail_questions if question["isCorrect"])
+
+            visible_score = _score_value(row["score"]) if score_visible else None
 
             results.append({
                 "id": str(row["attempt_id"]),
@@ -136,15 +147,17 @@ def get_student_results(user_id: int):
                 "date": _iso(row["submitted_at"] or row["end_time"] or row["start_time"]),
                 "duration": _duration_label(row["duration_minutes"]),
                 "status": status,
-                "score": correct_answers,
-                "rawScore": _score_value(row["score"]),
-                "correctAnswers": correct_answers,
+                "score": visible_score,
+                "rawScore": visible_score,
+                "correctAnswers": correct_answers if allow_view_details else None,
                 "totalQuestions": total_questions,
                 "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
                 "scoreVisible": score_visible,
                 "allowViewDetails": allow_view_details,
                 "attemptNumber": row["attempt_no"],
                 "maxAttempts": row["max_attempt"],
+                "attemptStatus": row["attempt_status"],
+                "terminated": row["attempt_status"] == "terminated",
             })
 
         return results
@@ -165,14 +178,14 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         a.start_time,
         a.end_time,
         a.submitted_at,
+        a.status AS attempt_status,
         e.title,
         e.description,
         e.duration_minutes,
         e.result_visibility,
         COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
         COUNT(DISTINCT aq.question_id) AS total_questions,
-        COALESCE(SUM(CASE WHEN o.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_answers,
-        COALESCE(SUM(CASE WHEN q.question_type = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
+        COALESCE(SUM(CASE WHEN COALESCE(aq.question_type_snapshot, q.question_type) = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
     FROM attempt a
     JOIN exam e
         ON e.exam_id = a.exam_id
@@ -185,8 +198,6 @@ def get_student_result_detail(user_id: int, attempt_id: int):
     LEFT JOIN mcq_answers ma
         ON ma.attempt_id = aq.attempt_id
         AND ma.question_id = aq.question_id
-    LEFT JOIN options o
-        ON o.options_id = ma.selected_option_id
     LEFT JOIN essay_answers ea
         ON ea.attempt_id = aq.attempt_id
         AND ea.question_id = aq.question_id
@@ -201,6 +212,7 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         a.start_time,
         a.end_time,
         a.submitted_at,
+        a.status,
         e.title,
         e.description,
         e.duration_minutes,
@@ -219,7 +231,6 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             row["result_visibility"],
             pending_essay_count,
         )
-        correct_answers = int(row["correct_answers"] or 0)
         total_questions = int(row["total_questions"] or 0)
 
         result = {
@@ -232,17 +243,20 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             "duration": _duration_label(row["duration_minutes"]),
             "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
             "status": status,
-            "score": correct_answers,
-            "rawScore": _score_value(row["score"]),
-            "correctAnswers": correct_answers,
+            "score": _score_value(row["score"]) if score_visible else None,
+            "rawScore": _score_value(row["score"]) if score_visible else None,
+            "correctAnswers": None,
             "totalQuestions": total_questions,
             "scoreVisible": score_visible,
             "allowViewDetails": allow_view_details,
+            "attemptStatus": row["attempt_status"],
+            "terminated": row["attempt_status"] == "terminated",
             "questions": [],
         }
 
         if allow_view_details:
             result["questions"] = _get_attempt_questions(cursor, row["attempt_id"])
+            result["correctAnswers"] = sum(1 for question in result["questions"] if question["isCorrect"])
 
         return result
     finally:
@@ -259,9 +273,11 @@ def _get_attempt_questions(cursor, attempt_id: int):
         q.question_type,
         q.subject_id,
         aq.question_point,
+        aq.question_text_snapshot,
+        aq.question_type_snapshot,
+        aq.question_point_snapshot,
+        aq.options_snapshot,
         ma.selected_option_id,
-        selected.options_text AS student_mcq_answer,
-        selected.is_correct AS selected_is_correct,
         ea.answer_text AS essay_answer,
         ea.score AS essay_score
     FROM attempt_question aq
@@ -272,8 +288,6 @@ def _get_attempt_questions(cursor, attempt_id: int):
     LEFT JOIN mcq_answers ma
         ON ma.attempt_id = aq.attempt_id
         AND ma.question_id = aq.question_id
-    LEFT JOIN options selected
-        ON selected.options_id = ma.selected_option_id
     LEFT JOIN essay_answers ea
         ON ea.attempt_id = aq.attempt_id
         AND ea.question_id = aq.question_id
@@ -292,40 +306,60 @@ def _get_attempt_questions(cursor, attempt_id: int):
     questions = []
 
     for row in rows:
-        question_type = row["question_type"]
+        question_type = row["question_type_snapshot"] or row["question_type"]
+        question_text = row["question_text_snapshot"] or row["question_text"]
+        points = row["question_point_snapshot"]
+        if points is None:
+            points = row["question_point"]
         if question_type == "essay":
             questions.append({
                 "id": row["question_id"],
                 "type": "essay",
                 "topic": row["subject_id"],
                 "isCorrect": row["essay_score"] is not None and int(row["essay_score"] or 0) > 0,
-                "question": row["question_text"],
+                "question": question_text,
                 "studentAnswer": row["essay_answer"],
                 "correctAnswer": None,
-                "points": row["question_point"],
+                "points": points,
                 "score": row["essay_score"],
             })
             continue
 
-        cursor.execute(options_query, (row["question_id"],))
-        option_rows = cursor.fetchall()
-        options = [option["options_text"] for option in option_rows]
-        correct_answer = next(
-            (option["options_text"] for option in option_rows if option["is_correct"]),
-            None,
-        )
+        snapshot = row["options_snapshot"]
+        if snapshot is not None:
+            option_rows = _snapshot_options(snapshot)
+            options = [option["text"] for option in option_rows]
+            selected = next(
+                (option for option in option_rows if int(option["id"]) == int(row["selected_option_id"])),
+                None,
+            ) if row["selected_option_id"] is not None else None
+            correct = next((option for option in option_rows if option.get("isCorrect")), None)
+            student_answer = selected["text"] if selected else None
+            correct_answer = correct["text"] if correct else None
+            selected_is_correct = bool(selected and selected.get("isCorrect"))
+        else:
+            cursor.execute(options_query, (row["question_id"],))
+            option_rows = cursor.fetchall()
+            options = [option["options_text"] for option in option_rows]
+            correct_answer = next((option["options_text"] for option in option_rows if option["is_correct"]), None)
+            selected = next(
+                (option for option in option_rows if row["selected_option_id"] is not None and int(option["options_id"]) == int(row["selected_option_id"])),
+                None,
+            )
+            student_answer = selected["options_text"] if selected else None
+            selected_is_correct = bool(selected and selected["is_correct"])
 
         questions.append({
             "id": row["question_id"],
             "type": "mcq",
             "topic": row["subject_id"],
-            "isCorrect": bool(row["selected_is_correct"]),
-            "question": row["question_text"],
+            "isCorrect": selected_is_correct,
+            "question": question_text,
             "options": options,
-            "studentAnswer": row["student_mcq_answer"],
+            "studentAnswer": student_answer,
             "correctAnswer": correct_answer,
-            "points": row["question_point"],
-            "score": row["question_point"] if row["selected_is_correct"] else 0,
+            "points": points,
+            "score": points if selected_is_correct else 0,
         })
 
     return questions

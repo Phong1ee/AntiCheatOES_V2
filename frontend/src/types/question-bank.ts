@@ -55,9 +55,8 @@ export interface QuestionBankItem {
 }
 
 export interface QuestionDetail extends QuestionBankItem {
-  created_by?: number | null;
+  created_by?: string | null;
   creator?: {
-    id: number;
     school_id: string;
     full_name: string;
   } | null;

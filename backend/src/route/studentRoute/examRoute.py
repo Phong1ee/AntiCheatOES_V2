@@ -10,6 +10,8 @@ class VerifyCodeRequest(BaseModel):
     code: str
 
 class SubmitAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     questionId: int
     selectedOptionId: int | None = None
     answerText: str | None = None
@@ -19,6 +21,22 @@ class SubmitExamRequest(BaseModel):
 
     attemptId: int = Field(alias="attempt_id")
     answers: list[SubmitAnswerRequest]
+    timeSpentSeconds: int | None = None
+
+
+class AutoSaveAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selectedOptionId: int | None = None
+    answerText: str | None = None
+
+
+class TerminateAttemptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+    violationType: str | None = None
+    answers: list[SubmitAnswerRequest] = []
     timeSpentSeconds: int | None = None
 
 
@@ -118,6 +136,75 @@ async def submit_exam(
         if detail in {"Only students can submit exams", "Attempt does not belong to student"}:
             raise HTTPException(status_code=403, detail=detail)
         if detail in {"User not found", "Attempt not found"}:
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+
+@router.put("/{exam_id}/attempts/{attempt_id}/answers/{question_id}")
+async def save_answer(
+    exam_id: int,
+    attempt_id: int,
+    question_id: int,
+    request: AutoSaveAnswerRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """Persist the student's latest answer for one attempt question."""
+    try:
+        return ExamController.saveAnswer(
+            current_user["school_id"], current_user["role"], exam_id, attempt_id,
+            question_id, request.model_dump(exclude_none=True),
+        )
+    except Exception as e:
+        detail = str(e)
+        if detail in {"Only students can manage exam attempts", "Attempt does not belong to student"}:
+            raise HTTPException(status_code=403, detail=detail)
+        if detail in {"User not found", "Exam not found or not assigned to student"}:
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+
+@router.post("/{exam_id}/attempts/{attempt_id}/terminate")
+async def terminate_attempt(
+    exam_id: int,
+    attempt_id: int,
+    request: TerminateAttemptRequest,
+    current_user: dict = Depends(verify_token),
+):
+    """Finalize an attempt when an anti-cheat policy terminates it."""
+    try:
+        return ExamController.terminateAttempt(
+            current_user["school_id"], current_user["role"], exam_id, attempt_id,
+            request.reason, request.violationType,
+            [answer.model_dump(exclude_none=True) for answer in request.answers],
+        )
+    except Exception as e:
+        detail = str(e)
+        if detail in {"Only students can manage exam attempts", "Attempt does not belong to student"}:
+            raise HTTPException(status_code=403, detail=detail)
+        if detail in {"User not found", "Exam not found or not assigned to student", "Attempt not found"}:
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+
+@router.get("/{exam_id}/attempts/{attempt_id}")
+async def restore_attempt(
+    exam_id: int,
+    attempt_id: int,
+    current_user: dict = Depends(verify_token),
+):
+    """Read an owned attempt snapshot without changing the attempt."""
+    try:
+        return ExamController.restoreAttempt(
+            current_user["school_id"],
+            current_user["role"],
+            exam_id,
+            attempt_id,
+        )
+    except Exception as e:
+        detail = str(e)
+        if detail in {"Only students can view assigned exams", "Attempt does not belong to student"}:
+            raise HTTPException(status_code=403, detail=detail)
+        if detail == "Exam not found or not assigned to student":
             raise HTTPException(status_code=404, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
 

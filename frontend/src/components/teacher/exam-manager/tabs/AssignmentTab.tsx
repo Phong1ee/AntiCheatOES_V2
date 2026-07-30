@@ -1,254 +1,253 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../../ui/card';
-import { Label } from '../../../ui/label';
-import { Input } from '../../../ui/input';
-import { Button } from '../../../ui/button';
-import { Badge } from '../../../ui/badge';
-import { Checkbox } from '../../../ui/checkbox';
-import { Switch } from '../../../ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/select';
-import {
-  Users,
-  Link as LinkIcon,
-  Lock,
-  Copy,
-  Send,
-  Search,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, RefreshCw, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface Student {
-  id: string;
-  name: string;
-  email: string;
-  class: string;
+import { teacherExamService } from '../../../../services/teacher-exam.service';
+import type { AssignmentOptions } from '../../../../types/teacher-exam';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../../ui/alert-dialog';
+import { Badge } from '../../../ui/badge';
+import { Button } from '../../../ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Checkbox } from '../../../ui/checkbox';
+import { Input } from '../../../ui/input';
+import { Label } from '../../../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
+
+interface AssignmentTabProps {
+  examId: string | null;
 }
 
-const mockStudents: Student[] = [
-  { id: '1', name: 'Alice Johnson', email: 'alice@example.com', class: 'CS301' },
-  { id: '2', name: 'Bob Smith', email: 'bob@example.com', class: 'CS301' },
-  { id: '3', name: 'Carol Davis', email: 'carol@example.com', class: 'CS301' },
-  { id: '4', name: 'David Wilson', email: 'david@example.com', class: 'CS301' },
-  { id: '5', name: 'Emma Brown', email: 'emma@example.com', class: 'CS301' },
-];
+export function AssignmentTab({ examId }: AssignmentTabProps) {
+  const [data, setData] = useState<AssignmentOptions | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [originalIds, setOriginalIds] = useState<Set<string>>(new Set());
+  const [classFilter, setClassFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
 
-export function AssignmentTab() {
-  const [selectedClass, setSelectedClass] = useState('all');
-  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [examLink, setExamLink] = useState('https://oes.edu/exam/EXAM-ABC123');
-  const [enablePassword, setEnablePassword] = useState(false);
-  const [examPassword, setExamPassword] = useState('');
-  const [restrictIP, setRestrictIP] = useState(false);
-  const [allowedIP, setAllowedIP] = useState('');
+  const load = useCallback(async () => {
+    if (!examId || examId.startsWith('new-')) {
+      setData(null);
+      setSelectedIds(new Set());
+      setOriginalIds(new Set());
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await teacherExamService.getAssignmentOptions(Number(examId));
+      const assigned = new Set(
+        response.students.filter((student) => student.assigned).map((student) => student.school_id),
+      );
+      setData(response);
+      setSelectedIds(assigned);
+      setOriginalIds(new Set(assigned));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load assignment options.');
+    } finally {
+      setLoading(false);
+    }
+  }, [examId]);
 
-  const filteredStudents = mockStudents
-    .filter((s) => selectedClass === 'all' || s.class === selectedClass)
-    .filter(
-      (s) =>
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.email.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+  useEffect(() => {
+    setClassFilter('all');
+    setSearch('');
+    void load();
+  }, [load]);
 
-  const toggleStudent = (id: string) => {
-    setSelectedStudents((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
-    );
+  const visibleStudents = useMemo(() => {
+    const normalized = search.trim().toLowerCase();
+    return (data?.students ?? []).filter((student) => {
+      const matchesClass = classFilter === 'all' || student.class_ids.includes(Number(classFilter));
+      const matchesSearch = !normalized
+        || student.full_name.toLowerCase().includes(normalized)
+        || student.school_id.toLowerCase().includes(normalized)
+        || student.email.toLowerCase().includes(normalized);
+      return matchesClass && matchesSearch;
+    });
+  }, [classFilter, data, search]);
+
+  const visibleSelectedCount = visibleStudents.filter((student) => selectedIds.has(student.school_id)).length;
+  const allVisibleSelected = visibleStudents.length > 0 && visibleSelectedCount === visibleStudents.length;
+  const selectAllState = allVisibleSelected ? true : visibleSelectedCount > 0 ? 'indeterminate' : false;
+  const removedCount = [...originalIds].filter((id) => !selectedIds.has(id)).length;
+  const dirty = selectedIds.size !== originalIds.size
+    || [...selectedIds].some((id) => !originalIds.has(id));
+
+  const toggleStudent = (schoolId: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(schoolId)) next.delete(schoolId);
+      else next.add(schoolId);
+      return next;
+    });
   };
 
-  const selectAll = () => {
-    if (selectedStudents.length === filteredStudents.length) {
-      setSelectedStudents([]);
-    } else {
-      setSelectedStudents(filteredStudents.map((s) => s.id));
+  const toggleVisible = (checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      visibleStudents.forEach((student) => {
+        if (checked) next.add(student.school_id);
+        else next.delete(student.school_id);
+      });
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (!examId) return;
+    try {
+      setSaving(true);
+      const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds]);
+      toast.success(
+        `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
+      );
+      setConfirmRemoval(false);
+      await load();
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : 'Unable to save assignments.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(examLink);
-    toast.success('Exam link copied to clipboard');
-  };
+  if (!examId || examId.startsWith('new-')) {
+    return <div className="rounded-xl border bg-white p-8 text-center text-gray-500">Save the exam before assigning students.</div>;
+  }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Exam Link */}
-      <Card className="shadow-md rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-gray-800">
-            <LinkIcon className="size-5 text-teal-600" />
-            Exam Link
-          </CardTitle>
-          <CardDescription>Share this link with students to access the exam</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input value={examLink} readOnly className="flex-1" />
-            <Button onClick={copyLink} variant="outline">
-              <Copy className="size-4 mr-2" />
-              Copy
-            </Button>
+    <Card className="mx-auto max-w-5xl border-0 shadow-md">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Users className="size-5 text-teal-600" />Assign Students</CardTitle>
+        <CardDescription>
+          Class selection is a bulk action over current membership. Future class members are not assigned automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading && !data ? (
+          <div className="flex min-h-56 items-center justify-center gap-2 text-gray-600"><Loader2 className="size-5 animate-spin" />Loading classes and students...</div>
+        ) : error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-center text-red-700">
+            <p>{error}</p>
+            <Button variant="outline" className="mt-3" onClick={() => void load()}><RefreshCw className="mr-2 size-4" />Retry</Button>
           </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="password" className="flex items-center gap-2">
-                  <Lock className="size-4 text-teal-600" />
-                  Require Password
-                </Label>
-                <p className="text-sm text-gray-500">Students must enter password to start exam</p>
+        ) : !data?.classes.length ? (
+          <div className="rounded-lg border p-8 text-center text-gray-500">No classes are assigned to your teacher account.</div>
+        ) : !data.students.length ? (
+          <div className="rounded-lg border p-8 text-center text-gray-500">Your classes currently have no students.</div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, school ID, or email" className="pl-10" />
               </div>
-              <Switch
-                id="password"
-                checked={enablePassword}
-                onCheckedChange={setEnablePassword}
-              />
-            </div>
-
-            {enablePassword && (
-              <Input
-                value={examPassword}
-                onChange={(e) => setExamPassword(e.target.value)}
-                placeholder="Enter exam password"
-                className="max-w-sm"
-              />
-            )}
-          </div>
-
-          {/* <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="restrict-ip">Restrict by IP Address</Label>
-                <p className="text-sm text-gray-500">
-                  Only allow access from specific IP addresses
-                </p>
-              </div>
-              <Switch id="restrict-ip" checked={restrictIP} onCheckedChange={setRestrictIP} />
-            </div> */}
-
-          {/* {restrictIP && (
-            <Input
-              value={allowedIP}
-              onChange={(e) => setAllowedIP(e.target.value)}
-              placeholder="Enter IP addresses (comma-separated)"
-              className="max-w-sm"
-            />
-          )} */}
-          {/* </div> */}
-        </CardContent>
-      </Card>
-
-      {/* Assign to Students */}
-      <Card className="shadow-md rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-gray-800">
-            <Users className="size-5 text-teal-600" />
-            Assign to Students
-          </CardTitle>
-          <CardDescription>Select students who can access this exam</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Filters */}
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-              <Input
-                placeholder="Search students..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={selectedClass} onValueChange={setSelectedClass}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select class" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
-                <SelectItem value="CS301">CS301 - Fall 2025</SelectItem>
-                <SelectItem value="CS201">CS201 - Fall 2025</SelectItem>
-                <SelectItem value="CS102">CS102 - Fall 2025</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Select All */}
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="select-all"
-                checked={
-                  filteredStudents.length > 0 &&
-                  selectedStudents.length === filteredStudents.length
-                }
-                onCheckedChange={selectAll}
-              />
-              <Label htmlFor="select-all" className="cursor-pointer">
-                Select All ({filteredStudents.length} students)
-              </Label>
-            </div>
-            <span className="text-sm text-gray-600">{selectedStudents.length} selected</span>
-          </div>
-
-          {/* Student List */}
-          <div className="border border-gray-200 rounded-xl max-h-[400px] overflow-y-auto">
-            {filteredStudents.map((student) => (
-              <div
-                key={student.id}
-                className="flex items-center justify-between p-4 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors"
+              <Select
+                value={classFilter}
+                onValueChange={(value) => {
+                  setClassFilter(value);
+                  if (value !== 'all') {
+                    const classId = Number(value);
+                    setSelectedIds((current) => {
+                      const next = new Set(current);
+                      data.students
+                        .filter((student) => student.class_ids.includes(classId))
+                        .forEach((student) => next.add(student.school_id));
+                      return next;
+                    });
+                  }
+                }}
               >
-                <div className="flex items-center gap-3 flex-1">
-                  <Checkbox
-                    id={`student-${student.id}`}
-                    checked={selectedStudents.includes(student.id)}
-                    onCheckedChange={() => toggleStudent(student.id)}
-                  />
-                  <div className="flex-1">
-                    <p className="text-sm text-gray-800">{student.name}</p>
-                    <p className="text-xs text-gray-500">{student.email}</p>
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    {student.class}
-                  </Badge>
-                </div>
-              </div>
-            ))}
-
-            {filteredStudents.length === 0 && (
-              <div className="p-8 text-center text-gray-500">
-                <p>No students found</p>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Send Notification */}
-      <Card className="shadow-md rounded-2xl border-0 bg-gradient-to-r from-teal-50 to-blue-50">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h4 className="text-gray-800 mb-1">Send Notification to Students</h4>
-              <p className="text-sm text-gray-600">
-                Notify {selectedStudents.length} selected students about this exam
-              </p>
+                <SelectTrigger className="sm:w-64"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All classes</SelectItem>
+                  {data.classes.map((courseClass) => (
+                    <SelectItem key={courseClass.class_id} value={String(courseClass.class_id)}>
+                      {courseClass.class_name} ({courseClass.student_count})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Button
-              disabled={selectedStudents.length === 0}
-              className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
-            >
-              <Send className="size-4 mr-2" />
-              Send Notification
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="select-visible"
+                  checked={selectAllState}
+                  onCheckedChange={(checked) => toggleVisible(checked === true)}
+                />
+                <Label htmlFor="select-visible">Select all visible ({visibleStudents.length})</Label>
+              </div>
+              <div className="flex gap-2 text-sm">
+                <Badge variant="outline">{selectedIds.size} selected</Badge>
+                <Badge variant="outline">{originalIds.size} assigned</Badge>
+                {dirty && <Badge className="bg-amber-100 text-amber-700">Unsaved changes</Badge>}
+              </div>
+            </div>
+
+            <div className="max-h-[430px] overflow-y-auto rounded-xl border">
+              {visibleStudents.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">No students match the current filters.</div>
+              ) : visibleStudents.map((student) => (
+                <label key={student.school_id} className="flex cursor-pointer items-start gap-3 border-b p-4 last:border-0 hover:bg-gray-50">
+                  <Checkbox checked={selectedIds.has(student.school_id)} onCheckedChange={() => toggleStudent(student.school_id)} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800">{student.full_name}</span>
+                      <Badge variant="outline">{student.school_id}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">{student.email}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {student.class_names.map((name) => <Badge key={name} variant="secondary">{name}</Badge>)}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                disabled={!dirty || saving}
+                onClick={() => removedCount > 0 ? setConfirmRemoval(true) : void save()}
+                className="bg-gradient-to-r from-teal-500 to-blue-600"
+              >
+                {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                Save Assignments
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+
+      <AlertDialog open={confirmRemoval} onOpenChange={setConfirmRemoval}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {removedCount} existing assignment{removedCount === 1 ? '' : 's'}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Students with an existing attempt cannot be removed; the server will reject the synchronization without partial changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={saving} onClick={(event) => { event.preventDefault(); void save(); }}>
+              Confirm and Save
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   );
 }

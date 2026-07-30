@@ -39,7 +39,7 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
   subjects: [],
   creators: [],
   statuses: [],
-  current_teacher_id: 0,
+  current_teacher_school_id: '',
 };
 
 export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
@@ -84,7 +84,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
           difficulty: difficulty === 'all' ? undefined : difficulty,
           subject_id: subjectId === 'all' ? undefined : subjectId,
           status: questionStatus === 'all' ? undefined : questionStatus,
-          created_by: createdBy === 'all' ? undefined : Number(createdBy),
+          created_by: createdBy === 'all' ? undefined : createdBy,
           page,
           page_size: pageSize,
         });
@@ -192,7 +192,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
             <Select value={difficulty} onValueChange={(value: QuestionDifficulty | 'all') => { setDifficulty(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Difficulty" /></SelectTrigger><SelectContent><SelectItem value="all">All Difficulties</SelectItem><SelectItem value="easy">Easy</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="hard">Hard</SelectItem></SelectContent></Select>
             <Select value={subjectId} onValueChange={(value) => { setSubjectId(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Subject" /></SelectTrigger><SelectContent><SelectItem value="all">All Subjects</SelectItem>{metadata.subjects.map((subject) => <SelectItem key={subject.subject_id} value={subject.subject_id}>{subject.subject_id} · {subject.subject_name}</SelectItem>)}</SelectContent></Select>
             <Select value={questionStatus} onValueChange={(value: QuestionStatus | 'all') => { setQuestionStatus(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="all">All Statuses</SelectItem>{metadata.statuses.map((status) => <SelectItem key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</SelectItem>)}</SelectContent></Select>
-            <Select value={createdBy} onValueChange={(value) => { setCreatedBy(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Created By" /></SelectTrigger><SelectContent><SelectItem value="all">All Creators</SelectItem>{metadata.creators.map((creator) => <SelectItem key={creator.id} value={String(creator.id)}>{creator.id === metadata.current_teacher_id ? `Me · ${creator.full_name}` : creator.full_name}</SelectItem>)}</SelectContent></Select>
+            <Select value={createdBy} onValueChange={(value) => { setCreatedBy(value); resetPage(); }}><SelectTrigger><SelectValue placeholder="Created By" /></SelectTrigger><SelectContent><SelectItem value="all">All Creators</SelectItem>{metadata.creators.map((creator) => <SelectItem key={creator.school_id} value={creator.school_id}>{creator.school_id === metadata.current_teacher_school_id ? `Me · ${creator.full_name}` : creator.full_name}</SelectItem>)}</SelectContent></Select>
           </div>
           <div className="question-pool-modal-header items-center justify-between gap-2">
             <Button variant="outline" size="sm" onClick={togglePageSelection} disabled={loading || importing || selectablePageIds.length === 0}>{allPageSelected ? 'Deselect Current Page' : 'Select All on Current Page'}</Button>
@@ -218,7 +218,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
                 ? `${question.subject.subject_id} · ${question.subject.subject_name}`
                 : '';
               const creatorLabel = question.creator
-                ? `By ${question.creator.id === metadata.current_teacher_id ? 'Me' : question.creator.full_name}`
+                ? `By ${question.creator.school_id === metadata.current_teacher_school_id ? 'Me' : question.creator.full_name}`
                 : '';
               return <Card key={question.question_id} className={selected ? 'border-teal-500 bg-teal-50/30' : ''}><CardContent className="flex min-w-0 items-start gap-3 p-3 sm:gap-4 sm:p-4">
                 <input type="checkbox" checked={selected} disabled={alreadyAdded || importing} onChange={() => toggleQuestion(question.question_id)} className="mt-1 size-4 shrink-0" aria-label={`Select question ${question.question_id}`} />

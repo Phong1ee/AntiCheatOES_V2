@@ -120,7 +120,7 @@ class AdminUserManagementTests(unittest.TestCase):
         subject = Subject(subject_id="MATH", subject_name="Math", subject_description="Math subject")
         self.db.add(subject)
         self.db.flush()
-        self.db.add(TeacherSubject(teacher_id=self.teacher.id, subject_id=subject.subject_id, is_active=True))
+        self.db.add(TeacherSubject(teacher_id=self.teacher.school_id, subject_id=subject.subject_id, is_active=True))
         self.db.commit()
         update_user(
             self.teacher.id,
@@ -240,7 +240,7 @@ class AdminUserManagementTests(unittest.TestCase):
         subject = Subject(subject_id="PHY", subject_name="Physics", subject_description="Physics subject")
         self.db.add(subject)
         self.db.flush()
-        self.db.add(TeacherSubject(teacher_id=self.teacher.id, subject_id=subject.subject_id, is_active=True))
+        self.db.add(TeacherSubject(teacher_id=self.teacher.school_id, subject_id=subject.subject_id, is_active=True))
         self.db.commit()
         token = AuthController.create_token(self.teacher.school_id, "teacher")
         delete_user(self.teacher.id, self.current_admin, None, self.db)

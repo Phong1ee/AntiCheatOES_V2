@@ -1,14 +1,39 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
-from src.a_db_config import Exam, ExamQuestion, Question, StudentExam, Subject, User
+from src.a_db_config import (
+    Attempt,
+    CourseClass,
+    Exam,
+    ExamQuestion,
+    Question,
+    StudentClass,
+    StudentExam,
+    Subject,
+    User,
+    UserRole,
+)
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
 
 router = APIRouter()
+
+
+class AssignmentSyncRequest(BaseModel):
+    class_ids: list[int] = Field(default_factory=list)
+    student_ids: list[str] = Field(default_factory=list)
+    excluded_student_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("class_ids", "student_ids", "excluded_student_ids")
+    @classmethod
+    def unique_values(cls, value: list):
+        if len(value) != len(set(value)):
+            raise ValueError("Assignment identifiers must not contain duplicates")
+        return value
 
 
 def get_exam_status(exam: Exam, now_time: datetime | None = None) -> str:
@@ -36,6 +61,64 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
     if exam.manage_by != school_id:
         raise HTTPException(status_code=403, detail="You do not manage this exam")
     return exam
+
+
+def _assignment_options(db: Session, exam_id: int, teacher_school_id: str) -> dict:
+    _owned_exam(db, exam_id, teacher_school_id)
+    classes = (
+        db.query(CourseClass)
+        .options(
+            selectinload(CourseClass.subject),
+            selectinload(CourseClass.student_classes).selectinload(StudentClass.student),
+        )
+        .filter(CourseClass.teacher_id == teacher_school_id)
+        .order_by(CourseClass.class_name, CourseClass.class_id)
+        .all()
+    )
+    assigned_ids = {
+        row[0]
+        for row in db.query(StudentExam.student_id)
+        .filter(StudentExam.exam_id == exam_id)
+        .all()
+    }
+    student_map: dict[str, dict] = {}
+    for course_class in classes:
+        for membership in course_class.student_classes:
+            student = membership.student
+            if not student or student.role != UserRole.student:
+                continue
+            item = student_map.setdefault(
+                student.school_id,
+                {
+                    "school_id": student.school_id,
+                    "full_name": student.full_name,
+                    "email": student.email,
+                    "class_ids": [],
+                    "class_names": [],
+                    "assigned": student.school_id in assigned_ids,
+                },
+            )
+            item["class_ids"].append(course_class.class_id)
+            item["class_names"].append(course_class.class_name)
+    return {
+        "classes": [
+            {
+                "class_id": course_class.class_id,
+                "class_name": course_class.class_name,
+                "subject_id": course_class.subject_id,
+                "student_count": len(
+                    {
+                        membership.student_id
+                        for membership in course_class.student_classes
+                        if membership.student and membership.student.role == UserRole.student
+                    }
+                ),
+            }
+            for course_class in classes
+        ],
+        "students": list(student_map.values()),
+        "assigned_count": len(assigned_ids),
+    }
 
 
 def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
@@ -102,6 +185,128 @@ def get_teacher_exams(
     )
     now = datetime.now()
     return [_serialize_exam(db, exam, now) for exam in exams]
+
+
+@router.get("/exams/{exam_id}/assignment-options")
+def get_assignment_options(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    return _assignment_options(db, exam_id, current_user["school_id"])
+
+
+@router.get("/exams/{exam_id}/assignments")
+def get_assignments(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    options = _assignment_options(db, exam_id, current_user["school_id"])
+    assigned = [student["school_id"] for student in options["students"] if student["assigned"]]
+    return {"exam_id": exam_id, "student_ids": assigned, "assigned_count": len(assigned)}
+
+
+@router.put("/exams/{exam_id}/assignments")
+def sync_assignments(
+    exam_id: int,
+    request: AssignmentSyncRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    teacher_school_id = current_user["school_id"]
+    try:
+        _owned_exam(db, exam_id, teacher_school_id)
+        owned_classes = (
+            db.query(CourseClass)
+            .filter(
+                CourseClass.teacher_id == teacher_school_id,
+                CourseClass.class_id.in_(request.class_ids or [-1]),
+            )
+            .all()
+        )
+        if len(owned_classes) != len(request.class_ids):
+            raise HTTPException(status_code=403, detail="One or more classes are not taught by this teacher")
+
+        roster_ids = {
+            row[0]
+            for row in db.query(StudentClass.student_id)
+            .join(CourseClass, CourseClass.class_id == StudentClass.class_id)
+            .join(User, User.school_id == StudentClass.student_id)
+            .filter(
+                CourseClass.teacher_id == teacher_school_id,
+                User.role == UserRole.student,
+            )
+            .distinct()
+            .all()
+        }
+        submitted_ids = set(request.student_ids) | set(request.excluded_student_ids)
+        invalid_ids = sorted(submitted_ids - roster_ids)
+        if invalid_ids:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "Students must belong to a class taught by this teacher", "student_ids": invalid_ids},
+            )
+        class_student_ids = {
+            row[0]
+            for row in db.query(StudentClass.student_id)
+            .filter(StudentClass.class_id.in_(request.class_ids or [-1]))
+            .distinct()
+            .all()
+        }
+        desired_ids = (class_student_ids | set(request.student_ids)) - set(request.excluded_student_ids)
+        existing_ids = {
+            row[0]
+            for row in db.query(StudentExam.student_id)
+            .filter(StudentExam.exam_id == exam_id)
+            .all()
+        }
+        added_ids = desired_ids - existing_ids
+        removed_ids = existing_ids - desired_ids
+        blocked_ids = {
+            row[0]
+            for row in db.query(Attempt.student_id)
+            .filter(Attempt.exam_id == exam_id, Attempt.student_id.in_(removed_ids or [""]))
+            .distinct()
+            .all()
+        }
+        if blocked_ids:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Assignments with existing attempts cannot be removed",
+                    "student_ids": sorted(blocked_ids),
+                },
+            )
+        if removed_ids:
+            db.query(StudentExam).filter(
+                StudentExam.exam_id == exam_id,
+                StudentExam.student_id.in_(removed_ids),
+            ).delete(synchronize_session=False)
+        db.add_all(
+            StudentExam(exam_id=exam_id, student_id=student_id)
+            for student_id in sorted(added_ids)
+        )
+        db.commit()
+        return {
+            "added_count": len(added_ids),
+            "removed_count": len(removed_ids),
+            "unchanged_count": len(existing_ids & desired_ids),
+            "final_count": len(desired_ids),
+            "student_ids": sorted(desired_ids),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/get_exams")

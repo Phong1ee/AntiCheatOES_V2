@@ -1,19 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { CheckCircle2, Circle, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle } from 'lucide-react';
 import { Button } from '../ui/button';
-
-interface Question {
-  id: number;
-  text: string;
-  type: 'multiple-choice' | 'true-false' | 'essay';
-  options?: string[];
-}
+import type { StudentAnswers, StudentQuestion } from '../../types/student-exam';
 
 interface QuestionPanelProps {
-  questions: Question[];
+  questions: StudentQuestion[];
   currentQuestion: number;
-  answers: Record<number, string>;
+  answers: StudentAnswers;
+  isOnline: boolean;
+  saveStatus: string;
   onQuestionSelect: (index: number) => void;
   answeredCount: number;
   unansweredQuestions: number[];
@@ -23,12 +19,12 @@ export function QuestionPanel({
   questions,
   currentQuestion,
   answers,
+  isOnline,
+  saveStatus,
   onQuestionSelect,
   answeredCount,
   unansweredQuestions,
 }: QuestionPanelProps) {
-  const isOnline = true; // Mock online status
-
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
       <div className="sticky top-0 bg-white border-b border-gray-200 p-4 z-10">
@@ -46,7 +42,7 @@ export function QuestionPanel({
           </div>
         </div>
 
-        {/* Network Status */}
+        {/* Connection and answer-save feedback */}
         <div
           className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
             isOnline ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
@@ -55,6 +51,26 @@ export function QuestionPanel({
           {isOnline ? <Wifi className="size-4" /> : <WifiOff className="size-4" />}
           <span className="text-sm">{isOnline ? 'Online' : 'Offline'}</span>
         </div>
+        {saveStatus !== 'Ready' && (
+          <div
+            className={`mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+              saveStatus === 'Saved'
+                ? 'bg-emerald-50 text-emerald-700'
+                : saveStatus === 'Saving'
+                ? 'bg-sky-50 text-sky-700'
+                : 'bg-amber-50 text-amber-700'
+            }`}
+          >
+            {saveStatus === 'Saved' ? (
+              <CheckCircle2 className="size-4" />
+            ) : saveStatus === 'Saving' ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <AlertCircle className="size-4" />
+            )}
+            <span>{saveStatus === 'Saved' ? 'Saved successfully' : saveStatus}</span>
+          </div>
+        )}
       </div>
 
       {/* Question Grid */}

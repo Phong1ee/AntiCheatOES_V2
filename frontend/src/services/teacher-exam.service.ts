@@ -1,5 +1,11 @@
 import { apiClient } from "./api-client";
-import type { TeacherExamApi, TeacherExamRequest, TeacherSubject } from "../types/teacher-exam";
+import type {
+  AssignmentOptions,
+  AssignmentSyncResult,
+  TeacherExamApi,
+  TeacherExamRequest,
+  TeacherSubject,
+} from "../types/teacher-exam";
 
 interface TeacherOverview {
   subjects: TeacherSubject[];
@@ -28,5 +34,20 @@ export const teacherExamService = {
 
   async delete(examId: number): Promise<void> {
     await apiClient.delete(`/api/teacher/delete_exam/${examId}`);
+  },
+
+  async getAssignmentOptions(examId: number): Promise<AssignmentOptions> {
+    const { data } = await apiClient.get<AssignmentOptions>(
+      `/api/teacher/exams/${examId}/assignment-options`,
+    );
+    return data;
+  },
+
+  async saveAssignments(examId: number, studentIds: string[]): Promise<AssignmentSyncResult> {
+    const { data } = await apiClient.put<AssignmentSyncResult>(
+      `/api/teacher/exams/${examId}/assignments`,
+      { class_ids: [], student_ids: studentIds, excluded_student_ids: [] },
+    );
+    return data;
   },
 };

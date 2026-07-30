@@ -128,8 +128,8 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
     scores = []
     submitted_count = 0
     for _student_exam, user in roster:
-        best = _best_attempt(submitted_by_student.get(user.id, []))
-        if best:
+        attempt = latest_attempts.get(user.id)
+        if attempt and attempt.submitted_at is not None:
             submitted_count += 1
             if best.score is not None:
                 scores.append(float(best.score))
@@ -375,7 +375,7 @@ def get_student_attempt_detail(
     attempt = db.query(Attempt).filter(Attempt.attempt_id == attempt_id, Attempt.exam_id == exam_id).first()
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    student = db.query(User).filter(User.id == attempt.student_id).first()
+    student = db.query(User).filter(User.school_id == attempt.student_id).first()
 
     links = (
         db.query(AttemptQuestion)
@@ -480,7 +480,7 @@ def list_essay_answers(
             & (AttemptQuestion.question_id == EssayAnswer.question_id),
         )
         .join(Question, Question.question_id == EssayAnswer.question_id)
-        .join(User, User.id == Attempt.student_id)
+        .join(User, User.school_id == Attempt.student_id)
         .filter(Attempt.exam_id == exam_id)
         .order_by(User.full_name)
         .all()

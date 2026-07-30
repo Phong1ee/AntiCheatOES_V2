@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from src.a_db_config import (
+    Attempt,
+    AttemptQuestion,
     Chapter,
     ChapterLO,
     ChapterQuestion,
@@ -335,6 +337,13 @@ def _replace_options(db: Session, question: Question, payload: RevisionSnapshotP
         raise HTTPException(status_code=400, detail="An option ID does not belong to this question")
 
     deleted_ids = set(existing) - set(requested_ids)
+    if deleted_ids and (
+        db.query(AttemptQuestion)
+        .join(Attempt, Attempt.attempt_id == AttemptQuestion.attempt_id)
+        .filter(AttemptQuestion.question_id == question.question_id, Attempt.status == "in_progress")
+        .first()
+    ):
+        raise HTTPException(status_code=409, detail="Options cannot be removed while an attempt is in progress")
     if deleted_ids and db.query(MCQAnswer.mcq_answer_id).filter(MCQAnswer.selected_option_id.in_(deleted_ids)).first():
         raise HTTPException(status_code=409, detail="An option is already used by an attempt and cannot be removed")
 
@@ -364,8 +373,8 @@ def _create_snapshot_revision(
     question: Question,
     version_number: int,
     revision_status: str,
-    edited_by: int | None,
-    approved_by: int | None,
+    edited_by: str | None,
+    approved_by: str | None,
     approved_at: datetime | None,
     rejection_reason: str | None,
 ) -> QuestionRevision:
@@ -385,7 +394,7 @@ def _create_snapshot_revision(
 def list_pending_questions(
     search: str | None = None,
     subject_id: str | None = None,
-    teacher_id: int | None = None,
+    teacher_school_id: str | None = None,
     question_type: QuestionTypeLiteral | None = None,
     difficulty: QuestionDifficultyLiteral | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -399,8 +408,8 @@ def list_pending_questions(
     query = _question_query(db).filter(Question.question_status == QuestionStatus.pending)
     if subject_id:
         query = query.filter(Question.subject_id == subject_id)
-    if teacher_id is not None:
-        query = query.filter(Question.created_by == teacher_id)
+    if teacher_school_id is not None:
+        query = query.filter(Question.created_by == teacher_school_id)
     if question_type:
         query = query.filter(Question.question_type == question_type)
     if difficulty:
@@ -451,7 +460,7 @@ def approve_pending_question(
         ).first():
             db.add(_create_snapshot_revision(
                 db, question, _next_version(db, question.question_id), "approved", question.created_by,
-                admin.id, datetime.now(), None,
+                admin.school_id, datetime.now(), None,
             ))
         db.query(QuestionRevision).filter(
             QuestionRevision.question_id == question.question_id,
@@ -488,7 +497,7 @@ def reject_pending_question(
         # revision preserves the reason and reviewer without a schema change.
         db.add(_create_snapshot_revision(
             db, question, _next_version(db, question.question_id), "rejected", question.created_by,
-            admin.id, datetime.now(), reason,
+            admin.school_id, datetime.now(), reason,
         ))
         question.question_status = QuestionStatus.rejected
         db.commit()
@@ -506,7 +515,7 @@ def reject_pending_question(
 def list_pending_revisions(
     search: str | None = None,
     subject_id: str | None = None,
-    editor_id: int | None = None,
+    editor_school_id: str | None = None,
     question_type: QuestionTypeLiteral | None = None,
     difficulty: QuestionDifficultyLiteral | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -520,15 +529,15 @@ def list_pending_revisions(
     query = _revision_query(db).filter(QuestionRevision.question_status == "pending")
     if subject_id:
         query = query.filter(QuestionRevision.subject_id == subject_id)
-    if editor_id is not None:
-        query = query.filter(QuestionRevision.edited_by == editor_id)
+    if editor_school_id is not None:
+        query = query.filter(QuestionRevision.edited_by == editor_school_id)
     if question_type:
         query = query.filter(QuestionRevision.question_type == question_type)
     if difficulty:
         query = query.filter(QuestionRevision.question_difficulties == difficulty)
     if search and search.strip():
         pattern = f"%{search.strip()}%"
-        query = query.outerjoin(User, QuestionRevision.edited_by == User.id).filter(
+        query = query.outerjoin(User, QuestionRevision.edited_by == User.school_id).filter(
             or_(QuestionRevision.question_text.ilike(pattern), User.full_name.ilike(pattern), QuestionRevision.subject_id.ilike(pattern))
         )
     total = query.with_entities(func.count(func.distinct(QuestionRevision.revision_id))).scalar() or 0
@@ -587,7 +596,7 @@ def approve_pending_revision(
         _replace_taxonomy(db, question, chapters, los)
         question.question_status = QuestionStatus.approved
         revision.question_status = "approved"
-        revision.approved_by = admin.id
+        revision.approved_by = admin.school_id
         revision.approved_at = datetime.now()
         revision.rejection_reason = None
         db.commit()
@@ -618,7 +627,7 @@ def reject_pending_revision(
         if _revision_status(revision) != "pending":
             raise HTTPException(status_code=409, detail="Question revision is no longer pending")
         revision.question_status = "rejected"
-        revision.approved_by = admin.id
+        revision.approved_by = admin.school_id
         revision.approved_at = datetime.now()
         revision.rejection_reason = reason
         db.commit()
@@ -744,9 +753,9 @@ def _ensure_not_last_active_admin(db: Session, target: User) -> None:
         )
 
 
-def _deactivate_teacher_subjects(db: Session, user_id: int) -> None:
+def _deactivate_teacher_subjects(db: Session, school_id: str) -> None:
     db.query(TeacherSubject).filter(
-        TeacherSubject.teacher_id == user_id,
+        TeacherSubject.teacher_id == school_id,
         TeacherSubject.is_active.is_(True),
     ).update({TeacherSubject.is_active: False}, synchronize_session=False)
 
@@ -889,7 +898,7 @@ def update_user(
         if payload.role is not None:
             new_role = UserRole(payload.role)
             if _user_role(user) == "teacher" and new_role != UserRole.teacher:
-                _deactivate_teacher_subjects(db, user.id)
+                _deactivate_teacher_subjects(db, user.school_id)
             if _user_role(user) == "admin" and new_role != UserRole.admin:
                 _ensure_not_last_active_admin(db, user)
             user.role = new_role
@@ -947,7 +956,7 @@ def lock_user(
         _ensure_not_last_active_admin(db, user)
         user.is_locked = True
         user.locked_at = datetime.now()
-        user.locked_by = admin.id
+        user.locked_by = admin.school_id
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)
@@ -997,12 +1006,12 @@ def delete_user(
             raise HTTPException(status_code=409, detail="You cannot delete your own account")
         _ensure_not_last_active_admin(db, user)
         if _user_role(user) == "teacher":
-            _deactivate_teacher_subjects(db, user.id)
+            _deactivate_teacher_subjects(db, user.school_id)
         user.deleted_at = datetime.now()
-        user.deleted_by = admin.id
+        user.deleted_by = admin.school_id
         user.is_locked = True
         user.locked_at = datetime.now()
-        user.locked_by = admin.id
+        user.locked_by = admin.school_id
         db.commit()
         return None
     except HTTPException:
@@ -1011,7 +1020,7 @@ def delete_user(
 
 
 class TeacherPermissionPayload(BaseModel):
-    teacher_id: int
+    teacher_school_id: str = Field(min_length=1, max_length=30)
     subject_id: str = Field(min_length=1, max_length=20)
 
 
@@ -1024,8 +1033,8 @@ class ReplaceTeacherPermissionsPayload(BaseModel):
     subject_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
-def _permission_teacher(db: Session, teacher_id: int) -> User:
-    teacher = db.query(User).filter(User.id == teacher_id).first()
+def _permission_teacher(db: Session, teacher_school_id: str) -> User:
+    teacher = db.query(User).filter(User.school_id == teacher_school_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     if _user_role(teacher) != "teacher":
@@ -1044,8 +1053,7 @@ def _permission_subject(db: Session, subject_id: str) -> Subject:
 
 def _serialize_teacher_permission(item: TeacherSubject) -> dict:
     return {
-        "teacher_id": item.teacher_id,
-        "teacher_school_id": item.teacher.school_id,
+        "teacher_school_id": item.teacher_id,
         "teacher_full_name": item.teacher.full_name,
         "teacher_email": item.teacher.email,
         "subject_id": item.subject_id,
@@ -1060,7 +1068,6 @@ def _serialize_teacher_permission(item: TeacherSubject) -> dict:
 
 def _serialize_teacher_permission_set(teacher: User, items: list[TeacherSubject]) -> dict:
     return {
-        "teacher_id": teacher.id,
         "teacher_school_id": teacher.school_id,
         "teacher_full_name": teacher.full_name,
         "teacher_email": teacher.email,
@@ -1080,7 +1087,7 @@ def _serialize_teacher_permission_set(teacher: User, items: list[TeacherSubject]
 
 @router.get("/teacher-permissions")
 def list_teacher_permissions(
-    search: str | None = None, teacher_id: int | None = None, subject_id: str | None = None, is_active: bool | None = None,
+    search: str | None = None, teacher_school_id: str | None = None, subject_id: str | None = None, is_active: bool | None = None,
     current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
 ):
     del role_check
@@ -1089,7 +1096,7 @@ def list_teacher_permissions(
     if search and search.strip():
         term = f"%{search.strip()}%"
         query = query.filter(or_(User.full_name.ilike(term), User.school_id.ilike(term), User.email.ilike(term)))
-    if teacher_id is not None: query = query.filter(TeacherSubject.teacher_id == teacher_id)
+    if teacher_school_id is not None: query = query.filter(TeacherSubject.teacher_id == teacher_school_id)
     if subject_id: query = query.filter(TeacherSubject.subject_id == subject_id)
     if is_active is not None: query = query.filter(TeacherSubject.is_active.is_(is_active))
     return {"items": [_serialize_teacher_permission(item) for item in query.order_by(TeacherSubject.teacher_id, TeacherSubject.subject_id).all()]}
@@ -1099,7 +1106,7 @@ def list_teacher_permissions(
 def list_permission_teachers(current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     _management_admin(db, current_user)
-    return [{"id": user.id, "school_id": user.school_id, "full_name": user.full_name, "email": user.email} for user in db.query(User).filter(User.role == UserRole.teacher, User.deleted_at.is_(None), User.is_locked.is_(False)).order_by(User.full_name, User.id).all()]
+    return [{"school_id": user.school_id, "full_name": user.full_name, "email": user.email} for user in db.query(User).filter(User.role == UserRole.teacher, User.deleted_at.is_(None), User.is_locked.is_(False)).order_by(User.full_name, User.id).all()]
 
 
 @router.get("/teacher-permissions/subjects")
@@ -1109,17 +1116,17 @@ def list_permission_subjects(current_user: dict = Depends(verify_token), role_ch
     return [{"subject_id": subject.subject_id, "subject_name": subject.subject_name} for subject in db.query(Subject).order_by(Subject.subject_name).all()]
 
 
-@router.get("/teachers/{teacher_id}/permissions")
-def list_teacher_subject_permissions(teacher_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+@router.get("/teachers/{teacher_school_id}/permissions")
+def list_teacher_subject_permissions(teacher_school_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     _management_admin(db, current_user)
-    _permission_teacher(db, teacher_id)
-    return {"items": [_serialize_teacher_permission(item) for item in db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher_id).order_by(TeacherSubject.subject_id).all()]}
+    _permission_teacher(db, teacher_school_id)
+    return {"items": [_serialize_teacher_permission(item) for item in db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher_school_id).order_by(TeacherSubject.subject_id).all()]}
 
 
-@router.patch("/teachers/{teacher_id}/permissions")
+@router.patch("/teachers/{teacher_school_id}/permissions")
 def replace_teacher_permissions(
-    teacher_id: int,
+    teacher_school_id: str,
     payload: ReplaceTeacherPermissionsPayload,
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(ADMIN_ONLY),
@@ -1129,7 +1136,7 @@ def replace_teacher_permissions(
     del role_check
     try:
         admin = _management_admin(db, current_user)
-        teacher = _permission_teacher(db, teacher_id)
+        teacher = _permission_teacher(db, teacher_school_id)
         subject_ids = [subject_id.strip() for subject_id in payload.subject_ids]
         if any(not subject_id for subject_id in subject_ids) or len(subject_ids) != len(set(subject_ids)):
             raise HTTPException(status_code=400, detail="Subject IDs must be unique and non-empty")
@@ -1140,7 +1147,7 @@ def replace_teacher_permissions(
         existing = {
             item.subject_id: item
             for item in db.query(TeacherSubject)
-            .filter(TeacherSubject.teacher_id == teacher.id)
+            .filter(TeacherSubject.teacher_id == teacher.school_id)
             .with_for_update()
             .all()
         }
@@ -1152,14 +1159,14 @@ def replace_teacher_permissions(
         for subject_id in requested:
             item = existing.get(subject_id)
             if item is None:
-                item = TeacherSubject(teacher_id=teacher.id, subject_id=subject_id, is_active=True, assigned_by=admin.id, assigned_at=now)
+                item = TeacherSubject(teacher_id=teacher.school_id, subject_id=subject_id, is_active=True, assigned_by=admin.school_id, assigned_at=now)
                 db.add(item)
             elif not item.is_active:
                 item.is_active = True
-                item.assigned_by = admin.id
+                item.assigned_by = admin.school_id
                 item.assigned_at = now
         db.commit()
-        refreshed = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher.id).order_by(TeacherSubject.subject_id).all()
+        refreshed = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher.school_id).order_by(TeacherSubject.subject_id).all()
         return _serialize_teacher_permission_set(teacher, refreshed)
     except HTTPException:
         db.rollback()
@@ -1173,12 +1180,12 @@ def replace_teacher_permissions(
 def grant_teacher_permission(payload: TeacherPermissionPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     try:
-        admin = _management_admin(db, current_user); _permission_teacher(db, payload.teacher_id); _permission_subject(db, payload.subject_id)
-        item = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == payload.teacher_id, TeacherSubject.subject_id == payload.subject_id).with_for_update().first()
+        admin = _management_admin(db, current_user); _permission_teacher(db, payload.teacher_school_id); _permission_subject(db, payload.subject_id)
+        item = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == payload.teacher_school_id, TeacherSubject.subject_id == payload.subject_id).with_for_update().first()
         if item and item.is_active: raise HTTPException(status_code=409, detail="Teacher already has active permission for this subject")
         if not item:
-            item = TeacherSubject(teacher_id=payload.teacher_id, subject_id=payload.subject_id); db.add(item)
-        item.is_active = True; item.assigned_by = admin.id; item.assigned_at = datetime.now()
+            item = TeacherSubject(teacher_id=payload.teacher_school_id, subject_id=payload.subject_id); db.add(item)
+        item.is_active = True; item.assigned_by = admin.school_id; item.assigned_at = datetime.now()
         db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
@@ -1186,34 +1193,34 @@ def grant_teacher_permission(payload: TeacherPermissionPayload, current_user: di
         db.rollback(); raise HTTPException(status_code=409, detail="Teacher permission conflicts with an existing assignment") from exc
 
 
-@router.patch("/teacher-permissions/{teacher_id}/{subject_id}")
-def update_teacher_permission(teacher_id: int, subject_id: str, payload: UpdateTeacherPermissionPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+@router.patch("/teacher-permissions/{teacher_school_id}/{subject_id}")
+def update_teacher_permission(teacher_school_id: str, subject_id: str, payload: UpdateTeacherPermissionPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     try:
-        admin = _management_admin(db, current_user); _permission_teacher(db, teacher_id)
-        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=subject_id).with_for_update().first()
+        admin = _management_admin(db, current_user); _permission_teacher(db, teacher_school_id)
+        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_school_id, subject_id=subject_id).with_for_update().first()
         if not item: raise HTTPException(status_code=404, detail="Teacher permission not found")
         if payload.new_subject_id and payload.new_subject_id != subject_id:
             _permission_subject(db, payload.new_subject_id)
-            other = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=payload.new_subject_id).with_for_update().first()
+            other = db.query(TeacherSubject).filter_by(teacher_id=teacher_school_id, subject_id=payload.new_subject_id).with_for_update().first()
             if other and other.is_active: raise HTTPException(status_code=409, detail="Teacher already has active permission for this subject")
             item.is_active = False
             if other: item = other
-            else: item = TeacherSubject(teacher_id=teacher_id, subject_id=payload.new_subject_id); db.add(item)
+            else: item = TeacherSubject(teacher_id=teacher_school_id, subject_id=payload.new_subject_id); db.add(item)
             item.is_active = True
         if payload.is_active is not None: item.is_active = payload.is_active
-        item.assigned_by = admin.id; item.assigned_at = datetime.now()
+        item.assigned_by = admin.school_id; item.assigned_at = datetime.now()
         db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
 
 
-@router.delete("/teacher-permissions/{teacher_id}/{subject_id}")
-def revoke_teacher_permission(teacher_id: int, subject_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+@router.delete("/teacher-permissions/{teacher_school_id}/{subject_id}")
+def revoke_teacher_permission(teacher_school_id: str, subject_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     try:
         _management_admin(db, current_user)
-        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_id, subject_id=subject_id).with_for_update().first()
+        item = db.query(TeacherSubject).filter_by(teacher_id=teacher_school_id, subject_id=subject_id).with_for_update().first()
         if not item: raise HTTPException(status_code=404, detail="Teacher permission not found")
         item.is_active = False; db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:

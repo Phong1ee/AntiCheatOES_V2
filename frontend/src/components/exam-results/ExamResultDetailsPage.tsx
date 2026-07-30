@@ -14,8 +14,7 @@ import {
   EyeOff,
   FileText,
 } from "lucide-react";
-
-const API_BASE_URL = "http://localhost:8000";
+import { apiClient } from "../../services/api-client";
 
 interface QuestionResult {
   id: number;
@@ -43,6 +42,8 @@ interface ExamResultDetail {
   correctAnswers?: number; // số câu đúng
   totalQuestions?: number; // tổng số câu
   questions?: QuestionResult[];
+  attemptStatus?: "submitted" | "terminated";
+  terminated?: boolean;
 }
 
 interface ExamResultDetailsPageProps {
@@ -64,21 +65,8 @@ export function ExamResultDetailsPage({
         setLoading(true);
         setLoadError(null);
 
-        const token = localStorage.getItem("token");
-
-        const res = await fetch(`${API_BASE_URL}/api/results/${examId}`, {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || "Failed to load exam result");
-        }
-
-        const data = await res.json();
-        const result = data.result || data;
+        const { data } = await apiClient.get<{ result: ExamResultDetail }>(`/api/results/${examId}`);
+        const result = data.result;
 
         const mapped: ExamResultDetail = {
           id: result.id,
@@ -93,12 +81,14 @@ export function ExamResultDetailsPage({
           correctAnswers: result.correctAnswers,
           totalQuestions: result.totalQuestions,
           questions: result.questions || [],
+          attemptStatus: result.attemptStatus,
+          terminated: result.terminated,
         };
 
         setExam(mapped);
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
-        setLoadError(err.message || "Error loading exam result");
+        setLoadError(err instanceof Error ? err.message : "Error loading exam result");
       } finally {
         setLoading(false);
       }

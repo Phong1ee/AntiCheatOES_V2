@@ -42,3 +42,33 @@ export interface TeacherExamRequest {
   total_points: number;
   passing_score: number;
 }
+
+export interface AssignmentClass {
+  class_id: number;
+  class_name: string;
+  subject_id: string;
+  student_count: number;
+}
+
+export interface AssignmentStudent {
+  school_id: string;
+  full_name: string;
+  email: string;
+  class_ids: number[];
+  class_names: string[];
+  assigned: boolean;
+}
+
+export interface AssignmentOptions {
+  classes: AssignmentClass[];
+  students: AssignmentStudent[];
+  assigned_count: number;
+}
+
+export interface AssignmentSyncResult {
+  added_count: number;
+  removed_count: number;
+  unchanged_count: number;
+  final_count: number;
+  student_ids: string[];
+}

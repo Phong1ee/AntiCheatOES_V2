@@ -43,6 +43,17 @@ class ExamStatus(str, enum.Enum):
     published = "published"
     archived = "archived"
 
+class AttemptStatus(str, enum.Enum):
+    in_progress = "in_progress"
+    submitted = "submitted"
+    terminated = "terminated"
+
+
+attempt_status_enum = Enum(
+    AttemptStatus,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="attemptstatus",
+)
 
 class QuestionSelectionMode(str, enum.Enum):
     manual = "manual"
@@ -113,9 +124,9 @@ class User(Base):
         nullable=True,
     )
 
-    locked_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    locked_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -124,9 +135,9 @@ class User(Base):
         nullable=True,
     )
 
-    deleted_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    deleted_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -230,8 +241,8 @@ class CourseClass(Base):
     subject_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("subject.subject_id"), nullable=False
     )
-    teacher_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("user.id"), nullable=False
+    teacher_id: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id"), nullable=False
     )
 
     subject: Mapped["Subject"] = relationship(back_populates="classes")
@@ -242,8 +253,8 @@ class CourseClass(Base):
 class StudentClass(Base):
     __tablename__ = "student_class"
 
-    student_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("user.id"), primary_key=True
+    student_id: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id"), primary_key=True
     )
     class_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("class.class_id"), primary_key=True
@@ -270,8 +281,8 @@ class Question(Base):
         ForeignKey("subject.subject_id", ondelete="RESTRICT"),
         nullable=True,
     )
-    created_by: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("user.id", ondelete="SET NULL")
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
     source_question_id: Mapped[Optional[int]] = mapped_column(
@@ -492,7 +503,7 @@ class Attempt(Base):
 
     attempt_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     exam_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("exam.exam_id"))
-    student_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("user.id"))
+    student_id: Mapped[Optional[str]] = mapped_column(String(30), ForeignKey("user.school_id"))
     attempt_no: Mapped[Optional[int]] = mapped_column(Integer)
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -505,6 +516,23 @@ class Attempt(Base):
         back_populates="attempt"
     )
     exam_events: Mapped[list["ExamEvent"]] = relationship(back_populates="attempt")
+    
+    status: Mapped[AttemptStatus] = mapped_column(
+        attempt_status_enum,
+        nullable=False,
+        default=AttemptStatus.in_progress,
+        server_default=AttemptStatus.in_progress.value,
+    )
+
+    last_saved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    termination_reason: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
 
 
 class AttemptQuestion(Base):
@@ -526,6 +554,26 @@ class AttemptQuestion(Base):
     )
     essay_answer: Mapped[Optional["EssayAnswer"]] = relationship(
         back_populates="attempt_question", uselist=False
+    )
+    
+    question_text_snapshot: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    question_type_snapshot: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    question_point_snapshot: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    options_snapshot: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
     )
 
 
@@ -626,7 +674,20 @@ class MCQAnswer(Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["attempt_id", "question_id"],
-            ["attempt_question.attempt_id", "attempt_question.question_id"],
+            [
+                "attempt_question.attempt_id",
+                "attempt_question.question_id",
+            ],
+        ),
+        Index(
+            "ix_mcq_answers_attempt_question",
+            "attempt_id",
+            "question_id",
+        ),
+        UniqueConstraint(
+            "attempt_id",
+            "question_id",
+            name="uq_mcq_answers_attempt_question",
         ),
     )
 
@@ -689,9 +750,9 @@ class ExamEvent(Base):
 class TeacherSubject(Base):
     __tablename__ = "teacher_subject"
 
-    teacher_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="CASCADE"),
+    teacher_id: Mapped[str] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="CASCADE"),
         primary_key=True,
     )
 
@@ -701,9 +762,9 @@ class TeacherSubject(Base):
         primary_key=True,
     )
 
-    assigned_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    assigned_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -817,15 +878,15 @@ class QuestionRevision(Base):
         nullable=True,
     )
 
-    edited_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    edited_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    approved_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("user.id", ondelete="SET NULL"),
+    approved_by: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="SET NULL"),
         nullable=True,
     )
 

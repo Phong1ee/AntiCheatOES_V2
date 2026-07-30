@@ -18,6 +18,7 @@ import type {
   QuestionDifficulty,
   QuestionType,
 } from '../../../types/question-bank';
+import { LoadingState } from '../common/LoadingState';
 
 interface BankQuestionListProps {
   questions: QuestionBankItem[];
@@ -181,16 +182,7 @@ export function BankQuestionList({
       </div>
 
       {loading ? (
-        <div className="rounded-xl border border-gray-200 bg-white px-6 py-10">
-          <div className="flex items-center justify-center gap-3 text-gray-500">
-            <span
-              className="h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-teal-500"
-              aria-hidden="true"
-            />
-
-            <p className="text-sm font-medium">Loading questions...</p>
-          </div>
-        </div>
+        <LoadingState label="Loading questions..." />
       ) : error ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}

@@ -55,7 +55,7 @@ def _time_taken(start_time, end_time, submitted_at):
 
 
 def _submitted_attempts_by_student(db: Session, exam_id: int) -> dict:
-    """Map student_id (user.id) -> all of their submitted attempts for this exam, ordered by attempt_no."""
+    """Map student_id (user.school_id) -> all of their submitted attempts for this exam, ordered by attempt_no."""
     attempts = (
         db.query(Attempt)
         .filter(Attempt.exam_id == exam_id, Attempt.submitted_at.isnot(None))
@@ -128,8 +128,8 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
     scores = []
     submitted_count = 0
     for _student_exam, user in roster:
-        attempt = latest_attempts.get(user.id)
-        if attempt and attempt.submitted_at is not None:
+        best = _best_attempt(submitted_by_student.get(user.school_id, []))
+        if best is not None:
             submitted_count += 1
             if best.score is not None:
                 scores.append(float(best.score))
@@ -166,7 +166,7 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     rows = []
     for _student_exam, user in roster:
-        attempts_list = submitted_by_student.get(user.id, [])
+        attempts_list = submitted_by_student.get(user.school_id, [])
 
         attempt_summaries = []
         for attempt in attempts_list:
@@ -237,10 +237,12 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
             correct_rate = round((sum(graded) / len(graded)) / max_points * 100, 1) if graded and max_points else 0
             stats.append({
                 "questionNumber": index,
+                "questionText": question.question_text,
                 "type": "essay",
                 "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
                 "correctRate": correct_rate,
                 "totalAttempts": len(essays),
+                "correctOption": None,
                 "optionStats": None,
             })
             continue
@@ -256,26 +258,39 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
         )
         total_attempts = len(mcqs)
         correct_count = sum(1 for mcq in mcqs if mcq.selected_option and mcq.selected_option.is_correct)
-        option_counts = {
-            option.options_id: {"option": option.options_text, "count": 0}
-            for option in sorted(question.options, key=lambda item: item.options_id)
+
+        is_true_false = question.question_type == QuestionType.true_false
+        options_sorted = sorted(question.options, key=lambda item: item.options_id)
+        option_meta = {
+            option.options_id: {
+                "letter": option.options_text if is_true_false else chr(65 + idx),
+                "label": option.options_text,
+                "isCorrect": bool(option.is_correct),
+                "count": 0,
+            }
+            for idx, option in enumerate(options_sorted)
         }
         for mcq in mcqs:
-            if mcq.selected_option_id in option_counts:
-                option_counts[mcq.selected_option_id]["count"] += 1
+            if mcq.selected_option_id in option_meta:
+                option_meta[mcq.selected_option_id]["count"] += 1
         option_stats = [
             {
-                "option": info["option"],
+                "option": info["letter"],
+                "label": info["label"],
+                "isCorrect": info["isCorrect"],
                 "percentage": round(info["count"] / total_attempts * 100, 1) if total_attempts else 0,
             }
-            for info in option_counts.values()
+            for info in option_meta.values()
         ]
+        correct_option = next((info["letter"] for info in option_meta.values() if info["isCorrect"]), None)
         stats.append({
             "questionNumber": index,
-            "type": "true-false" if question.question_type == QuestionType.true_false else "mcq",
+            "questionText": question.question_text,
+            "type": "true-false" if is_true_false else "mcq",
             "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
             "correctRate": round(correct_count / total_attempts * 100, 1) if total_attempts else 0,
             "totalAttempts": total_attempts,
+            "correctOption": correct_option,
             "optionStats": option_stats,
         })
     return stats
@@ -319,6 +334,7 @@ def list_exam_results(
             "examName": exam.title,
             "subject": exam.subject.subject_name if exam.subject else "General",
             "date": exam.start_time.isoformat() if exam.start_time else None,
+            "endDate": exam.end_time.isoformat() if exam.end_time else None,
             "duration": exam.duration_minutes,
             "status": _SCHEDULE_STATUS_MAP.get(get_exam_status(exam, now), "scheduled"),
             **_exam_stats(db, exam),

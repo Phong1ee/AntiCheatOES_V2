@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
+import { LoadingState } from './common/LoadingState';
 import {
   BookOpen,
   Users,
@@ -176,7 +177,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <p className="text-sm text-gray-500">Loading exams...</p>
+            <LoadingState variant="inline" label="Loading exams..." />
           ) : upcomingExams.length === 0 ? (
             <p className="text-sm text-gray-500">No upcoming exams</p>
           ) : (
@@ -229,7 +230,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <p className="text-sm text-gray-500">Loading question banks...</p>
+            <LoadingState variant="inline" label="Loading question banks..." />
           ) : questionBanks.length === 0 ? (
             <p className="text-sm text-gray-500">No subjects available</p>
           ) : (

@@ -3,6 +3,7 @@ import { Card, CardContent } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Checkbox } from '../../ui/checkbox';
+import { LoadingState } from '../common/LoadingState';
 import {
   Table,
   TableBody,
@@ -288,7 +289,9 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
   if (loading) {
     return (
       <Card className="shadow-md rounded-2xl border-0">
-        <CardContent className="p-12 text-center text-gray-500">Loading student results...</CardContent>
+        <CardContent className="p-12">
+          <LoadingState variant="inline" label="Loading student results..." />
+        </CardContent>
       </Card>
     );
   }

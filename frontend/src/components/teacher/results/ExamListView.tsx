@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
+import { LoadingState } from '../common/LoadingState';
 import { Badge } from '../../ui/badge';
 import {
   Select,
@@ -14,18 +15,67 @@ import {
   Calendar,
   Users,
   FileText,
-  TrendingUp,
   ChevronRight,
   Clock,
   CheckCircle,
   AlertCircle,
   PenTool,
+  BookOpen,
+  BarChart2,
 } from 'lucide-react';
 import { teacherResultsService } from '../../../services/teacher-results.service';
 import type { ExamResultSummary } from '../../../types/teacher-results';
 
 interface ExamListViewProps {
   onSelectExam: (examId: string) => void;
+}
+
+// Color palette cycling through subjects
+const SUBJECT_COLORS = [
+  {
+    border: 'border-l-teal-500',
+    icon: 'bg-teal-500',
+    badge: 'bg-teal-50 text-teal-700 border-teal-200',
+  },
+  {
+    border: 'border-l-violet-500',
+    icon: 'bg-violet-500',
+    badge: 'bg-violet-50 text-violet-700 border-violet-200',
+  },
+  {
+    border: 'border-l-blue-500',
+    icon: 'bg-blue-500',
+    badge: 'bg-blue-50 text-blue-700 border-blue-200',
+  },
+  {
+    border: 'border-l-rose-500',
+    icon: 'bg-rose-500',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+  },
+  {
+    border: 'border-l-amber-500',
+    icon: 'bg-amber-500',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
+];
+
+function getSubjectColor(subject: string, subjects: string[]) {
+  const idx = subjects.indexOf(subject);
+  return SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
+}
+
+function scoreColor(avg: number) {
+  if (avg >= 85) return 'text-green-600';
+  if (avg >= 70) return 'text-blue-600';
+  if (avg >= 55) return 'text-amber-600';
+  return 'text-red-600';
+}
+
+function scoreBarColor(avg: number) {
+  if (avg >= 85) return 'from-green-400 to-green-600';
+  if (avg >= 70) return 'from-blue-400 to-blue-600';
+  if (avg >= 55) return 'from-amber-400 to-amber-500';
+  return 'from-red-400 to-red-500';
 }
 
 export function ExamListView({ onSelectExam }: ExamListViewProps) {
@@ -68,34 +118,34 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
   });
 
   const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'No date set';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
+    if (!dateStr) return 'No date';
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const formatTime = (dateStr: string | null) => {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed':
         return (
-          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
+          <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border border-green-200">
             <CheckCircle className="size-3 mr-1" />
             Completed
           </Badge>
         );
       case 'in-progress':
         return (
-          <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">
+          <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border border-blue-200">
             <Clock className="size-3 mr-1" />
             In Progress
           </Badge>
         );
       case 'scheduled':
         return (
-          <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-100">
+          <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-100 border border-gray-200">
             <Calendar className="size-3 mr-1" />
             Scheduled
           </Badge>
@@ -157,7 +207,9 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
       <div className="space-y-4">
         {loading && (
           <Card className="shadow-md rounded-2xl border-0">
-            <CardContent className="p-12 text-center text-gray-500">Loading exams...</CardContent>
+            <CardContent className="p-12">
+              <LoadingState variant="inline" label="Loading exams..." />
+            </CardContent>
           </Card>
         )}
 
@@ -171,82 +223,105 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
           </Card>
         )}
 
-        {!loading && !error && filteredExams.map((exam) => (
-          <Card
-            key={exam.id}
-            className="shadow-md rounded-2xl border-0 hover:shadow-lg transition-all cursor-pointer group"
-            onClick={() => onSelectExam(exam.id)}
-          >
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                {/* Left: Exam Info */}
-                <div className="flex-1 space-y-3">
-                  {/* Title and Status */}
-                  <div className="flex items-start gap-3">
-                    <div className="flex-1">
-                      <h3 className="text-lg text-gray-800 group-hover:text-teal-600 transition-colors">
+        {!loading && !error && filteredExams.map((exam) => {
+          const color = getSubjectColor(exam.subject, subjects);
+          const completion = exam.totalStudents > 0
+            ? Math.round((exam.submittedCount / exam.totalStudents) * 100)
+            : 0;
+
+          return (
+            <Card
+              key={exam.id}
+              className={`shadow-md rounded-2xl border-0 border-l-4 ${color.border} hover:shadow-xl transition-all cursor-pointer group overflow-hidden`}
+              onClick={() => onSelectExam(exam.id)}
+            >
+              <CardContent className="p-0">
+                {/* Top strip */}
+                <div className="flex items-start gap-5 p-5 pb-4">
+                  {/* Subject icon */}
+                  <div className={`size-12 ${color.icon} rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm`}>
+                    <BookOpen className="size-6 text-white" />
+                  </div>
+
+                  {/* Main info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3 mb-1">
+                      <h3 className="text-base text-gray-800 group-hover:text-gray-900 transition-colors leading-snug">
                         {exam.examName}
                       </h3>
-                      <p className="text-sm text-gray-600 mt-1">{exam.subject}</p>
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                        {getStatusBadge(exam.status)}
+                        {exam.hasEssayQuestions && exam.pendingEssayCount > 0 && (
+                          <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border border-amber-200 text-xs">
+                            <PenTool className="size-3 mr-1" />
+                            {exam.pendingEssayCount} pending
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      {getStatusBadge(exam.status)}
-                      {exam.hasEssayQuestions && exam.pendingEssayCount > 0 && (
-                        <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
-                          <PenTool className="size-3 mr-1" />
-                          {exam.pendingEssayCount} Essay{exam.pendingEssayCount > 1 ? 's' : ''} Pending
-                        </Badge>
-                      )}
-                    </div>
+                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${color.badge}`}>
+                      {exam.subject}
+                    </span>
                   </div>
 
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-gray-100">
-                    {/* Date */}
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Calendar className="size-4 text-teal-600" />
-                      <span>{formatDate(exam.date)}</span>
-                    </div>
+                  <ChevronRight className="size-5 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0 mt-1" />
+                </div>
 
-                    {/* Duration */}
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Clock className="size-4 text-teal-600" />
-                      <span>{exam.duration ?? '-'} mins</span>
-                    </div>
-
-                    {/* Questions */}
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <FileText className="size-4 text-teal-600" />
-                      <span>{exam.totalQuestions} questions</span>
-                    </div>
-
-                    {/* Students */}
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Users className="size-4 text-teal-600" />
-                      <span>
-                        {exam.submittedCount}/{exam.totalStudents} submitted
-                      </span>
-                    </div>
+                {/* Stats row */}
+                <div className="grid grid-cols-4 divide-x divide-gray-100 border-t border-gray-100 bg-gray-50/60">
+                  {/* Period */}
+                  <div className="flex flex-col items-center justify-center py-3 px-4 gap-1 text-center">
+                    <Calendar className="size-4 text-gray-400" />
+                    <p className="text-xs text-gray-500">Period</p>
+                    <p className="text-xs text-teal-600">{formatDate(exam.date)} {formatTime(exam.date)}</p>
+                    <p className="text-xs text-gray-400 leading-none">↓</p>
+                    <p className="text-xs text-red-500">{formatDate(exam.endDate)} {formatTime(exam.endDate)}</p>
                   </div>
 
-                  {/* Average Score */}
-                  {exam.status === 'completed' && (
-                    <div className="flex items-center gap-2 pt-2">
-                      <TrendingUp className="size-4 text-green-600" />
-                      <span className="text-sm text-gray-600">Average Score:</span>
-                      <span className="text-green-700">{exam.avgScore.toFixed(1)}%</span>
-                    </div>
-                  )}
-                </div>
+                  {/* Duration + Questions */}
+                  <div className="flex flex-col items-center justify-center py-3 px-4 gap-1">
+                    <Clock className="size-4 text-gray-400" />
+                    <p className="text-xs text-gray-500">Duration</p>
+                    <p className="text-sm text-gray-700">
+                      {exam.duration ?? '-'} min · {exam.totalQuestions} Qs
+                    </p>
+                  </div>
 
-                {/* Right: Arrow */}
-                <div className="flex items-center">
-                  <ChevronRight className="size-5 text-gray-400 group-hover:text-teal-600 transition-colors" />
+                  {/* Submission */}
+                  <div className="flex flex-col items-center justify-center py-3 px-4 gap-1">
+                    <Users className="size-4 text-gray-400" />
+                    <p className="text-xs text-gray-500">Submitted</p>
+                    <p className="text-sm text-gray-700">
+                      {exam.submittedCount}/{exam.totalStudents}
+                      <span className="text-xs text-gray-400 ml-1">({completion}%)</span>
+                    </p>
+                  </div>
+
+                  {/* Avg Score */}
+                  <div className="flex flex-col items-center justify-center py-3 px-4 gap-1">
+                    <BarChart2 className="size-4 text-gray-400" />
+                    <p className="text-xs text-gray-500">Avg Score</p>
+                    {exam.status === 'completed' ? (
+                      <div className="flex items-center gap-2 w-full max-w-[100px]">
+                        <p className={`text-sm ${scoreColor(exam.avgScore)}`}>
+                          {exam.avgScore.toFixed(1)}%
+                        </p>
+                        <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${scoreBarColor(exam.avgScore)} rounded-full`}
+                            style={{ width: `${Math.min(exam.avgScore, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">—</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
 
         {!loading && !error && filteredExams.length === 0 && (
           <Card className="shadow-md rounded-2xl border-0">

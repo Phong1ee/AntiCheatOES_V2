@@ -17,6 +17,8 @@ interface TeacherDashboardProps {
 export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
+  const [examManagerTab, setExamManagerTab] = useState<'general' | 'settings'>('general');
+  const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const { setUser } = useUserRole();
 
   // Set user role on mount
@@ -36,7 +38,19 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
 
   const handleNavigateToExam = (examId: string) => {
     setSelectedExamId(examId);
+    setExamManagerTab('general');
     setActiveTab('exams');
+  };
+
+  const handleNavigateToSettings = (examId: string) => {
+    setSelectedExamId(examId);
+    setExamManagerTab('settings');
+    setActiveTab('exams');
+  };
+
+  const handleNavigateToResults = (examId: string) => {
+    setResultsExamId(examId);
+    setActiveTab('results');
   };
 
   return (
@@ -44,11 +58,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
       <TeacherHeader activeTab={activeTab} onTabChange={setActiveTab} onLogout={onLogout} />
 
       {activeTab === 'exams' ? (
-        <ExamManagerPage initialExamId={selectedExamId} />
+        <ExamManagerPage initialExamId={selectedExamId} initialTab={examManagerTab} />
       ) : activeTab === 'questions' ? (
         <QuestionBankPage />
       ) : activeTab === 'results' ? (
-        <ExamResultsPage />
+        <ExamResultsPage initialExamId={resultsExamId} />
       ) : activeTab === 'profile' ? (
         <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
           <ProfileSettings />
@@ -63,7 +77,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Main Content - Exam List */}
               <div className="lg:col-span-2">
-                <TeacherExamList onExamClick={handleNavigateToExam} />
+                <TeacherExamList
+                  onExamClick={handleNavigateToExam}
+                  onNavigateToSettings={handleNavigateToSettings}
+                  onNavigateToResults={handleNavigateToResults}
+                />
               </div>
 
               {/* Sidebar */}

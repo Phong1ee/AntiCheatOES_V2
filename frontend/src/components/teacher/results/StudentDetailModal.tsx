@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { teacherResultsService, downloadCsv } from '../../../services/teacher-results.service';
 import type { StudentAttemptDetail } from '../../../types/teacher-results';
+import { LoadingState } from '../common/LoadingState';
 
 interface StudentDetailModalProps {
   examId: number;
@@ -58,7 +59,7 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
     return (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-8 text-center">
-          {loading && <p className="text-gray-500">Loading attempt details...</p>}
+          {loading && <LoadingState variant="inline" label="Loading attempt details..." />}
           {!loading && error && <p className="text-red-600">{error}</p>}
           <Button variant="outline" onClick={onClose} className="mt-6">
             Close

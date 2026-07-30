@@ -1,5 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import {
   BookOpen,
@@ -12,6 +10,7 @@ import {
   CheckCircle,
   RefreshCw,
   PenLine,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ExamInfoCardProps {
@@ -50,149 +49,180 @@ export function ExamInfoCard({
   onManualGrading,
 }: ExamInfoCardProps) {
   const completionRate = ((submittedCount / totalStudents) * 100).toFixed(1);
-  const essayGradingRate = totalEssayCount > 0 
-    ? (((totalEssayCount - pendingEssayCount) / totalEssayCount) * 100).toFixed(1)
-    : 100;
+  const essayGradingRate =
+    totalEssayCount > 0
+      ? (((totalEssayCount - pendingEssayCount) / totalEssayCount) * 100).toFixed(1)
+      : '100';
+
+  const fmt = (d: string) =>
+    new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
-    <Card className="shadow-md rounded-2xl border-0">
-      <CardHeader>
-        <div className="flex items-start justify-between">
+    <div className="rounded-2xl overflow-hidden shadow-md">
+      {/* Gradient header */}
+      <div className="bg-gradient-to-r from-teal-600 via-teal-500 to-blue-600 px-6 py-5">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle className="text-xl text-gray-800 mb-2">{examName}</CardTitle>
-            <Badge variant="outline" className="bg-teal-100 text-teal-700">
-              <BookOpen className="size-3 mr-1" />
-              {subject}
-            </Badge>
+            <h2 className="text-white text-xl font-semibold leading-snug">{examName}</h2>
+            <div className="flex items-center gap-3 mt-2">
+              <span className="inline-flex items-center gap-1.5 text-sm bg-white/20 text-white px-3 py-1 rounded-full backdrop-blur-sm">
+                <BookOpen className="size-3.5" />
+                {subject}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-sm bg-white/20 text-white px-3 py-1 rounded-full backdrop-blur-sm">
+                <Calendar className="size-3.5" />
+                {fmt(startDate)} – {fmt(endDate)}
+              </span>
+            </div>
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex items-center gap-2 flex-shrink-0">
             {onRefreshGrades && (
               <Button
-                variant="outline"
                 size="sm"
                 onClick={onRefreshGrades}
-                className="hover:bg-blue-50 hover:border-blue-300"
+                className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
               >
-                <RefreshCw className="size-4 mr-2 text-blue-600" />
-                Refresh Grades
+                <RefreshCw className="size-4 mr-1.5" />
+                Refresh
               </Button>
             )}
             {onManualGrading && hasEssayQuestions && (
               <Button
-                variant={pendingEssayCount > 0 ? "default" : "outline"}
                 size="sm"
                 onClick={onManualGrading}
-                className={pendingEssayCount > 0 
-                  ? "bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700" 
-                  : "hover:bg-purple-50 hover:border-purple-300"}
+                className={
+                  pendingEssayCount > 0
+                    ? 'bg-amber-400 hover:bg-amber-500 text-amber-900 border-0'
+                    : 'bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm'
+                }
               >
-                <PenLine className={`size-4 mr-2 ${pendingEssayCount > 0 ? 'text-white' : 'text-purple-600'}`} />
-                {pendingEssayCount > 0 ? `Grade Essays (${pendingEssayCount} pending)` : 'Grade Essays'}
+                {pendingEssayCount > 0 && <AlertTriangle className="size-4 mr-1.5" />}
+                <PenLine className="size-4 mr-1.5" />
+                Grade Essays
+                {pendingEssayCount > 0 && (
+                  <span className="ml-1.5 bg-amber-900/20 px-1.5 py-0.5 rounded-full text-xs">
+                    {pendingEssayCount}
+                  </span>
+                )}
               </Button>
             )}
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className={`grid grid-cols-2 md:grid-cols-4 ${hasEssayQuestions ? 'lg:grid-cols-8' : 'lg:grid-cols-7'} gap-4`}>
-          {/* Exam Period */}
-          <div className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <Calendar className="size-4 text-blue-600" />
-              <p className="text-xs text-blue-600">Exam Period</p>
-            </div>
-            <p className="text-sm text-gray-800">
-              {new Date(startDate).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              })}
-            </p>
-            <p className="text-xs text-gray-500">to</p>
-            <p className="text-sm text-gray-800">
-              {new Date(endDate).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              })}
-            </p>
-          </div>
+      </div>
 
-          {/* Total Questions */}
-          <div className="p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <FileQuestion className="size-4 text-purple-600" />
-              <p className="text-xs text-purple-600">Questions</p>
-            </div>
-            <p className="text-2xl text-gray-800">{totalQuestions}</p>
+      {/* Stats grid */}
+      <div className="bg-white grid grid-cols-2 md:grid-cols-4 divide-x divide-y divide-gray-100">
+        {/* Questions */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <FileQuestion className="size-5 text-purple-600" />
           </div>
-
-          {/* Participants */}
-          <div className="p-4 bg-gradient-to-br from-teal-50 to-green-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <Users className="size-4 text-teal-600" />
-              <p className="text-xs text-teal-600">Students</p>
-            </div>
-            <p className="text-2xl text-gray-800">{totalStudents}</p>
-            <p className="text-xs text-gray-500">{submittedCount} submitted</p>
+          <div>
+            <p className="text-xs text-gray-500">Questions</p>
+            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{totalQuestions}</p>
           </div>
+        </div>
 
-          {/* Completion Rate */}
-          <div className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle className="size-4 text-green-600" />
-              <p className="text-xs text-green-600">Completion</p>
-            </div>
-            <p className="text-2xl text-gray-800">{completionRate}%</p>
+        {/* Students */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-teal-100 flex items-center justify-center flex-shrink-0">
+            <Users className="size-5 text-teal-600" />
           </div>
-
-          {/* Average Score */}
-          <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="size-4 text-amber-600" />
-              <p className="text-xs text-amber-600">Average</p>
-            </div>
-            <p className="text-2xl text-gray-800">{avgScore}</p>
-            <p className="text-xs text-gray-500">out of 100</p>
+          <div>
+            <p className="text-xs text-gray-500">Students</p>
+            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{totalStudents}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{submittedCount} submitted</p>
           </div>
+        </div>
 
-          {/* Highest Score */}
-          <div className="p-4 bg-gradient-to-br from-green-50 to-teal-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <Award className="size-4 text-green-600" />
-              <p className="text-xs text-green-600">Highest</p>
-            </div>
-            <p className="text-2xl text-gray-800">{highestScore}</p>
+        {/* Completion */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
+            <CheckCircle className="size-5 text-green-600" />
           </div>
-
-          {/* Lowest Score */}
-          <div className="p-4 bg-gradient-to-br from-red-50 to-pink-50 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="size-4 text-red-600" />
-              <p className="text-xs text-red-600">Lowest</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-500">Completion</p>
+            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{completionRate}%</p>
+            <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden w-full">
+              <div
+                className="h-full bg-gradient-to-r from-green-400 to-green-500 rounded-full"
+                style={{ width: `${completionRate}%` }}
+              />
             </div>
-            <p className="text-2xl text-gray-800">{lowestScore}</p>
           </div>
+        </div>
 
-          {/* Essay Grading Status */}
-          {hasEssayQuestions && (
-            <div className={`p-4 rounded-xl ${
-              pendingEssayCount > 0 
-                ? 'bg-gradient-to-br from-amber-50 to-orange-50' 
-                : 'bg-gradient-to-br from-purple-50 to-pink-50'
-            }`}>
-              <div className="flex items-center gap-2 mb-2">
-                <PenLine className={`size-4 ${pendingEssayCount > 0 ? 'text-amber-600' : 'text-purple-600'}`} />
-                <p className={`text-xs ${pendingEssayCount > 0 ? 'text-amber-600' : 'text-purple-600'}`}>
-                  Essay Grading
-                </p>
+        {/* Average */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+            <TrendingUp className="size-5 text-amber-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-500">Average Score</p>
+            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{avgScore}</p>
+            <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden w-full">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full"
+                style={{ width: `${avgScore}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Highest */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+            <Award className="size-5 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Highest Score</p>
+            <p className="text-2xl font-semibold text-blue-700 leading-none mt-0.5">{highestScore}</p>
+          </div>
+        </div>
+
+        {/* Lowest */}
+        <div className="flex items-center gap-4 px-5 py-4">
+          <div className="size-10 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
+            <Clock className="size-5 text-red-500" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Lowest Score</p>
+            <p className="text-2xl font-semibold text-red-600 leading-none mt-0.5">{lowestScore}</p>
+          </div>
+        </div>
+
+        {/* Essay grading — only if applicable */}
+        {hasEssayQuestions && (
+          <div className="flex items-center gap-4 px-5 py-4 md:col-span-2">
+            <div className={`size-10 rounded-xl flex items-center justify-center flex-shrink-0 ${pendingEssayCount > 0 ? 'bg-amber-100' : 'bg-purple-100'}`}>
+              <PenLine className={`size-5 ${pendingEssayCount > 0 ? 'text-amber-600' : 'text-purple-600'}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">Essay Grading</p>
+                {pendingEssayCount > 0 && (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                    {pendingEssayCount} pending
+                  </span>
+                )}
               </div>
-              <p className="text-2xl text-gray-800">{essayGradingRate}%</p>
-              <p className="text-xs text-gray-500">
+              <p className={`text-2xl font-semibold leading-none mt-0.5 ${pendingEssayCount > 0 ? 'text-amber-600' : 'text-purple-600'}`}>
+                {essayGradingRate}%
+              </p>
+              <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden w-full">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${pendingEssayCount > 0 ? 'from-amber-400 to-amber-500' : 'from-purple-400 to-purple-500'}`}
+                  style={{ width: `${essayGradingRate}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
                 {totalEssayCount - pendingEssayCount}/{totalEssayCount} graded
               </p>
             </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

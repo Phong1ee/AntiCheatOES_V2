@@ -4,6 +4,7 @@ import { ExamEditor } from "./ExamEditor";
 import { ExamListSidebar } from "./ExamListSidebar";
 import { teacherExamService } from "../../../services/teacher-exam.service";
 import type { ExamStatus, TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
+import { LoadingState } from "../common/LoadingState";
 
 interface Exam {
   id: string;
@@ -49,9 +50,10 @@ const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam =
 
 interface ExamManagerPageProps {
   initialExamId?: string | null;
+  initialTab?: 'general' | 'settings';
 }
 
-export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
+export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPageProps) {
   const [exams, setExams] = useState<Exam[]>([]);
   const [subjects, setSubjects] = useState<TeacherSubject[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
@@ -137,7 +139,11 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
   };
 
   if (loading) {
-    return <div className="h-[calc(100vh-64px)] flex items-center justify-center text-gray-600">Loading exams...</div>;
+    return (
+      <div className="h-[calc(100vh-64px)] flex items-center justify-center">
+        <LoadingState label="Loading exams..." />
+      </div>
+    );
   }
 
   if (loadError) {
@@ -162,6 +168,7 @@ export function ExamManagerPage({ initialExamId }: ExamManagerPageProps) {
           examId={selectedExamId}
           exam={selectedExam}
           subjects={subjects}
+          initialTab={initialTab}
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
         />

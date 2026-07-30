@@ -12,7 +12,6 @@ import {
   Clock,
   Eye,
   FileText,
-  Loader2,
   Pencil,
   Plus,
   Send,
@@ -38,6 +37,7 @@ import type {
   QuestionStatus,
   QuestionType,
 } from '../../../types/question-bank';
+import { LoadingState } from '../common/LoadingState';
 
 type StatusFilter = QuestionStatus | 'all';
 
@@ -334,14 +334,8 @@ export function YourQuestionsList({
       </div>
 
       {loading && (
-        <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-gray-200 bg-white shadow-sm">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-
-            <p className="text-sm font-medium text-gray-700">
-              Loading questions...
-            </p>
-          </div>
+        <div className="flex min-h-[360px] items-center justify-center">
+          <LoadingState label="Loading questions..." className="w-full" />
         </div>
       )}
 

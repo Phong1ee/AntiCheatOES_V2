@@ -21,8 +21,7 @@ import {
 } from 'lucide-react';
 import { Input } from '../ui/input';
 import { ExamDetailsModal } from './ExamDetailsModal';
-import { ExamSettingsModal } from './ExamSettingsModal';
-import { ExamResultsModal } from './ExamResultsModal';
+import { LoadingState } from './common/LoadingState';
 
 interface Exam {
   exam_id: number;
@@ -50,16 +49,16 @@ const statusConfig = {
 
 interface TeacherExamListProps {
   onExamClick?: (examId: string) => void;
+  onNavigateToSettings?: (examId: string) => void;
+  onNavigateToResults?: (examId: string) => void;
 }
 
-export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
+export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateToResults }: TeacherExamListProps) {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('date-desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showResultsModal, setShowResultsModal] = useState(false);
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,14 +115,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-          <p className="mt-4 text-gray-600">Loading exams...</p>
-        </div>
-      </div>
-    );
+    return <LoadingState label="Loading exams..." />;
   }
 
   if (error) {
@@ -271,10 +263,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                         variant="outline"
                         size="sm"
                         className="border-teal-300 text-teal-700 hover:bg-teal-50 whitespace-nowrap"
-                        onClick={() => {
-                          setSelectedExam(exam);
-                          setShowSettingsModal(true);
-                        }}
+                        onClick={() => onNavigateToSettings?.(String(exam.exam_id))}
                       >
                         <Settings className="size-4 mr-2" />
                         Settings
@@ -284,10 +273,7 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
                           variant="outline"
                           size="sm"
                           className="border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
-                          onClick={() => {
-                            setSelectedExam(exam);
-                            setShowResultsModal(true);
-                          }}
+                          onClick={() => onNavigateToResults?.(String(exam.exam_id))}
                         >
                           <BarChart3 className="size-4 mr-2" />
                           View Results
@@ -328,18 +314,6 @@ export function TeacherExamList({ onExamClick }: TeacherExamListProps) {
         <ExamDetailsModal
           exam={modalExam}
           onClose={() => setShowDetailsModal(false)}
-        />
-      )}
-      {showSettingsModal && selectedExam && modalExam && (
-        <ExamSettingsModal
-          exam={modalExam}
-          onClose={() => setShowSettingsModal(false)}
-        />
-      )}
-      {showResultsModal && selectedExam && modalExam && (
-        <ExamResultsModal
-          exam={modalExam}
-          onClose={() => setShowResultsModal(false)}
         />
       )}
     </div>

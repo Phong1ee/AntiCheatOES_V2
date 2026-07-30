@@ -13,9 +13,14 @@ import { Alert, AlertDescription, AlertTitle } from '../../ui/alert';
 import { toast } from 'sonner';
 import { teacherResultsService } from '../../../services/teacher-results.service';
 import type { ExamResultsOverview } from '../../../types/teacher-results';
+import { LoadingState } from '../common/LoadingState';
 
-export function ExamResultsPage() {
-  const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
+interface ExamResultsPageProps {
+  initialExamId?: string | null;
+}
+
+export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState('results');
   const [showManualGrading, setShowManualGrading] = useState(false);
@@ -44,6 +49,10 @@ export function ExamResultsPage() {
     if (examId) loadOverview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
+
+  useEffect(() => {
+    if (initialExamId) setSelectedExamId(initialExamId);
+  }, [initialExamId]);
 
   const handleFilterChange = (value: ResultsFilterValue) => {
     setFilters(value);
@@ -77,62 +86,48 @@ export function ExamResultsPage() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
-          {/* Left: Title and Back Button */}
-          <div className="flex items-center gap-4">
-            {selectedExamId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSelectedExamId(null);
-                  setActiveTab('results');
-                }}
-                className="hover:bg-gray-100"
-              >
-                <ArrowLeft className="size-4 mr-2" />
-                Back to Exams
-              </Button>
-            )}
-            <div>
-              <h1 className="text-2xl text-gray-800">
-                {selectedExamId ? 'Exam Details' : 'Exam Results & Analytics'}
-              </h1>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedExamId
-                  ? 'View detailed results and export comprehensive reports'
-                  : 'Select an exam to view detailed results and analytics'}
-              </p>
-            </div>
-          </div>
+      {/* Header — only shown when an exam is selected */}
+      {selectedExamId && (
+        <div className="px-6 pt-5 max-w-7xl mx-auto w-full">
+          <div className="flex items-center justify-between gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedExamId(null);
+                setActiveTab('results');
+              }}
+              className="hover:bg-gray-100"
+            >
+              <ArrowLeft className="size-4 mr-2" />
+              Back to Exams
+            </Button>
 
-          {/* Right: Export Actions (only show when exam is selected) */}
-          {selectedExamId && overview && (
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportExcel}
-                className="hover:bg-green-50 hover:border-green-300"
-              >
-                <FileSpreadsheet className="size-4 mr-2 text-green-600" />
-                Export Excel
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleManualGrading}
-                className="hover:bg-purple-50 hover:border-purple-300"
-              >
-                <PenTool className="size-4 mr-2 text-purple-600" />
-                Grade Essay Questions
-              </Button>
-            </div>
-          )}
+            {overview && (
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportExcel}
+                  className="hover:bg-green-50 hover:border-green-300"
+                >
+                  <FileSpreadsheet className="size-4 mr-2 text-green-600" />
+                  Export Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleManualGrading}
+                  className="hover:bg-purple-50 hover:border-purple-300"
+                >
+                  <PenTool className="size-4 mr-2 text-purple-600" />
+                  Grade Essay Questions
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-6">
@@ -141,7 +136,7 @@ export function ExamResultsPage() {
             // Exam List View
             <ExamListView onSelectExam={setSelectedExamId} />
           ) : overviewLoading && !overview ? (
-            <div className="text-center text-gray-500 py-12">Loading exam details...</div>
+            <LoadingState label="Loading exam details..." />
           ) : overviewError ? (
             <Alert className="border-red-200 bg-red-50">
               <AlertCircle className="size-4 text-red-600" />
@@ -153,28 +148,28 @@ export function ExamResultsPage() {
             <>
               {/* Grading Alert */}
               {overview.hasEssayQuestions && overview.pendingEssayCount > 0 && (
-                <Alert className="border-amber-200 bg-amber-50">
-                  <AlertCircle className="size-4 text-amber-600" />
-                  <AlertTitle className="text-amber-800">
-                    Essay Grading Incomplete
-                  </AlertTitle>
-                  <AlertDescription className="text-amber-700">
-                    There are <strong>{overview.pendingEssayCount} essay question{overview.pendingEssayCount > 1 ? 's' : ''}</strong> still pending manual grading.
-                    Student scores may not be final until all essays are graded.
-                    <Button
-                      variant="link"
-                      size="sm"
-                      onClick={handleManualGrading}
-                      className="text-amber-800 underline p-0 h-auto ml-2"
-                    >
-                      Grade now
-                    </Button>
-                  </AlertDescription>
-                </Alert>
+                <div className="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <div className="size-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                    <AlertCircle className="size-5 text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-800">
+                      {overview.pendingEssayCount} essay{overview.pendingEssayCount > 1 ? 's' : ''} pending manual grading
+                    </p>
+                    <p className="text-xs text-amber-600 mt-0.5">
+                      Student scores may not be final until all essays are graded.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handleManualGrading}
+                    className="bg-amber-500 hover:bg-amber-600 text-white flex-shrink-0"
+                  >
+                    <PenTool className="size-3.5 mr-1.5" />
+                    Grade now
+                  </Button>
+                </div>
               )}
-
-              {/* Filters */}
-              <ResultsFilter onFilterChange={handleFilterChange} />
 
               {/* Exam Info Card */}
               <ExamInfoCard
@@ -194,6 +189,9 @@ export function ExamResultsPage() {
                 onRefreshGrades={handleRefreshGrades}
                 onManualGrading={overview.hasEssayQuestions ? handleManualGrading : undefined}
               />
+
+              {/* Filters */}
+              <ResultsFilter onFilterChange={handleFilterChange} />
 
               {/* Tabs for Results and Statistics */}
               <Tabs value={activeTab} onValueChange={setActiveTab}>

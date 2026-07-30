@@ -41,6 +41,7 @@ interface ExamEditorProps {
     status: ExamStatus;
   } | null;
   subjects: TeacherSubject[];
+  initialTab?: 'general' | 'settings';
   onClose: () => void;
   onSave: (examData: {
     id: string;
@@ -55,7 +56,7 @@ interface ExamEditorProps {
   }) => Promise<void>;
 }
 
-export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -147,10 +148,10 @@ export function ExamEditor({ examId, exam, subjects, onClose, onSave }: ExamEdit
         setStartClock(savedStartTime.slice(0, 5));
         setEndDate(savedEndDate);
         setEndClock(savedEndTime.slice(0, 5));
-        setActiveTab('general');
+        setActiveTab(initialTab ?? 'general');
       }
     }
-  }, [examId, exam]);
+  }, [examId, exam, initialTab]);
 
   // Auto-save simulation
   useEffect(() => {

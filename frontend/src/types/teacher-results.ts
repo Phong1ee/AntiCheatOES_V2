@@ -20,6 +20,7 @@ export interface ExamResultSummary extends ExamResultStatsApi {
   examName: string;
   subject: string;
   date: string | null;
+  endDate: string | null;
   duration: number | null;
   status: ExamResultStatus;
 }
@@ -85,15 +86,19 @@ export interface StudentAttemptDetail {
 
 export interface QuestionOptionStat {
   option: string;
+  label: string;
+  isCorrect: boolean;
   percentage: number;
 }
 
 export interface QuestionStat {
   questionNumber: number;
+  questionText: string;
   type: QuestionKind;
   difficulty: string;
   correctRate: number;
   totalAttempts: number;
+  correctOption: string | null;
   optionStats: QuestionOptionStat[] | null;
 }
 

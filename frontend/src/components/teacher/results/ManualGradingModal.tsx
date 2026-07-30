@@ -9,6 +9,7 @@ import { X, Save, User, FileText, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { teacherResultsService } from '../../../services/teacher-results.service';
 import type { EssayGradingItem } from '../../../types/teacher-results';
+import { LoadingState } from '../common/LoadingState';
 
 interface ManualGradingModalProps {
   examId: number;
@@ -133,7 +134,9 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
 
         {/* Main Content */}
         {loading ? (
-          <div className="flex-1 flex items-center justify-center text-gray-500 p-12">Loading essay answers...</div>
+          <div className="flex-1 flex items-center justify-center p-12">
+            <LoadingState variant="inline" label="Loading essay answers..." />
+          </div>
         ) : error ? (
           <div className="flex-1 flex items-center justify-center text-red-600 p-12">{error}</div>
         ) : answers.length === 0 ? (

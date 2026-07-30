@@ -745,7 +745,10 @@ def get_question_import_candidates(
                         )
                     )
                     .distinct()
-                    .order_by(User.full_name, User.id)
+                    # MySQL requires every ORDER BY expression to be present in
+                    # the SELECT list when DISTINCT is used. school_id is both
+                    # selected and the current Question.created_by key.
+                    .order_by(User.full_name, User.school_id)
                     .all()
                 )
             ],

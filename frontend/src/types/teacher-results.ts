@@ -33,6 +33,17 @@ export interface ExamResultsOverview extends ExamResultStatsApi {
   status: ExamResultStatus;
 }
 
+export interface StudentAttemptSummary {
+  attemptId: number;
+  attemptNumber: number | null;
+  score: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  timeSpent: string;
+  status: "submitted" | "late";
+  submittedAt: string | null;
+}
+
 export interface StudentResult {
   id: string;
   attemptId: number | null;
@@ -44,6 +55,8 @@ export interface StudentResult {
   timeSpent: string;
   status: StudentResultStatus;
   submittedAt: string | null;
+  /** Every submitted attempt this student made on this exam (best attempt is what the row above summarizes). */
+  attempts: StudentAttemptSummary[];
 }
 
 export interface StudentAttemptQuestion {
@@ -87,6 +100,7 @@ export interface QuestionStat {
 export interface EssayGradingItem {
   essayAnswerId: number;
   attemptId: number;
+  attemptNumber: number | null;
   studentId: string;
   studentName: string;
   questionId: number;

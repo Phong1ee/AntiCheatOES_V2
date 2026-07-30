@@ -165,7 +165,10 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
                             <p className="text-sm text-gray-800">
                               {answer.studentName}
                             </p>
-                            <p className="text-xs text-gray-500">{answer.studentId}</p>
+                            <p className="text-xs text-gray-500">
+                              {answer.studentId}
+                              {answer.attemptNumber !== null && ` · Attempt ${answer.attemptNumber}`}
+                            </p>
                           </div>
                         </div>
                         {answer.status === 'graded' ? (
@@ -219,6 +222,7 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
                             </h3>
                             <p className="text-sm text-gray-600">
                               {selectedAnswer.studentId}
+                              {selectedAnswer.attemptNumber !== null && ` · Attempt ${selectedAnswer.attemptNumber}`}
                             </p>
                           </div>
                         </div>

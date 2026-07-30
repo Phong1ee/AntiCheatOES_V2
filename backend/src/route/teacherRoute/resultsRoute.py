@@ -54,20 +54,25 @@ def _time_taken(start_time, end_time, submitted_at):
     return f"{minutes}m {seconds}s"
 
 
-def _latest_attempts_by_student(db: Session, exam_id: int) -> dict:
-    """Map student_id (user.id) -> their best attempt (prefer submitted, then highest attempt_no)."""
-    attempts = db.query(Attempt).filter(Attempt.exam_id == exam_id).all()
-    latest: dict = {}
+def _submitted_attempts_by_student(db: Session, exam_id: int) -> dict:
+    """Map student_id (user.id) -> all of their submitted attempts for this exam, ordered by attempt_no."""
+    attempts = (
+        db.query(Attempt)
+        .filter(Attempt.exam_id == exam_id, Attempt.submitted_at.isnot(None))
+        .order_by(Attempt.attempt_no)
+        .all()
+    )
+    by_student: dict = {}
     for attempt in attempts:
-        key = (attempt.submitted_at is not None, attempt.attempt_no or 0, attempt.attempt_id)
-        current = latest.get(attempt.student_id)
-        if current is None:
-            latest[attempt.student_id] = attempt
-            continue
-        current_key = (current.submitted_at is not None, current.attempt_no or 0, current.attempt_id)
-        if key > current_key:
-            latest[attempt.student_id] = attempt
-    return latest
+        by_student.setdefault(attempt.student_id, []).append(attempt)
+    return by_student
+
+
+def _best_attempt(attempts: list):
+    """Pick the highest-scoring attempt from a student's submitted attempts (tie-break: latest attempt_no)."""
+    if not attempts:
+        return None
+    return max(attempts, key=lambda a: (float(a.score) if a.score is not None else -1, a.attempt_no or 0))
 
 
 def _attempt_breakdown(db: Session, attempt_id: int):
@@ -87,21 +92,16 @@ def _attempt_breakdown(db: Session, attempt_id: int):
     return correct, total_questions
 
 
-def _student_status(attempt, exam: Exam) -> str:
-    if attempt is None or attempt.submitted_at is None:
-        return "not-submitted"
-    if exam.end_time and attempt.submitted_at > exam.end_time:
+def _attempt_status(attempt, exam: Exam) -> str:
+    if exam.end_time and attempt.submitted_at and attempt.submitted_at > exam.end_time:
         return "late"
     return "submitted"
 
 
-def _essay_counts(db: Session, exam_id: int):
-    rows = (
-        db.query(EssayAnswer.score)
-        .join(Attempt, Attempt.attempt_id == EssayAnswer.attempt_id)
-        .filter(Attempt.exam_id == exam_id)
-        .all()
-    )
+def _essay_counts(db: Session, attempt_ids: list):
+    if not attempt_ids:
+        return 0, 0
+    rows = db.query(EssayAnswer.score).filter(EssayAnswer.attempt_id.in_(attempt_ids)).all()
     total = len(rows)
     pending = sum(1 for (score,) in rows if score is None)
     return total, pending
@@ -124,20 +124,23 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
         .filter(StudentExam.exam_id == exam.exam_id)
         .all()
     )
-    latest_attempts = _latest_attempts_by_student(db, exam.exam_id)
+    submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     scores = []
     submitted_count = 0
     for _student_exam, user in roster:
-        attempt = latest_attempts.get(user.id)
-        if attempt and attempt.submitted_at is not None:
+        best = _best_attempt(submitted_by_student.get(user.id, []))
+        if best:
             submitted_count += 1
-            if attempt.score is not None:
-                scores.append(float(attempt.score))
+            if best.score is not None:
+                scores.append(float(best.score))
 
     total_questions = (
         db.query(func.count(ExamQuestion.question_id)).filter(ExamQuestion.exam_id == exam.exam_id).scalar() or 0
     )
-    total_essay, pending_essay = _essay_counts(db, exam.exam_id)
+    # Essay counts span every submitted attempt (not just each student's best) so a teacher can
+    # grade essays from any attempt, since grading can itself change which attempt ends up "best".
+    all_submitted_ids = [attempt.attempt_id for attempts in submitted_by_student.values() for attempt in attempts]
+    total_essay, pending_essay = _essay_counts(db, all_submitted_ids)
 
     return {
         "totalStudents": len(roster),
@@ -160,33 +163,54 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
         .order_by(User.full_name)
         .all()
     )
-    latest_attempts = _latest_attempts_by_student(db, exam.exam_id)
+    submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     rows = []
     for _student_exam, user in roster:
-        attempt = latest_attempts.get(user.id)
-        correct, total_questions = _attempt_breakdown(db, attempt.attempt_id) if attempt else (0, 0)
+        attempts_list = submitted_by_student.get(user.id, [])
+
+        attempt_summaries = []
+        for attempt in attempts_list:
+            correct, total_questions = _attempt_breakdown(db, attempt.attempt_id)
+            attempt_summaries.append({
+                "attemptId": attempt.attempt_id,
+                "attemptNumber": attempt.attempt_no,
+                "score": _score_value(attempt.score),
+                "correctAnswers": correct,
+                "totalQuestions": total_questions,
+                "timeSpent": _time_taken(attempt.start_time, attempt.end_time, attempt.submitted_at),
+                "status": _attempt_status(attempt, exam),
+                "submittedAt": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            })
+
+        best = _best_attempt(attempts_list)
+        best_summary = (
+            next(s for s in attempt_summaries if s["attemptId"] == best.attempt_id) if best else None
+        )
+
         rows.append({
-            "id": str(attempt.attempt_id) if attempt else user.school_id,
-            "attemptId": attempt.attempt_id if attempt else None,
+            "id": str(best.attempt_id) if best else user.school_id,
+            "attemptId": best.attempt_id if best else None,
             "studentId": user.school_id,
             "name": user.full_name,
-            "score": _score_value(attempt.score) if attempt else 0,
-            "correctAnswers": correct,
-            "totalQuestions": total_questions,
-            "timeSpent": _time_taken(attempt.start_time, attempt.end_time, attempt.submitted_at) if attempt else "-",
-            "status": _student_status(attempt, exam),
-            "submittedAt": attempt.submitted_at.isoformat() if attempt and attempt.submitted_at else None,
+            "score": best_summary["score"] if best_summary else 0,
+            "correctAnswers": best_summary["correctAnswers"] if best_summary else 0,
+            "totalQuestions": best_summary["totalQuestions"] if best_summary else 0,
+            "timeSpent": best_summary["timeSpent"] if best_summary else "-",
+            "status": best_summary["status"] if best_summary else "not-submitted",
+            "submittedAt": best_summary["submittedAt"] if best_summary else None,
+            "attempts": attempt_summaries,
         })
     return rows
 
 
 def _build_question_stats(db: Session, exam: Exam) -> list:
-    submitted_attempt_ids = [
-        attempt.attempt_id
-        for attempt in db.query(Attempt)
-        .filter(Attempt.exam_id == exam.exam_id, Attempt.submitted_at.isnot(None))
-        .all()
-    ]
+    # One data point per student (their best attempt), so a student who retried isn't counted 3x.
+    submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
+    submitted_attempt_ids = []
+    for attempts in submitted_by_student.values():
+        best = _best_attempt(attempts)
+        if best:
+            submitted_attempt_ids.append(best.attempt_id)
     links = (
         db.query(ExamQuestion)
         .options(selectinload(ExamQuestion.question).selectinload(Question.options))
@@ -466,6 +490,7 @@ def list_essay_answers(
         {
             "essayAnswerId": essay.essay_answer_id,
             "attemptId": attempt.attempt_id,
+            "attemptNumber": attempt.attempt_no,
             "studentId": user.school_id,
             "studentName": user.full_name,
             "questionId": question.question_id,

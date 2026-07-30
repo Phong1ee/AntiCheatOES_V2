@@ -24,6 +24,12 @@ import {
   ArrowUp,
   ArrowDown,
   MoreVertical,
+  X,
+  History,
+  Trophy,
+  Clock,
+  CheckCircle,
+  ChevronRight,
 } from 'lucide-react';
 import { teacherResultsService, downloadCsv } from '../../../services/teacher-results.service';
 import type { StudentResult } from '../../../types/teacher-results';
@@ -61,6 +67,128 @@ function toCsvRow(result: StudentResult): (string | number)[] {
   ];
 }
 
+interface AttemptsModalProps {
+  result: StudentResult;
+  onClose: () => void;
+  onViewAttempt: (attemptId: number) => void;
+}
+
+function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
+  const bestAttemptId = result.attemptId;
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="size-10 bg-teal-100 rounded-xl flex items-center justify-center">
+              <History className="size-5 text-teal-600" />
+            </div>
+            <div>
+              <h2 className="text-gray-800 text-base">{result.name}</h2>
+              <p className="text-xs text-gray-500">
+                {result.studentId} · {result.attempts.length} attempt{result.attempts.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        {/* Attempts list */}
+        <div className="p-5 space-y-3 max-h-[420px] overflow-y-auto">
+          {[...result.attempts].reverse().map((attempt) => {
+            const isBest = bestAttemptId === attempt.attemptId;
+            return (
+              <div
+                key={attempt.attemptId}
+                className={`rounded-xl border p-4 ${isBest ? 'border-teal-200 bg-teal-50/50' : 'border-gray-100 bg-gray-50'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {/* Attempt badge */}
+                    <div className={`size-9 rounded-full flex items-center justify-center text-sm font-medium ${isBest ? 'bg-teal-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                      {attempt.attemptNumber ?? '?'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">Attempt {attempt.attemptNumber ?? '?'}</span>
+                        {isBest && (
+                          <span className="inline-flex items-center gap-1 text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
+                            <Trophy className="size-3" />
+                            Best
+                          </span>
+                        )}
+                        {attempt.status === 'late' && (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Late</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {attempt.submittedAt
+                          ? new Date(attempt.submittedAt).toLocaleString('en-US', {
+                              month: 'short', day: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })
+                          : 'Not submitted'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    {/* Stats */}
+                    <div className="text-right">
+                      <p className={`text-lg font-medium ${attempt.score >= 90 ? 'text-green-600' : attempt.score >= 75 ? 'text-blue-600' : attempt.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {attempt.score}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <CheckCircle className="size-3" />
+                          {attempt.correctAnswers}/{attempt.totalQuestions}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="size-3" />
+                          {attempt.timeSpent}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* View button */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      onClick={() => { onViewAttempt(attempt.attemptId); onClose(); }}
+                    >
+                      <Eye className="size-3 mr-1" />
+                      View
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="p-4 border-t border-gray-100">
+          <button
+            onClick={onClose}
+            className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ResultsTable({ examId, examName, refreshKey, filters, onViewDetail }: ResultsTableProps) {
   const [results, setResults] = useState<StudentResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +196,7 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>(null);
+  const [attemptsFor, setAttemptsFor] = useState<StudentResult | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +302,7 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
   }
 
   return (
+    <>
     <Card className="shadow-md rounded-2xl border-0">
       <CardContent className="p-0">
         {/* Bulk Actions */}
@@ -216,12 +346,13 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     {getSortIcon('name')}
                   </button>
                 </TableHead>
+                <TableHead className="text-center">Attempts</TableHead>
                 <TableHead className="text-center">
                   <button
                     onClick={() => handleSort('score')}
                     className="flex items-center gap-2 mx-auto hover:text-teal-600"
                   >
-                    Score
+                    Best Score
                     {getSortIcon('score')}
                   </button>
                 </TableHead>
@@ -265,6 +396,24 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     </TableCell>
                     <TableCell className="text-gray-600">{result.studentId}</TableCell>
                     <TableCell className="text-gray-800">{result.name}</TableCell>
+                    <TableCell className="text-center">
+                      {result.attempts.length > 0 ? (
+                        <button
+                          onClick={() => setAttemptsFor(result)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-colors ${
+                            result.attempts.length > 1
+                              ? 'bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200'
+                              : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                          }`}
+                        >
+                          <History className="size-3" />
+                          {result.attempts.length} attempt{result.attempts.length !== 1 ? 's' : ''}
+                          {result.attempts.length > 1 && <ChevronRight className="size-3" />}
+                        </button>
+                      ) : (
+                        <span className="text-gray-400 text-xs">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-center">
                       <span
                         className={`inline-flex items-center justify-center w-12 h-8 rounded-lg ${
@@ -315,7 +464,13 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                             {result.attemptId !== null && (
                               <DropdownMenuItem onClick={() => onViewDetail(result.attemptId as number)}>
                                 <Eye className="size-4 mr-2" />
-                                View Details
+                                View Best Attempt
+                              </DropdownMenuItem>
+                            )}
+                            {result.attempts.length > 1 && (
+                              <DropdownMenuItem onClick={() => setAttemptsFor(result)}>
+                                <History className="size-4 mr-2" />
+                                View All Attempts
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => exportOne(result)}>
@@ -331,7 +486,7 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
               })}
               {sortedResults.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
+                  <TableCell colSpan={9} className="text-center text-gray-500 py-8">
                     No students match the current filters.
                   </TableCell>
                 </TableRow>
@@ -341,5 +496,15 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
         </div>
       </CardContent>
     </Card>
+
+    {/* Attempts modal */}
+    {attemptsFor && (
+      <AttemptsModal
+        result={attemptsFor}
+        onClose={() => setAttemptsFor(null)}
+        onViewAttempt={onViewDetail}
+      />
+    )}
+    </>
   );
 }

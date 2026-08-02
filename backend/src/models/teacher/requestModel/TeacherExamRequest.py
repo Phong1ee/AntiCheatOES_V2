@@ -3,6 +3,13 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+
+ExamStatusValue = Literal["draft", "published", "archived"]
+
+
+class TeacherExamStatusRequest(BaseModel):
+    status: ExamStatusValue
+
 class TeacherExamRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -18,7 +25,7 @@ class TeacherExamRequest(BaseModel):
     duration_minutes: int = Field(..., gt=0, description="The duration of the exam in minutes.")
     start_time: datetime = Field(..., description="Local exam availability start date and time.")
     end_time: datetime = Field(..., description="Local exam availability end date and time.")
-    status: Literal["draft", "published", "archived"] = Field(default="draft")
+    status: ExamStatusValue = Field(default="draft")
     result_visibility: Literal["hidden", "score-only", "full"] = Field(...)
     subject_id: str = Field(..., description="The ID of the subject associated with the exam.")
 

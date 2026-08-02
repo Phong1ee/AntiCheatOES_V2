@@ -11,7 +11,6 @@ interface Exam {
   title: string;
   subject: string;
   subjectId: string;
-  class: string;
   status: ExamStatus;
   startTime: string;
   endTime: string;
@@ -27,12 +26,11 @@ interface Exam {
   passingScore: number;
 }
 
-const toManagerExam = (exam: TeacherExamApi, subjects: TeacherSubject[]): Exam => ({
+const toManagerExam = (exam: TeacherExamApi): Exam => ({
   id: String(exam.exam_id),
   title: exam.title,
   subject: exam.subject ?? "No subject",
-  subjectId: exam.subject_id ?? subjects.find((subject) => subject.subject_name === exam.subject)?.subject_id ?? "",
-  class: "Unassigned",
+  subjectId: exam.subject_id ?? "",
   status: exam.status,
   startTime: exam.start_time ?? "",
   endTime: exam.end_time ?? "",
@@ -68,7 +66,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
         teacherExamService.list(),
         teacherExamService.listSubjects(),
       ]);
-      const mappedExams = apiExams.map((exam) => toManagerExam(exam, apiSubjects));
+      const mappedExams = apiExams.map(toManagerExam);
       setSubjects(apiSubjects);
       setExams(mappedExams);
       setSelectedExamId((current) =>
@@ -138,6 +136,23 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
     toast.success("Exam deleted successfully.");
   };
 
+  const handleDuplicateExam = async (examId: string) => {
+    const duplicated = await teacherExamService.duplicate(Number(examId));
+    const mappedDuplicate = toManagerExam(duplicated);
+    setExams((current) => [mappedDuplicate, ...current]);
+    setSelectedExamId(mappedDuplicate.id);
+    toast.success("Exam duplicated as a draft.");
+  };
+
+  const handleStatusChange = async (examId: string, status: ExamStatus) => {
+    const updated = await teacherExamService.updateStatus(Number(examId), status);
+    const mappedUpdated = toManagerExam(updated);
+    setExams((current) => current.map((exam) => exam.id === examId ? mappedUpdated : exam));
+    setSelectedExamId((current) => current && current !== examId ? current : mappedUpdated.id);
+    const action = status === "published" ? "published" : status === "archived" ? "archived" : "set to draft";
+    toast.success(`Exam ${action} successfully.`);
+  };
+
   if (loading) {
     return (
       <div className="h-[calc(100vh-64px)] flex items-center justify-center">
@@ -161,6 +176,8 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
           onSelectExam={setSelectedExamId}
           onCreateNew={handleCreateNew}
           onDeleteExam={handleDeleteExam}
+          onDuplicateExam={handleDuplicateExam}
+          onStatusChange={handleStatusChange}
         />
       </div>
       <div className="flex-1">

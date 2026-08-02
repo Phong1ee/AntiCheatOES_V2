@@ -8,14 +8,39 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from src.a_db_config import Chapter, Exam, ExamQuestion, ExamSetting, Option, Question, QuestionStatus, Subject, User
+from src.a_db_config import (
+    Attempt,
+    AttemptQuestion,
+    Chapter,
+    EssayAnswer,
+    Exam,
+    ExamEvent,
+    ExamPoolConfig,
+    ExamPoolQuestion,
+    ExamPoolRule,
+    ExamQuestion,
+    ExamSetting,
+    Option,
+    Question,
+    QuestionSelectionMode,
+    QuestionStatus,
+    StudentExam,
+    Subject,
+    User,
+)
 from src.models.teacher.requestModel.ExamSettingsRequest import ExamSettingsRequest
 from src.models.teacher.requestModel.QuestionAddToDBRequest import QuestionAddToDBRequest
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
-from src.models.teacher.requestModel.TeacherExamRequest import TeacherExamRequest
+from src.models.teacher.requestModel.TeacherExamRequest import TeacherExamRequest, TeacherExamStatusRequest
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
-from src.route.teacherRoute.addExamRoute import add_exam_to_database, delete_exam_from_database, update_exam_in_database
+from src.route.teacherRoute.addExamRoute import (
+    add_exam_to_database,
+    delete_exam_from_database,
+    duplicate_exam,
+    update_exam_in_database,
+    update_exam_status,
+)
 from src.route.teacherRoute.addQuestionsRoute import (
     add_questions_to_exam_from_question_bank,
     add_question_to_database,
@@ -219,6 +244,202 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             update_exam_in_database(other.exam_id, request, {"school_id": "T1"}, {}, self.db)
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_duplicate_owned_manual_exam_copies_configuration_without_student_data(self):
+        source = self.db.query(Exam).filter_by(examcode="A").one()
+        source.title = "Manual source"
+        source.description = "Reusable configuration"
+        source.max_attempt = 3
+        source.duration_minutes = 75
+        source.start_time = datetime(2026, 8, 3, 9, 0)
+        source.end_time = datetime(2026, 8, 3, 11, 0)
+        source.total_points = 5
+        source.passing_score = 3
+        source.status = "published"
+        teacher = self.db.query(User).filter_by(school_id="T1").one()
+        student = User(
+            school_id="S1",
+            full_name="Student One",
+            email="s1@example.test",
+            password_hash="x",
+            role="student",
+        )
+        question = Question(
+            question_text="Reusable essay",
+            question_difficulties="medium",
+            question_type="essay",
+            subject_id="DB",
+            created_by=teacher.school_id,
+            question_status=QuestionStatus.approved,
+        )
+        self.db.add_all([student, question])
+        self.db.flush()
+        self.db.add_all(
+            [
+                ExamQuestion(exam_id=source.exam_id, question_id=question.question_id, question_point=5),
+                ExamSetting(
+                    exam_id=source.exam_id,
+                    shuffle_question=True,
+                    shuffle_answer_options=True,
+                    auto_submit_on_expire=False,
+                    grace_period=4,
+                    force_fullscreen_thresh=2,
+                    tab_switch_thresh=3,
+                    copy_paste_thresh=1,
+                    auto_grade=False,
+                ),
+                StudentExam(student_id=student.school_id, exam_id=source.exam_id),
+            ]
+        )
+        self.db.flush()
+        attempt = Attempt(
+            exam_id=source.exam_id,
+            student_id=student.school_id,
+            attempt_no=1,
+            score=4,
+            start_time=datetime(2026, 8, 3, 9, 0),
+        )
+        self.db.add(attempt)
+        self.db.flush()
+        self.db.add(AttemptQuestion(attempt_id=attempt.attempt_id, question_id=question.question_id, question_point=5))
+        self.db.flush()
+        self.db.add_all(
+            [
+                EssayAnswer(attempt_id=attempt.attempt_id, question_id=question.question_id, answer_text="Answer", score=4),
+                ExamEvent(attempt_id=attempt.attempt_id, event_type="tab_switch", event_timestamp=datetime(2026, 8, 3, 9, 5)),
+            ]
+        )
+        self.db.commit()
+        original_question_count = self.db.query(Question).count()
+        original_attempt_question_count = self.db.query(AttemptQuestion).count()
+        original_answer_count = self.db.query(EssayAnswer).count()
+        original_event_count = self.db.query(ExamEvent).count()
+
+        result = duplicate_exam(source.exam_id, {"school_id": "T1"}, {}, self.db)
+        duplicate = self.db.get(Exam, result["exam_id"])
+
+        self.assertNotEqual(duplicate.exam_id, source.exam_id)
+        self.assertNotEqual(duplicate.examcode, source.examcode)
+        self.assertEqual(len(duplicate.examcode), 20)
+        self.assertEqual(duplicate.status.value, "draft")
+        self.assertEqual(duplicate.title, "Copy of Manual source")
+        self.assertEqual(
+            (duplicate.subject_id, duplicate.description, duplicate.duration_minutes, duplicate.max_attempt),
+            (source.subject_id, source.description, source.duration_minutes, source.max_attempt),
+        )
+        copied_link = self.db.query(ExamQuestion).filter_by(exam_id=duplicate.exam_id).one()
+        self.assertEqual((copied_link.question_id, copied_link.question_point), (question.question_id, 5))
+        self.assertEqual(self.db.query(Question).count(), original_question_count)
+        copied_settings = self.db.get(ExamSetting, duplicate.exam_id)
+        self.assertEqual(
+            (copied_settings.shuffle_question, copied_settings.grace_period, copied_settings.auto_grade),
+            (True, 4, False),
+        )
+        self.assertEqual(self.db.query(StudentExam).filter_by(exam_id=duplicate.exam_id).count(), 0)
+        self.assertEqual(self.db.query(Attempt).filter_by(exam_id=duplicate.exam_id).count(), 0)
+        self.assertEqual(result["totalStudents"], 0)
+        self.assertEqual(self.db.query(AttemptQuestion).count(), original_attempt_question_count)
+        self.assertEqual(self.db.query(EssayAnswer).count(), original_answer_count)
+        self.assertEqual(self.db.query(ExamEvent).count(), original_event_count)
+
+        other_exam = self.db.query(Exam).filter_by(examcode="O").one()
+        with self.assertRaises(HTTPException) as forbidden:
+            duplicate_exam(other_exam.exam_id, {"school_id": "T1"}, {}, self.db)
+        self.assertEqual(forbidden.exception.status_code, 403)
+
+    def test_duplicate_pool_exam_copies_rules_and_candidates(self):
+        source = self.db.query(Exam).filter_by(examcode="B").one()
+        source.question_selection_mode = QuestionSelectionMode.pool
+        teacher = self.db.query(User).filter_by(school_id="T1").one()
+        question = Question(
+            question_text="Pool candidate",
+            question_difficulties="easy",
+            question_type="essay",
+            subject_id="DB",
+            created_by=teacher.school_id,
+            question_status=QuestionStatus.approved,
+        )
+        self.db.add(question)
+        self.db.flush()
+        config = ExamPoolConfig(exam_id=source.exam_id, subject_id="DB", fixed_randomization=False, version=7)
+        self.db.add(config)
+        self.db.flush()
+        rule = ExamPoolRule(
+            pool_config_id=config.pool_config_id,
+            chapter_id=1,
+            lo_id=None,
+            difficulty="easy",
+            draw_count=1,
+        )
+        self.db.add(rule)
+        self.db.flush()
+        self.db.add(ExamPoolQuestion(rule_id=rule.rule_id, question_id=question.question_id))
+        self.db.commit()
+
+        result = duplicate_exam(source.exam_id, {"school_id": "T1"}, {}, self.db)
+        copied_config = self.db.query(ExamPoolConfig).filter_by(exam_id=result["exam_id"]).one()
+        copied_rule = self.db.query(ExamPoolRule).filter_by(pool_config_id=copied_config.pool_config_id).one()
+        copied_candidate = self.db.query(ExamPoolQuestion).filter_by(rule_id=copied_rule.rule_id).one()
+        self.assertEqual((copied_config.subject_id, copied_config.fixed_randomization, copied_config.version), ("DB", False, 7))
+        self.assertEqual((copied_rule.chapter_id, copied_rule.lo_id, copied_rule.draw_count), (1, None, 1))
+        self.assertEqual(copied_candidate.question_id, question.question_id)
+        self.assertEqual(result["question_selection_mode"], "pool")
+
+    def test_focused_status_updates_enforce_validation_and_ownership(self):
+        valid = self.db.query(Exam).filter_by(examcode="A").one()
+        valid.total_points = 5
+        teacher = self.db.query(User).filter_by(school_id="T1").one()
+        question = Question(
+            question_text="Publishable",
+            question_difficulties="medium",
+            question_type="essay",
+            subject_id="DB",
+            created_by=teacher.school_id,
+            question_status=QuestionStatus.approved,
+        )
+        self.db.add(question)
+        self.db.flush()
+        self.db.add(ExamQuestion(exam_id=valid.exam_id, question_id=question.question_id, question_point=5))
+        self.db.commit()
+
+        for target_status in ("archived", "draft", "published"):
+            result = update_exam_status(
+                valid.exam_id,
+                TeacherExamStatusRequest(status=target_status),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+            self.assertEqual(result["status"], target_status)
+            self.assertEqual(self.db.get(Exam, valid.exam_id).status.value, target_status)
+
+        invalid = self.db.query(Exam).filter_by(examcode="B").one()
+        invalid.status = "archived"
+        self.db.commit()
+        with self.assertRaises(HTTPException) as publish_error:
+            update_exam_status(
+                invalid.exam_id,
+                TeacherExamStatusRequest(status="published"),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(publish_error.exception.status_code, 422)
+        self.assertIn("at least one question", publish_error.exception.detail)
+        self.assertEqual(self.db.get(Exam, invalid.exam_id).status.value, "archived")
+
+        other = self.db.query(Exam).filter_by(examcode="O").one()
+        with self.assertRaises(HTTPException) as forbidden:
+            update_exam_status(
+                other.exam_id,
+                TeacherExamStatusRequest(status="draft"),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(forbidden.exception.status_code, 403)
+        with self.assertRaises(ValidationError):
+            TeacherExamStatusRequest(status="scheduled")
 
     def test_create_exam_persists_scores_and_rejects_invalid_score_range(self):
         request = TeacherExamRequest(

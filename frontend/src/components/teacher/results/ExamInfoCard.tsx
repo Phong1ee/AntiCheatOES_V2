@@ -11,7 +11,15 @@ import {
   RefreshCw,
   PenLine,
   AlertTriangle,
+  SlidersHorizontal,
 } from 'lucide-react';
+import type { ResultStrategy } from '../../../types/teacher-results';
+
+const STRATEGY_LABELS: Record<ResultStrategy, string> = {
+  highest: 'Highest Attempt',
+  average: 'Average of Attempts',
+  last_attempt: 'Last Attempt',
+};
 
 interface ExamInfoCardProps {
   examName: string;
@@ -27,6 +35,7 @@ interface ExamInfoCardProps {
   hasEssayQuestions?: boolean;
   pendingEssayCount?: number;
   totalEssayCount?: number;
+  resultStrategy?: ResultStrategy;
   onRefreshGrades?: () => void;
   onManualGrading?: () => void;
 }
@@ -45,6 +54,7 @@ export function ExamInfoCard({
   hasEssayQuestions = false,
   pendingEssayCount = 0,
   totalEssayCount = 0,
+  resultStrategy,
   onRefreshGrades,
   onManualGrading,
 }: ExamInfoCardProps) {
@@ -73,6 +83,12 @@ export function ExamInfoCard({
                 <Calendar className="size-3.5" />
                 {fmt(startDate)} – {fmt(endDate)}
               </span>
+              {resultStrategy && (
+                <span className="inline-flex items-center gap-1.5 text-sm bg-white/20 text-white px-3 py-1 rounded-full backdrop-blur-sm">
+                  <SlidersHorizontal className="size-3.5" />
+                  {STRATEGY_LABELS[resultStrategy]}
+                </span>
+              )}
             </div>
           </div>
 

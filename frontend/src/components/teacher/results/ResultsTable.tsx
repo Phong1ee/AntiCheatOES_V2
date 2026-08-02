@@ -53,7 +53,7 @@ interface ResultsTableProps {
   onViewDetail: (attemptId: number) => void;
 }
 
-const CSV_HEADERS = ['Student ID', 'Name', 'Score', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
+const CSV_HEADERS = ['Student ID', 'Name', 'Final Score', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
 
 function toCsvRow(result: StudentResult): (string | number)[] {
   return [
@@ -75,7 +75,7 @@ interface AttemptsModalProps {
 }
 
 function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
-  const bestAttemptId = result.attemptId;
+  const finalAttemptId = result.attemptId;
   return (
     <div
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
@@ -106,25 +106,25 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
         {/* Attempts list */}
         <div className="p-5 space-y-3 max-h-[420px] overflow-y-auto">
           {[...result.attempts].reverse().map((attempt) => {
-            const isBest = bestAttemptId === attempt.attemptId;
+            const isFinal = finalAttemptId === attempt.attemptId;
             return (
               <div
                 key={attempt.attemptId}
-                className={`rounded-xl border p-4 ${isBest ? 'border-teal-200 bg-teal-50/50' : 'border-gray-100 bg-gray-50'}`}
+                className={`rounded-xl border p-4 ${isFinal ? 'border-teal-200 bg-teal-50/50' : 'border-gray-100 bg-gray-50'}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {/* Attempt badge */}
-                    <div className={`size-9 rounded-full flex items-center justify-center text-sm font-medium ${isBest ? 'bg-teal-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                    <div className={`size-9 rounded-full flex items-center justify-center text-sm font-medium ${isFinal ? 'bg-teal-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
                       {attempt.attemptNumber ?? '?'}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-700">Attempt {attempt.attemptNumber ?? '?'}</span>
-                        {isBest && (
+                        {isFinal && (
                           <span className="inline-flex items-center gap-1 text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
                             <Trophy className="size-3" />
-                            Best
+                            Final
                           </span>
                         )}
                         {attempt.status === 'late' && (

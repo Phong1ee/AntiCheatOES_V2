@@ -11,6 +11,7 @@ from src.a_db_config import (
     CourseClass,
     Exam,
     ExamQuestion,
+    ExamStatus,
     Question,
     StudentClass,
     StudentExam,
@@ -387,8 +388,28 @@ def get_exam_overview(
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     now = datetime.now()
-    active = db.query(Exam).filter(Exam.manage_by == teacher.school_id, Exam.start_time <= now, Exam.end_time >= now).first()
-    upcoming = db.query(Exam).filter(Exam.manage_by == teacher.school_id, Exam.start_time > now).order_by(Exam.start_time).limit(4).all()
+    active_exams = (
+        db.query(Exam)
+        .filter(
+            Exam.manage_by == teacher.school_id,
+            Exam.status == ExamStatus.published,
+            Exam.start_time <= now,
+            Exam.end_time >= now,
+        )
+        .order_by(Exam.end_time)
+        .all()
+    )
+    upcoming = (
+        db.query(Exam)
+        .filter(
+            Exam.manage_by == teacher.school_id,
+            Exam.status == ExamStatus.published,
+            Exam.start_time > now,
+        )
+        .order_by(Exam.start_time)
+        .limit(4)
+        .all()
+    )
     total_students = (
         db.query(func.count(func.distinct(StudentExam.student_id)))
         .join(Exam, StudentExam.exam_id == Exam.exam_id)
@@ -409,7 +430,7 @@ def get_exam_overview(
         .all()
     )
     return {
-        "active_exam": _serialize_exam(db, active, now) if active else None,
+        "active_exams": [_serialize_exam(db, exam, now) for exam in active_exams],
         "upcoming_exams": [_serialize_exam(db, exam, now) for exam in upcoming],
         "total_students": total_students,
         "subjects": [

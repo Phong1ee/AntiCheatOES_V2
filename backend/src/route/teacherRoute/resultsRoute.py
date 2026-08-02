@@ -15,11 +15,14 @@ from src.a_db_config import (
     AttemptQuestion,
     Exam,
     ExamQuestion,
+    ExamSetting,
+    ExamStatus,
     EssayAnswer,
     MCQAnswer,
     Option,
     Question,
     QuestionType,
+    ResultStrategy,
     StudentExam,
     User,
 )
@@ -33,6 +36,10 @@ _SCHEDULE_STATUS_MAP = {"upcoming": "scheduled", "ongoing": "in-progress", "comp
 
 class GradeEssayRequest(BaseModel):
     score: float
+
+
+class UpdateStrategyRequest(BaseModel):
+    strategy: str
 
 
 def _score_value(value):
@@ -73,6 +80,62 @@ def _best_attempt(attempts: list):
     if not attempts:
         return None
     return max(attempts, key=lambda a: (float(a.score) if a.score is not None else -1, a.attempt_no or 0))
+
+
+def _latest_attempt(attempts: list):
+    if not attempts:
+        return None
+    return max(attempts, key=lambda a: a.attempt_no or 0)
+
+
+def _representative_attempt(strategy: str, attempts: list):
+    """The single attempt used for display-only fields (correct count, time spent, status, attemptId).
+
+    'average' has no single attempt that represents it, so it falls back to the best attempt,
+    same as 'highest'.
+    """
+    if strategy == ResultStrategy.last_attempt.value:
+        return _latest_attempt(attempts)
+    return _best_attempt(attempts)
+
+
+def _compute_final_score(strategy: str, attempts: list):
+    """The official final score for a student on an exam, per the exam's chosen grading strategy."""
+    if not attempts:
+        return None
+    if strategy == ResultStrategy.average.value:
+        scored = [a.score for a in attempts if a.score is not None]
+        return round(sum(scored, Decimal("0")) / len(scored), 2) if scored else None
+    if strategy == ResultStrategy.last_attempt.value:
+        latest = _latest_attempt(attempts)
+        return latest.score if latest else None
+    best = _best_attempt(attempts)
+    return best.score if best else None
+
+
+def _get_or_create_settings(db: Session, exam: Exam) -> ExamSetting:
+    settings = db.get(ExamSetting, exam.exam_id)
+    if settings:
+        return settings
+    settings = ExamSetting(exam_id=exam.exam_id)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def _sync_final_scores(db: Session, exam: Exam) -> str:
+    """Recompute and persist every roster student's final_score using the exam's current strategy.
+
+    Returns the strategy used, so callers can also pick the matching representative attempt.
+    """
+    strategy = _get_or_create_settings(db, exam).result_strategy.value
+    submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
+    student_exams = db.query(StudentExam).filter(StudentExam.exam_id == exam.exam_id).all()
+    for student_exam in student_exams:
+        student_exam.final_score = _compute_final_score(strategy, submitted_by_student.get(student_exam.student_id, []))
+    db.commit()
+    return strategy
 
 
 def _attempt_breakdown(db: Session, attempt_id: int):
@@ -118,6 +181,7 @@ def _has_essay_questions(db: Session, exam_id: int) -> bool:
 
 
 def _exam_stats(db: Session, exam: Exam) -> dict:
+    strategy = _sync_final_scores(db, exam)
     roster = (
         db.query(StudentExam, User)
         .join(User, User.school_id == StudentExam.student_id)
@@ -127,18 +191,17 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     scores = []
     submitted_count = 0
-    for _student_exam, user in roster:
-        best = _best_attempt(submitted_by_student.get(user.school_id, []))
-        if best is not None:
+    for student_exam, user in roster:
+        if submitted_by_student.get(user.school_id):
             submitted_count += 1
-            if best.score is not None:
-                scores.append(float(best.score))
+            if student_exam.final_score is not None:
+                scores.append(float(student_exam.final_score))
 
     total_questions = (
         db.query(func.count(ExamQuestion.question_id)).filter(ExamQuestion.exam_id == exam.exam_id).scalar() or 0
     )
-    # Essay counts span every submitted attempt (not just each student's best) so a teacher can
-    # grade essays from any attempt, since grading can itself change which attempt ends up "best".
+    # Essay counts span every submitted attempt (not just each student's final attempt) so a teacher
+    # can grade essays from any attempt, since grading can itself change the computed final score.
     all_submitted_ids = [attempt.attempt_id for attempts in submitted_by_student.values() for attempt in attempts]
     total_essay, pending_essay = _essay_counts(db, all_submitted_ids)
 
@@ -152,10 +215,12 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
         "hasEssayQuestions": total_essay > 0 or _has_essay_questions(db, exam.exam_id),
         "pendingEssayCount": pending_essay,
         "totalEssayCount": total_essay,
+        "resultStrategy": strategy,
     }
 
 
 def _build_student_rows(db: Session, exam: Exam) -> list:
+    strategy = _sync_final_scores(db, exam)
     roster = (
         db.query(StudentExam, User)
         .join(User, User.school_id == StudentExam.student_id)
@@ -165,7 +230,7 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
     )
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     rows = []
-    for _student_exam, user in roster:
+    for student_exam, user in roster:
         attempts_list = submitted_by_student.get(user.school_id, [])
 
         attempt_summaries = []
@@ -182,35 +247,39 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
                 "submittedAt": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
             })
 
-        best = _best_attempt(attempts_list)
-        best_summary = (
-            next(s for s in attempt_summaries if s["attemptId"] == best.attempt_id) if best else None
+        representative = _representative_attempt(strategy, attempts_list)
+        representative_summary = (
+            next(s for s in attempt_summaries if s["attemptId"] == representative.attempt_id)
+            if representative
+            else None
         )
 
         rows.append({
-            "id": str(best.attempt_id) if best else user.school_id,
-            "attemptId": best.attempt_id if best else None,
+            "id": str(representative.attempt_id) if representative else user.school_id,
+            "attemptId": representative.attempt_id if representative else None,
             "studentId": user.school_id,
             "name": user.full_name,
-            "score": best_summary["score"] if best_summary else 0,
-            "correctAnswers": best_summary["correctAnswers"] if best_summary else 0,
-            "totalQuestions": best_summary["totalQuestions"] if best_summary else 0,
-            "timeSpent": best_summary["timeSpent"] if best_summary else "-",
-            "status": best_summary["status"] if best_summary else "not-submitted",
-            "submittedAt": best_summary["submittedAt"] if best_summary else None,
+            "score": _score_value(student_exam.final_score) if representative else 0,
+            "correctAnswers": representative_summary["correctAnswers"] if representative_summary else 0,
+            "totalQuestions": representative_summary["totalQuestions"] if representative_summary else 0,
+            "timeSpent": representative_summary["timeSpent"] if representative_summary else "-",
+            "status": representative_summary["status"] if representative_summary else "not-submitted",
+            "submittedAt": representative_summary["submittedAt"] if representative_summary else None,
             "attempts": attempt_summaries,
         })
     return rows
 
 
 def _build_question_stats(db: Session, exam: Exam) -> list:
-    # One data point per student (their best attempt), so a student who retried isn't counted 3x.
+    # One data point per student (their representative attempt per the exam's strategy), so a
+    # student who retried isn't counted multiple times.
+    strategy = _get_or_create_settings(db, exam).result_strategy.value
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
     submitted_attempt_ids = []
     for attempts in submitted_by_student.values():
-        best = _best_attempt(attempts)
-        if best:
-            submitted_attempt_ids.append(best.attempt_id)
+        representative = _representative_attempt(strategy, attempts)
+        if representative:
+            submitted_attempt_ids.append(representative.attempt_id)
     links = (
         db.query(ExamQuestion)
         .options(selectinload(ExamQuestion.question).selectinload(Question.options))
@@ -324,7 +393,12 @@ def list_exam_results(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    exams = db.query(Exam).filter(Exam.manage_by == teacher.school_id).order_by(Exam.exam_id.desc()).all()
+    exams = (
+        db.query(Exam)
+        .filter(Exam.manage_by == teacher.school_id, Exam.status == ExamStatus.published)
+        .order_by(Exam.exam_id.desc())
+        .all()
+    )
     now = datetime.now()
     result = []
     for exam in exams:
@@ -361,6 +435,31 @@ def get_exam_results_overview(
         "status": _SCHEDULE_STATUS_MAP.get(get_exam_status(exam, datetime.now()), "scheduled"),
         **_exam_stats(db, exam),
     }
+
+
+@router.put("/results/exams/{exam_id}/strategy")
+def update_result_strategy(
+    exam_id: int,
+    payload: UpdateStrategyRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    exam = _owned_exam(db, exam_id, teacher.school_id)
+
+    try:
+        strategy = ResultStrategy(payload.strategy)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid strategy")
+
+    settings = _get_or_create_settings(db, exam)
+    settings.result_strategy = strategy
+    db.commit()
+    _sync_final_scores(db, exam)
+
+    return {"resultStrategy": strategy.value}
 
 
 @router.get("/results/exams/{exam_id}/students")

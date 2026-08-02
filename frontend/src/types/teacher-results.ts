@@ -1,6 +1,7 @@
 export type ExamResultStatus = "scheduled" | "in-progress" | "completed";
 export type StudentResultStatus = "submitted" | "late" | "not-submitted";
 export type QuestionKind = "mcq" | "true-false" | "essay";
+export type ResultStrategy = "highest" | "average" | "last_attempt";
 
 interface ExamResultStatsApi {
   totalStudents: number;
@@ -12,6 +13,7 @@ interface ExamResultStatsApi {
   hasEssayQuestions: boolean;
   pendingEssayCount: number;
   totalEssayCount: number;
+  resultStrategy: ResultStrategy;
 }
 
 export interface ExamResultSummary extends ExamResultStatsApi {
@@ -56,7 +58,7 @@ export interface StudentResult {
   timeSpent: string;
   status: StudentResultStatus;
   submittedAt: string | null;
-  /** Every submitted attempt this student made on this exam (best attempt is what the row above summarizes). */
+  /** Every submitted attempt this student made on this exam (the row above summarizes the exam's final-score strategy). */
   attempts: StudentAttemptSummary[];
 }
 

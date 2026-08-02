@@ -131,7 +131,9 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
   }
 
   const filteredExams = exams
-    // Filter by status
+    // Only published exams belong on the dashboard — drafts/archived stay in the Exams tab for editing
+    .filter((exam) => exam.status === 'published')
+    // Filter by schedule status
     .filter((exam) => filterStatus === 'all' || exam.schedule_status === filterStatus)
     // Filter by search query
     .filter((exam) => {

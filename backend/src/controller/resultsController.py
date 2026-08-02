@@ -14,7 +14,7 @@ class ResultsController:
 
         return {
             "success": True,
-            "results": resultModel.get_student_results(user["id"]),
+            "results": resultModel.get_student_results(user["school_id"]),
         }
 
     @staticmethod
@@ -26,7 +26,7 @@ class ResultsController:
         if not user:
             raise Exception("User not found")
 
-        result = resultModel.get_student_result_detail(user["id"], attempt_id)
+        result = resultModel.get_student_result_detail(user["school_id"], attempt_id)
         if not result:
             raise Exception("Result not found")
 

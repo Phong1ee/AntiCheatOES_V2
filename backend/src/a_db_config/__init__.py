@@ -67,6 +67,19 @@ result_visibility_enum = Enum(
 )
 
 
+class ResultStrategy(str, enum.Enum):
+    highest = "highest"
+    average = "average"
+    last_attempt = "last_attempt"
+
+
+result_strategy_enum = Enum(
+    ResultStrategy,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="resultstrategy",
+)
+
+
 class QuestionDifficulty(str, enum.Enum):
     easy = "easy"
     medium = "medium"
@@ -460,6 +473,12 @@ class ExamSetting(Base):
     auto_grade: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")
     )
+    result_strategy: Mapped[ResultStrategy] = mapped_column(
+        result_strategy_enum,
+        nullable=False,
+        default=ResultStrategy.highest,
+        server_default=ResultStrategy.highest.value,
+    )
 
     exam: Mapped["Exam"] = relationship(back_populates="settings")
 
@@ -487,6 +506,7 @@ class StudentExam(Base):
     exam_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("exam.exam_id", ondelete="CASCADE"), primary_key=True
     )
+    final_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
 
     student: Mapped["User"] = relationship(
         back_populates="student_exams",

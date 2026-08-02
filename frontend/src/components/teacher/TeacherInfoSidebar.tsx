@@ -81,7 +81,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
 
         const data = await response.json();
         console.log("Fetched exam data:", data);
-        setActiveExamsCount(data.active_exam ? 1 : 0);
+        setActiveExamsCount(Array.isArray(data.active_exams) ? data.active_exams.length : 0);
         setTotalStudentsCount(data.total_students || 0);
         setUpcomingExams(data.upcoming_exams || []);
         setQuestionBanks(data.subjects || []);

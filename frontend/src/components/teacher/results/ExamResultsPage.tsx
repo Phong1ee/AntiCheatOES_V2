@@ -186,6 +186,7 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
                 hasEssayQuestions={overview.hasEssayQuestions}
                 pendingEssayCount={overview.pendingEssayCount}
                 totalEssayCount={overview.totalEssayCount}
+                resultStrategy={overview.resultStrategy}
                 onRefreshGrades={handleRefreshGrades}
                 onManualGrading={overview.hasEssayQuestions ? handleManualGrading : undefined}
               />

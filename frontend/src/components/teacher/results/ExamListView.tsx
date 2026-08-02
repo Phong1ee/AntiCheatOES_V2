@@ -59,6 +59,15 @@ const SUBJECT_COLORS = [
   },
 ];
 
+// The card accent (left border + icon) reflects exam status, not subject — status is the more
+// actionable signal in a results list. The subject-cycling palette above only drives the small
+// subject-name pill now.
+const STATUS_ACCENT_COLORS: Record<string, { border: string; icon: string }> = {
+  completed: { border: 'border-l-green-500', icon: 'bg-green-500' },
+  'in-progress': { border: 'border-l-blue-500', icon: 'bg-blue-500' },
+  scheduled: { border: 'border-l-orange-500', icon: 'bg-orange-500' },
+};
+
 function getSubjectColor(subject: string, subjects: string[]) {
   const idx = subjects.indexOf(subject);
   return SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
@@ -224,7 +233,8 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
         )}
 
         {!loading && !error && filteredExams.map((exam) => {
-          const color = getSubjectColor(exam.subject, subjects);
+          const subjectColor = getSubjectColor(exam.subject, subjects);
+          const color = { ...subjectColor, ...STATUS_ACCENT_COLORS[exam.status] };
           const completion = exam.totalStudents > 0
             ? Math.round((exam.submittedCount / exam.totalStudents) * 100)
             : 0;

@@ -5,6 +5,7 @@ import type {
   ExamResultsOverview,
   GradeEssayResult,
   QuestionStat,
+  ResultStrategy,
   StudentAttemptDetail,
   StudentResult,
 } from "../types/teacher-results";
@@ -55,6 +56,14 @@ export const teacherResultsService = {
     const { data } = await apiClient.put<GradeEssayResult>(
       `/api/teacher/results/exams/${examId}/essays/${essayAnswerId}`,
       { score },
+    );
+    return data;
+  },
+
+  async updateStrategy(examId: number, strategy: ResultStrategy): Promise<{ resultStrategy: ResultStrategy }> {
+    const { data } = await apiClient.put<{ resultStrategy: ResultStrategy }>(
+      `/api/teacher/results/exams/${examId}/strategy`,
+      { strategy },
     );
     return data;
   },

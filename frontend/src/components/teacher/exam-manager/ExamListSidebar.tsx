@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { Card, CardContent } from '../../ui/card';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -33,24 +32,23 @@ import {
   Plus,
   Filter,
   MoreVertical,
-  Edit,
   Copy,
-  Eye,
-  Share2,
-  Download,
+  Send,
+  FilePenLine,
   Archive,
   Trash2,
   Clock,
   Users,
   FileText,
 } from 'lucide-react';
+import type { ExamStatus } from '../../../types/teacher-exam';
 
 interface Exam {
   id: string;
   title: string;
   subject: string;
-  class: string;
-  status: 'draft' | 'published' | 'archived';
+  subjectId: string;
+  status: ExamStatus;
   date: string;
   questionCount: number;
   assignedStudents: number;
@@ -72,14 +70,56 @@ interface ExamListSidebarProps {
   onSelectExam: (id: string | null) => void;
   onCreateNew: () => void;
   onDeleteExam: (id: string) => Promise<void>;
+  onDuplicateExam: (id: string) => Promise<void>;
+  onStatusChange: (id: string, status: ExamStatus) => Promise<void>;
 }
 
-export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateNew, onDeleteExam }: ExamListSidebarProps) {
+type ExamOperation = 'duplicate' | 'publish' | 'draft' | 'archive';
+
+export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateNew, onDeleteExam, onDuplicateExam, onStatusChange }: ExamListSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterSubject, setFilterSubject] = useState<string>('all');
   const [examToDelete, setExamToDelete] = useState<Exam | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeOperation, setActiveOperation] = useState<{ examId: string; operation: ExamOperation } | null>(null);
+
+  const subjectOptions = useMemo(() => {
+    const uniqueSubjects = new Map<string, string>();
+    exams.forEach((exam) => {
+      if (exam.subjectId && !uniqueSubjects.has(exam.subjectId)) uniqueSubjects.set(exam.subjectId, exam.subject);
+    });
+    return Array.from(uniqueSubjects, ([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [exams]);
+
+  useEffect(() => {
+    if (filterSubject !== 'all' && !subjectOptions.some((subject) => subject.id === filterSubject)) {
+      setFilterSubject('all');
+    }
+  }, [filterSubject, subjectOptions]);
+
+  const runOperation = async (event: MouseEvent, exam: Exam, operation: ExamOperation) => {
+    event.stopPropagation();
+    if (activeOperation || isDeleting) return;
+    try {
+      setActiveOperation({ examId: exam.id, operation });
+      if (operation === 'duplicate') {
+        await onDuplicateExam(exam.id);
+        setSearchQuery('');
+        setFilterStatus('all');
+        setFilterSubject('all');
+      } else {
+        const status: ExamStatus = operation === 'publish' ? 'published' : operation === 'archive' ? 'archived' : 'draft';
+        await onStatusChange(exam.id, status);
+        setFilterStatus('all');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update the exam.');
+    } finally {
+      setActiveOperation(null);
+    }
+  };
 
   const confirmDelete = async () => {
     if (!examToDelete) return;
@@ -96,11 +136,10 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
 
   const filteredExams = exams
     .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
-    .filter((exam) => filterSubject === 'all' || exam.subject === filterSubject)
+    .filter((exam) => filterSubject === 'all' || exam.subjectId === filterSubject)
     .filter((exam) =>
       exam.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exam.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exam.class.toLowerCase().includes(searchQuery.toLowerCase())
+      exam.subject.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
   return (
@@ -147,9 +186,9 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Subjects</SelectItem>
-              <SelectItem value="Database Systems">Database Systems</SelectItem>
-              <SelectItem value="Web Development">Web Development</SelectItem>
-              <SelectItem value="Data Structures">Data Structures</SelectItem>
+              {subjectOptions.map((subject) => (
+                <SelectItem key={subject.id} value={subject.id}>{subject.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -166,6 +205,7 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
             {filteredExams.map((exam) => {
               const config = statusConfig[exam.status];
               const isSelected = selectedExamId === exam.id;
+              const isBusy = activeOperation?.examId === exam.id;
 
               return (
                 <div
@@ -181,38 +221,35 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                       <h4 className="text-sm text-gray-800 line-clamp-2 flex-1">{exam.title}</h4>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                          <button className="p-1 hover:bg-gray-200 rounded">
+                          <button disabled={Boolean(activeOperation) || isDeleting} className="p-1 hover:bg-gray-200 rounded disabled:opacity-50">
                             <MoreVertical className="size-4 text-gray-500" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <Edit className="size-4 mr-2" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'duplicate')}>
                             <Copy className="size-4 mr-2" />
-                            Duplicate
+                            {isBusy && activeOperation.operation === 'duplicate' ? 'Duplicating...' : 'Duplicate'}
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Eye className="size-4 mr-2" />
-                            Preview
-                          </DropdownMenuItem>
+                          {exam.status !== 'published' && (
+                            <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'publish')}>
+                              <Send className="size-4 mr-2" />
+                              {isBusy && activeOperation.operation === 'publish' ? 'Publishing...' : 'Publish'}
+                            </DropdownMenuItem>
+                          )}
+                          {exam.status !== 'draft' && (
+                            <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'draft')}>
+                              <FilePenLine className="size-4 mr-2" />
+                              {isBusy && activeOperation.operation === 'draft' ? 'Updating...' : 'Set as Draft'}
+                            </DropdownMenuItem>
+                          )}
+                          {exam.status !== 'archived' && (
+                            <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'archive')}>
+                              <Archive className="size-4 mr-2" />
+                              {isBusy && activeOperation.operation === 'archive' ? 'Archiving...' : 'Archive'}
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem>
-                            <Share2 className="size-4 mr-2" />
-                            Assign to Class
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Download className="size-4 mr-2" />
-                            Export
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem>
-                            <Archive className="size-4 mr-2" />
-                            Archive
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-600" onClick={(event) => { event.stopPropagation(); setExamToDelete(exam); }}>
+                          <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} className="text-red-600" onClick={(event) => { event.stopPropagation(); setExamToDelete(exam); }}>
                             <Trash2 className="size-4 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -220,10 +257,10 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                       </DropdownMenu>
                     </div>
 
-                    {/* Subject & Class */}
+                    {/* Subject */}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-600">
-                        {exam.subject} • {exam.class}
+                        {exam.subject}
                       </span>
                       <Badge variant="outline" className={`text-xs ${config.color}`}>
                         {config.label}

@@ -1,4 +1,5 @@
 from datetime import datetime
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from decimal import Decimal
@@ -16,14 +17,19 @@ from src.a_db_config import (
     ExamEvent,
     ExamQuestion,
     ExamPoolConfig,
+    ExamPoolQuestion,
     ExamPoolRule,
+    ExamSetting,
     MCQAnswer,
     StudentExam,
     Subject,
     User,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
-from src.models.teacher.requestModel.TeacherExamRequest import TeacherExamRequest
+from src.models.teacher.requestModel.TeacherExamRequest import (
+    TeacherExamRequest,
+    TeacherExamStatusRequest,
+)
 
 router = APIRouter()
 
@@ -111,6 +117,73 @@ def _validate_publishable(db: Session, exam: Exam, total_points: int) -> None:
         )
 
 
+def _new_exam_code(db: Session) -> str:
+    """Generate a code that fits exam.examcode (VARCHAR(20)) and avoids known collisions."""
+    for _ in range(20):
+        candidate = secrets.token_hex(10).upper()
+        if not db.query(Exam.exam_id).filter(Exam.examcode == candidate).first():
+            return candidate
+    raise HTTPException(status_code=409, detail="Unable to generate a unique exam code")
+
+
+def _copy_exam_settings(db: Session, source_exam_id: int, target_exam_id: int) -> None:
+    source = db.get(ExamSetting, source_exam_id)
+    if not source:
+        return
+    db.add(
+        ExamSetting(
+            exam_id=target_exam_id,
+            shuffle_question=source.shuffle_question,
+            shuffle_answer_options=source.shuffle_answer_options,
+            auto_submit_on_expire=source.auto_submit_on_expire,
+            grace_period=source.grace_period,
+            force_fullscreen_thresh=source.force_fullscreen_thresh,
+            tab_switch_thresh=source.tab_switch_thresh,
+            copy_paste_thresh=source.copy_paste_thresh,
+            auto_grade=source.auto_grade,
+        )
+    )
+
+
+def _copy_pool_configuration(db: Session, source_exam_id: int, target_exam_id: int) -> None:
+    source_config = db.query(ExamPoolConfig).filter_by(exam_id=source_exam_id).first()
+    if not source_config:
+        return
+    target_config = ExamPoolConfig(
+        exam_id=target_exam_id,
+        subject_id=source_config.subject_id,
+        fixed_randomization=source_config.fixed_randomization,
+        version=source_config.version,
+    )
+    db.add(target_config)
+    db.flush()
+    source_rules = (
+        db.query(ExamPoolRule)
+        .filter(ExamPoolRule.pool_config_id == source_config.pool_config_id)
+        .order_by(ExamPoolRule.rule_id)
+        .all()
+    )
+    for source_rule in source_rules:
+        target_rule = ExamPoolRule(
+            pool_config_id=target_config.pool_config_id,
+            chapter_id=source_rule.chapter_id,
+            lo_id=source_rule.lo_id,
+            difficulty=source_rule.difficulty,
+            draw_count=source_rule.draw_count,
+        )
+        db.add(target_rule)
+        db.flush()
+        candidate_ids = (
+            db.query(ExamPoolQuestion.question_id)
+            .filter(ExamPoolQuestion.rule_id == source_rule.rule_id)
+            .all()
+        )
+        db.add_all(
+            ExamPoolQuestion(rule_id=target_rule.rule_id, question_id=question_id)
+            for (question_id,) in candidate_ids
+        )
+
+
 @router.post("/add_exam", status_code=status.HTTP_201_CREATED)
 def add_exam_to_database(
     request: TeacherExamRequest,
@@ -187,6 +260,90 @@ def update_exam_in_database(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Exam code is already in use") from exc
+
+
+@router.post("/exams/{exam_id}/duplicate", status_code=status.HTTP_201_CREATED)
+def duplicate_exam(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        source = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        duplicate = Exam(
+            manage_by=current_user["school_id"],
+            title=f"Copy of {source.title}"[:255],
+            examcode=_new_exam_code(db),
+            max_attempt=source.max_attempt,
+            description=source.description,
+            duration_minutes=source.duration_minutes,
+            start_time=source.start_time,
+            end_time=source.end_time,
+            status="draft",
+            result_visibility=source.result_visibility,
+            subject_id=source.subject_id,
+            total_points=source.total_points,
+            passing_score=source.passing_score,
+            question_selection_mode=source.question_selection_mode,
+        )
+        db.add(duplicate)
+        db.flush()
+
+        source_questions = db.query(ExamQuestion).filter_by(exam_id=source.exam_id).all()
+        db.add_all(
+            ExamQuestion(
+                exam_id=duplicate.exam_id,
+                question_id=link.question_id,
+                question_point=link.question_point,
+            )
+            for link in source_questions
+        )
+        _copy_exam_settings(db, source.exam_id, duplicate.exam_id)
+        _copy_pool_configuration(db, source.exam_id, duplicate.exam_id)
+
+        db.commit()
+        db.refresh(duplicate)
+        return _serialize(duplicate)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Exam could not be duplicated") from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.patch("/exams/{exam_id}/status")
+def update_exam_status(
+    exam_id: int,
+    request: TeacherExamStatusRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        if request.status == "published":
+            _validate_publishable(
+                db,
+                exam,
+                exam.total_points if exam.total_points is not None else 100,
+            )
+        exam.status = request.status
+        db.commit()
+        db.refresh(exam)
+        return _serialize(exam)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.delete("/delete_exam/{exam_id}")

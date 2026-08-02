@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
-import { Button } from '../../../ui/button';
 import {
   Select,
   SelectContent,
@@ -11,14 +9,13 @@ import {
   SelectValue,
 } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
-import { AlertCircle, Calendar, Clock, Hash, Upload } from 'lucide-react';
+import { AlertCircle, Calendar, Clock, Hash } from 'lucide-react';
 import type { TeacherSubject } from '../../../../types/teacher-exam';
 
 interface GeneralInfoTabProps {
   subject: string;
   subjectId: string;
   subjects: TeacherSubject[];
-  classGroup: string;
   examCode: string;
   duration: number;
   maxAttempt: number;
@@ -29,7 +26,6 @@ interface GeneralInfoTabProps {
   endDate: string;
   endTime: string;
   onSubjectChange: (value: string) => void;
-  onClassGroupChange: (value: string) => void;
   onExamCodeChange: (value: string) => void;
   onDurationChange: (value: number) => void;
   onMaxAttemptChange: (value: number) => void;
@@ -45,7 +41,6 @@ export function GeneralInfoTab({
   subject,
   subjectId,
   subjects,
-  classGroup,
   examCode,
   duration,
   maxAttempt,
@@ -56,7 +51,6 @@ export function GeneralInfoTab({
   endDate,
   endTime,
   onSubjectChange,
-  onClassGroupChange,
   onExamCodeChange,
   onDurationChange,
   onMaxAttemptChange,
@@ -67,28 +61,7 @@ export function GeneralInfoTab({
   onEndDateChange,
   onEndTimeChange,
 }: GeneralInfoTabProps) {
-  const [tags, setTags] = useState('');
-
-  // Class mapping
-  const classMap: Record<string, string> = {
-    'CS301': 'cs301',
-    'CS201': 'cs201',
-    'CS102': 'cs102',
-  };
-
-  const reverseClassMap: Record<string, string> = {
-    'cs301': 'CS301',
-    'cs201': 'CS201',
-    'cs102': 'CS102',
-  };
-
-  // Get select values
   const subjectSelectValue = subjectId;
-  const classSelectValue = classMap[classGroup] || '';
-
-  const handleClassChange = (value: string) => {
-    onClassGroupChange(reverseClassMap[value] || value);
-  };
 
   // Validation
   const errors: string[] = [];
@@ -129,8 +102,7 @@ export function GeneralInfoTab({
           <CardTitle className="text-gray-800">Basic Information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+          <div className="max-w-xl space-y-2">
               <Label htmlFor="subject">Subject *</Label>
               <Select value={subjectSelectValue} onValueChange={onSubjectChange}>
                 <SelectTrigger id="subject" className={!subject ? 'border-red-300' : ''}>
@@ -142,21 +114,6 @@ export function GeneralInfoTab({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="class">Class/Group *</Label>
-              <Select value={classSelectValue} onValueChange={handleClassChange}>
-                <SelectTrigger id="class">
-                  <SelectValue placeholder="Select class" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cs301">CS301 - Fall 2025</SelectItem>
-                  <SelectItem value="cs201">CS201 - Fall 2025</SelectItem>
-                  <SelectItem value="cs102">CS102 - Fall 2025</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           <div className="space-y-2">
@@ -332,35 +289,6 @@ export function GeneralInfoTab({
         </CardContent>
       </Card>
 
-      {/* Tags & Attachments */}
-      <Card className="shadow-md rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="text-gray-800">Tags & Attachments</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="tags">Tags</Label>
-            <Input
-              id="tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="Enter tags separated by commas (e.g., midterm, chapter1-3)"
-            />
-            <p className="text-xs text-gray-500">
-              Tags help organize and search for exams
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Attachments</Label>
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-teal-400 transition-colors cursor-pointer">
-              <Upload className="size-8 text-gray-400 mx-auto mb-2" />
-              <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
-              <p className="text-xs text-gray-500 mt-1">PDF, DOC, Images (Max 10MB)</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

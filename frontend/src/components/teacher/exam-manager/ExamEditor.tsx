@@ -15,7 +15,7 @@ import { QuestionsTab } from './tabs/QuestionsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { PreviewTab } from './tabs/PreviewTab';
-import { Save, FileText, BookOpen, Users, Clock, Hash } from 'lucide-react';
+import { Save, FileText, BookOpen, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -27,7 +27,6 @@ interface ExamEditorProps {
     description?: string;
     subject: string;
     subjectId: string;
-    class: string;
     status: ExamStatus;
     startTime: string;
     endTime: string;
@@ -36,9 +35,6 @@ interface ExamEditorProps {
     maxAttempt: number;
     totalPoints: number;
     passingScore: number;
-    startTime: string;
-    endTime: string;
-    status: ExamStatus;
   } | null;
   subjects: TeacherSubject[];
   initialTab?: 'general' | 'settings';
@@ -53,6 +49,9 @@ interface ExamEditorProps {
     maxAttempt: number;
     totalPoints: number;
     passingScore: number;
+    startTime: string;
+    endTime: string;
+    status: ExamStatus;
   }) => Promise<void>;
 }
 
@@ -61,7 +60,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
   const [subjectId, setSubjectId] = useState('');
-  const [classGroup, setClassGroup] = useState('');
   const [duration, setDuration] = useState(60);
   const [examCode, setExamCode] = useState('');
   const [maxAttempt, setMaxAttempt] = useState(1);
@@ -96,7 +94,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setDescription('');
       setSubject('');
       setSubjectId('');
-      setClassGroup('');
       setDuration(60);
       setExamCode('');
       setMaxAttempt(1);
@@ -117,7 +114,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setDescription('');
       setSubject('');
       setSubjectId('');
-      setClassGroup('');
       setDuration(60);
       setExamCode(generateExamCode());
       setMaxAttempt(1);
@@ -135,7 +131,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         setDescription(exam.description || '');
         setSubject(exam.subject || '');
         setSubjectId(exam.subjectId || '');
-        setClassGroup(exam.class || '');
         setDuration(exam.duration || 60);
         setExamCode(exam.examCode || generateExamCode());
         setMaxAttempt(exam.maxAttempt);
@@ -316,18 +311,12 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             </div>
             
             {/* Exam Info Bar - Only show for existing exams with data */}
-            {!isNewExam && (subject || classGroup || duration || examCode) && (
+            {!isNewExam && (subject || duration || examCode) && (
               <div className="flex flex-wrap items-center gap-4 pt-2 text-sm text-gray-600">
                 {subject && (
                   <div className="flex items-center gap-1.5">
                     <BookOpen className="size-4 text-teal-600" />
                     <span>{subject}</span>
-                  </div>
-                )}
-                {classGroup && (
-                  <div className="flex items-center gap-1.5">
-                    <Users className="size-4 text-blue-600" />
-                    <span>{classGroup}</span>
                   </div>
                 )}
                 {duration > 0 && (
@@ -407,7 +396,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               subject={subject}
               subjectId={subjectId}
               subjects={subjects}
-              classGroup={classGroup}
               examCode={examCode}
               duration={duration}
               maxAttempt={maxAttempt}
@@ -421,7 +409,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                 setSubjectId(nextSubjectId);
                 setSubject(subjects.find((item) => item.subject_id === nextSubjectId)?.subject_name ?? '');
               }}
-              onClassGroupChange={setClassGroup}
               onExamCodeChange={setExamCode}
               onDurationChange={setDuration}
               onMaxAttemptChange={setMaxAttempt}
@@ -447,15 +434,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </TabsContent>
 
           <TabsContent value="preview" className="m-0 p-6">
-            <PreviewTab
-              examId={examId}
-              title={title}
-              description={description}
-              subject={subject}
-              classGroup={classGroup}
-              duration={duration}
-              examCode={examCode}
-            />
+            <PreviewTab />
           </TabsContent>
         </div>
       </Tabs>

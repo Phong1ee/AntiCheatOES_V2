@@ -2,6 +2,7 @@ import { apiClient } from "./api-client";
 import type {
   AssignmentOptions,
   AssignmentSyncResult,
+  ExamStatus,
   TeacherExamApi,
   TeacherExamRequest,
   TeacherSubject,
@@ -29,6 +30,18 @@ export const teacherExamService = {
 
   async update(examId: number, payload: TeacherExamRequest): Promise<TeacherExamApi> {
     const { data } = await apiClient.put<TeacherExamApi>(`/api/teacher/update_exam/${examId}`, payload);
+    return data;
+  },
+
+  async duplicate(examId: number): Promise<TeacherExamApi> {
+    const { data } = await apiClient.post<TeacherExamApi>(`/api/teacher/exams/${examId}/duplicate`);
+    return data;
+  },
+
+  async updateStatus(examId: number, status: ExamStatus): Promise<TeacherExamApi> {
+    const { data } = await apiClient.patch<TeacherExamApi>(`/api/teacher/exams/${examId}/status`, {
+      status,
+    });
     return data;
   },
 

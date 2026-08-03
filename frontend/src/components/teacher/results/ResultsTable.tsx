@@ -355,7 +355,7 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     onClick={() => handleSort('score')}
                     className="flex items-center gap-2 mx-auto hover:text-teal-600"
                   >
-                    Best Score
+                    Final Score
                     {getSortIcon('score')}
                   </button>
                 </TableHead>

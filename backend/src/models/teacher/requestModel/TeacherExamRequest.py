@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
-ExamStatusValue = Literal["draft", "published", "archived"]
+ExamStatusValue = Literal["draft", "published"]
 
 
 class TeacherExamStatusRequest(BaseModel):

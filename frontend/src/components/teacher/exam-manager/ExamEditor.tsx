@@ -14,7 +14,6 @@ import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
-import { PreviewTab } from './tabs/PreviewTab';
 import { Save, FileText, BookOpen, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, TeacherSubject } from '../../../types/teacher-exam';
@@ -55,6 +54,11 @@ interface ExamEditorProps {
   }) => Promise<void>;
 }
 
+type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
+
+const isExamEditorTab = (value: string): value is ExamEditorTab =>
+  value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
+
 export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -71,7 +75,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [endDate, setEndDate] = useState('');
   const [endClock, setEndClock] = useState('');
   const [lastSaved, setLastSaved] = useState<Date>(new Date());
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState<ExamEditorTab>('general');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -197,7 +201,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const statusConfig = {
     draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
     published: { label: 'Published', color: 'bg-green-100 text-green-700' },
-    archived: { label: 'Archived', color: 'bg-amber-100 text-amber-700' },
   } as const;
 
   // Handle Save
@@ -336,14 +339,15 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Select value={status} onValueChange={(value: ExamStatus) => setStatus(value)}>
+            <Select value={status} onValueChange={(value) => {
+              if (value === 'draft' || value === 'published') setStatus(value);
+            }}>
               <SelectTrigger className={`w-36 ${statusConfig[status].color}`} aria-label="Exam status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="draft">Draft</SelectItem>
                 <SelectItem value="published">Published</SelectItem>
-                <SelectItem value="archived">Archived</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -356,7 +360,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+      <Tabs value={activeTab} onValueChange={(value) => {
+        if (isExamEditorTab(value)) setActiveTab(value);
+      }} className="flex-1 flex flex-col">
         <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
           <TabsTrigger
             value="general"
@@ -381,12 +387,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
           >
             Assignment
-          </TabsTrigger>
-          <TabsTrigger
-            value="preview"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
-          >
-            Preview & Test
           </TabsTrigger>
         </TabsList>
 
@@ -433,9 +433,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             <AssignmentTab examId={examId} />
           </TabsContent>
 
-          <TabsContent value="preview" className="m-0 p-6">
-            <PreviewTab />
-          </TabsContent>
         </div>
       </Tabs>
 

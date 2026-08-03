@@ -2,6 +2,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.a_db_config import ResultStrategy
+
 
 NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 
@@ -17,6 +19,7 @@ class ExamSettingsRequest(BaseModel):
     tab_switch_thresh: NonNegativeInt = 0
     copy_paste_thresh: NonNegativeInt = 0
     auto_grade: bool = True
+    result_strategy: ResultStrategy = ResultStrategy.highest
 
 
 class ExamSettingsResponse(ExamSettingsRequest):

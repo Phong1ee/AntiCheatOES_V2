@@ -141,6 +141,7 @@ def _copy_exam_settings(db: Session, source_exam_id: int, target_exam_id: int) -
             tab_switch_thresh=source.tab_switch_thresh,
             copy_paste_thresh=source.copy_paste_thresh,
             auto_grade=source.auto_grade,
+            result_strategy=source.result_strategy,
         )
     )
 

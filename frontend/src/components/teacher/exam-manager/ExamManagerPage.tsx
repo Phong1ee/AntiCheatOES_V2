@@ -149,7 +149,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
     const mappedUpdated = toManagerExam(updated);
     setExams((current) => current.map((exam) => exam.id === examId ? mappedUpdated : exam));
     setSelectedExamId((current) => current && current !== examId ? current : mappedUpdated.id);
-    const action = status === "published" ? "published" : status === "archived" ? "archived" : "set to draft";
+    const action = status === "published" ? "published" : "set to draft";
     toast.success(`Exam ${action} successfully.`);
   };
 

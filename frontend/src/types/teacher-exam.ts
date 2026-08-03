@@ -5,7 +5,7 @@ export interface TeacherSubject {
   question_count: number;
 }
 
-export type ExamStatus = "draft" | "published" | "archived";
+export type ExamStatus = "draft" | "published";
 
 export interface TeacherExamApi {
   exam_id: number;

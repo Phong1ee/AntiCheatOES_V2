@@ -41,7 +41,6 @@ class ResultVisibility(str, enum.Enum):
 class ExamStatus(str, enum.Enum):
     draft = "draft"
     published = "published"
-    archived = "archived"
 
 class AttemptStatus(str, enum.Enum):
     in_progress = "in_progress"

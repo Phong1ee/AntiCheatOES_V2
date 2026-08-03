@@ -35,7 +35,6 @@ import {
   Copy,
   Send,
   FilePenLine,
-  Archive,
   Trash2,
   Clock,
   Users,
@@ -61,7 +60,6 @@ interface Exam {
 const statusConfig = {
   draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700 border-gray-200' },
   published: { label: 'Published', color: 'bg-green-100 text-green-700 border-green-200' },
-  archived: { label: 'Archived', color: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
 
 interface ExamListSidebarProps {
@@ -74,7 +72,7 @@ interface ExamListSidebarProps {
   onStatusChange: (id: string, status: ExamStatus) => Promise<void>;
 }
 
-type ExamOperation = 'duplicate' | 'publish' | 'draft' | 'archive';
+type ExamOperation = 'duplicate' | 'publish' | 'draft';
 
 export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateNew, onDeleteExam, onDuplicateExam, onStatusChange }: ExamListSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,7 +108,7 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
         setFilterStatus('all');
         setFilterSubject('all');
       } else {
-        const status: ExamStatus = operation === 'publish' ? 'published' : operation === 'archive' ? 'archived' : 'draft';
+        const status: ExamStatus = operation === 'publish' ? 'published' : 'draft';
         await onStatusChange(exam.id, status);
         setFilterStatus('all');
       }
@@ -176,7 +174,6 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="published">Published</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
             </SelectContent>
           </Select>
 
@@ -240,12 +237,6 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                             <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'draft')}>
                               <FilePenLine className="size-4 mr-2" />
                               {isBusy && activeOperation.operation === 'draft' ? 'Updating...' : 'Set as Draft'}
-                            </DropdownMenuItem>
-                          )}
-                          {exam.status !== 'archived' && (
-                            <DropdownMenuItem disabled={Boolean(activeOperation) || isDeleting} onClick={(event) => void runOperation(event, exam, 'archive')}>
-                              <Archive className="size-4 mr-2" />
-                              {isBusy && activeOperation.operation === 'archive' ? 'Archiving...' : 'Archive'}
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />

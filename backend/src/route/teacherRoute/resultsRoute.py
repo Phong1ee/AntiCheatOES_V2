@@ -28,6 +28,14 @@ from src.a_db_config import (
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
 from src.route.teacherRoute.getExamsRoute import _owned_exam, _teacher, get_exam_status
+from src.service.result_strategy_service import (
+    get_or_create_exam_settings as _get_or_create_settings_by_id,
+    representative_attempt as _representative_attempt,
+    set_result_strategy,
+    submitted_attempts_by_student as _submitted_attempts_by_student,
+    sync_final_scores,
+    sync_student_final_score,
+)
 
 router = APIRouter()
 
@@ -39,7 +47,7 @@ class GradeEssayRequest(BaseModel):
 
 
 class UpdateStrategyRequest(BaseModel):
-    strategy: str
+    strategy: ResultStrategy
 
 
 def _score_value(value):
@@ -61,67 +69,8 @@ def _time_taken(start_time, end_time, submitted_at):
     return f"{minutes}m {seconds}s"
 
 
-def _submitted_attempts_by_student(db: Session, exam_id: int) -> dict:
-    """Map student_id (user.school_id) -> all of their submitted attempts for this exam, ordered by attempt_no."""
-    attempts = (
-        db.query(Attempt)
-        .filter(Attempt.exam_id == exam_id, Attempt.submitted_at.isnot(None))
-        .order_by(Attempt.attempt_no)
-        .all()
-    )
-    by_student: dict = {}
-    for attempt in attempts:
-        by_student.setdefault(attempt.student_id, []).append(attempt)
-    return by_student
-
-
-def _best_attempt(attempts: list):
-    """Pick the highest-scoring attempt from a student's submitted attempts (tie-break: latest attempt_no)."""
-    if not attempts:
-        return None
-    return max(attempts, key=lambda a: (float(a.score) if a.score is not None else -1, a.attempt_no or 0))
-
-
-def _latest_attempt(attempts: list):
-    if not attempts:
-        return None
-    return max(attempts, key=lambda a: a.attempt_no or 0)
-
-
-def _representative_attempt(strategy: str, attempts: list):
-    """The single attempt used for display-only fields (correct count, time spent, status, attemptId).
-
-    'average' has no single attempt that represents it, so it falls back to the best attempt,
-    same as 'highest'.
-    """
-    if strategy == ResultStrategy.last_attempt.value:
-        return _latest_attempt(attempts)
-    return _best_attempt(attempts)
-
-
-def _compute_final_score(strategy: str, attempts: list):
-    """The official final score for a student on an exam, per the exam's chosen grading strategy."""
-    if not attempts:
-        return None
-    if strategy == ResultStrategy.average.value:
-        scored = [a.score for a in attempts if a.score is not None]
-        return round(sum(scored, Decimal("0")) / len(scored), 2) if scored else None
-    if strategy == ResultStrategy.last_attempt.value:
-        latest = _latest_attempt(attempts)
-        return latest.score if latest else None
-    best = _best_attempt(attempts)
-    return best.score if best else None
-
-
 def _get_or_create_settings(db: Session, exam: Exam) -> ExamSetting:
-    settings = db.get(ExamSetting, exam.exam_id)
-    if settings:
-        return settings
-    settings = ExamSetting(exam_id=exam.exam_id)
-    db.add(settings)
-    db.commit()
-    db.refresh(settings)
-    return settings
+    return _get_or_create_settings_by_id(db, exam.exam_id)
 
 
 def _sync_final_scores(db: Session, exam: Exam) -> str:
@@ -129,11 +78,7 @@ def _sync_final_scores(db: Session, exam: Exam) -> str:
 
     Returns the strategy used, so callers can also pick the matching representative attempt.
     """
-    strategy = _get_or_create_settings(db, exam).result_strategy.value
-    submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
-    student_exams = db.query(StudentExam).filter(StudentExam.exam_id == exam.exam_id).all()
-    for student_exam in student_exams:
-        student_exam.final_score = _compute_final_score(strategy, submitted_by_student.get(student_exam.student_id, []))
+    strategy = sync_final_scores(db, exam)
     db.commit()
     return strategy
 
@@ -164,9 +109,9 @@ def _attempt_status(attempt, exam: Exam) -> str:
 def _essay_counts(db: Session, attempt_ids: list):
     if not attempt_ids:
         return 0, 0
-    rows = db.query(EssayAnswer.score).filter(EssayAnswer.attempt_id.in_(attempt_ids)).all()
+    rows = db.query(EssayAnswer.answer_text, EssayAnswer.score).filter(EssayAnswer.attempt_id.in_(attempt_ids)).all()
     total = len(rows)
-    pending = sum(1 for (score,) in rows if score is None)
+    pending = sum(1 for answer_text, score in rows if score is None and answer_text and answer_text.strip())
     return total, pending
 
 
@@ -365,7 +310,7 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
     return stats
 
 
-def _recompute_attempt_score(db: Session, attempt_id: int) -> None:
+def _recompute_attempt_score(db: Session, attempt_id: int) -> Attempt:
     mcq_rows = (
         db.query(AttemptQuestion.question_point, Option.is_correct)
         .join(
@@ -382,7 +327,8 @@ def _recompute_attempt_score(db: Session, attempt_id: int) -> None:
     )
     attempt = db.get(Attempt, attempt_id)
     attempt.score = mcq_total + Decimal(str(essay_total or 0))
-    db.commit()
+    db.flush()
+    return attempt
 
 
 @router.get("/results/exams")
@@ -450,16 +396,12 @@ def update_result_strategy(
     exam = _owned_exam(db, exam_id, teacher.school_id)
 
     try:
-        strategy = ResultStrategy(payload.strategy)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid strategy")
-
-    settings = _get_or_create_settings(db, exam)
-    settings.result_strategy = strategy
-    db.commit()
-    _sync_final_scores(db, exam)
-
-    return {"resultStrategy": strategy.value}
+        strategy = set_result_strategy(db, exam, payload.strategy)
+        db.commit()
+        return {"resultStrategy": strategy}
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/results/exams/{exam_id}/students")
@@ -596,10 +538,12 @@ def list_essay_answers(
         )
         .join(Question, Question.question_id == EssayAnswer.question_id)
         .join(User, User.school_id == Attempt.student_id)
-        .filter(Attempt.exam_id == exam_id)
+        .filter(Attempt.exam_id == exam_id, Attempt.submitted_at.isnot(None))
         .order_by(User.full_name)
         .all()
     )
+
+    rows = [row for row in rows if row[0].answer_text and row[0].answer_text.strip()]
 
     return [
         {
@@ -640,6 +584,8 @@ def grade_essay_answer(
     )
     if not essay:
         raise HTTPException(status_code=404, detail="Essay answer not found")
+    if not essay.answer_text or not essay.answer_text.strip():
+        raise HTTPException(status_code=400, detail="Blank essay answers are automatically graded as zero")
 
     attempt_question = (
         db.query(AttemptQuestion)
@@ -650,17 +596,22 @@ def grade_essay_answer(
     if payload.score < 0 or payload.score > max_points:
         raise HTTPException(status_code=400, detail=f"Score must be between 0 and {max_points}")
 
-    essay.score = int(round(payload.score))
-    db.commit()
-    _recompute_attempt_score(db, essay.attempt_id)
-
-    attempt = db.get(Attempt, essay.attempt_id)
-    return {
-        "essayAnswerId": essay.essay_answer_id,
-        "currentScore": essay.score,
-        "status": "graded",
-        "attemptScore": _score_value(attempt.score),
-    }
+    try:
+        essay.score = int(round(payload.score))
+        attempt = _recompute_attempt_score(db, essay.attempt_id)
+        exam = db.get(Exam, exam_id)
+        final_score = sync_student_final_score(db, exam, attempt.student_id)
+        db.commit()
+        return {
+            "essayAnswerId": essay.essay_answer_id,
+            "currentScore": essay.score,
+            "status": "graded",
+            "attemptScore": _score_value(attempt.score),
+            "finalScore": _score_value(final_score) if final_score is not None else None,
+        }
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/results/exams/{exam_id}/export.xlsx")

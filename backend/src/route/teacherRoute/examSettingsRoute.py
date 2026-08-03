@@ -9,6 +9,7 @@ from src.models.teacher.requestModel.ExamSettingsRequest import (
     ExamSettingsRequest,
     ExamSettingsResponse,
 )
+from src.service.result_strategy_service import set_result_strategy, sync_final_scores
 
 router = APIRouter()
 
@@ -35,6 +36,7 @@ def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
         tab_switch_thresh=setting.tab_switch_thresh,
         copy_paste_thresh=setting.copy_paste_thresh,
         auto_grade=setting.auto_grade,
+        result_strategy=setting.result_strategy,
     )
 
 
@@ -51,13 +53,15 @@ def get_exam_settings(
     db: Session = Depends(get_db),
 ):
     del role_check
-    _owned_exam(db, exam_id, current_user["school_id"])
+    exam = _owned_exam(db, exam_id, current_user["school_id"])
     setting = db.get(ExamSetting, exam_id)
     if setting:
         return _serialize(setting)
     try:
         setting = ExamSetting(exam_id=exam_id)
         db.add(setting)
+        db.flush()
+        sync_final_scores(db, exam)
         db.commit()
         db.refresh(setting)
         return _serialize(setting)
@@ -86,13 +90,15 @@ def create_exam_settings(
     db: Session = Depends(get_db),
 ):
     del role_check
-    _owned_exam(db, exam_id, current_user["school_id"])
+    exam = _owned_exam(db, exam_id, current_user["school_id"])
     if db.get(ExamSetting, exam_id):
         raise HTTPException(status_code=409, detail="Exam settings already exist")
     try:
         setting = ExamSetting(exam_id=exam_id)
         _apply(setting, payload)
         db.add(setting)
+        db.flush()
+        sync_final_scores(db, exam)
         db.commit()
         db.refresh(setting)
         return _serialize(setting)
@@ -113,12 +119,17 @@ def update_exam_settings(
     db: Session = Depends(get_db),
 ):
     del role_check
-    _owned_exam(db, exam_id, current_user["school_id"])
+    exam = _owned_exam(db, exam_id, current_user["school_id"])
     setting = db.get(ExamSetting, exam_id)
     if not setting:
         raise HTTPException(status_code=404, detail="Exam settings not found")
     try:
+        previous_strategy = setting.result_strategy
         _apply(setting, payload)
+        if setting.result_strategy != previous_strategy:
+            set_result_strategy(db, exam, setting.result_strategy)
+        else:
+            db.flush()
         db.commit()
         db.refresh(setting)
         return _serialize(setting)

@@ -52,6 +52,7 @@ export interface TeacherExamSettingsPayload {
   tab_switch_thresh: number;
   copy_paste_thresh: number;
   auto_grade: boolean;
+  result_strategy: ResultStrategy;
 }
 
 export interface TeacherExamSettingsApi extends TeacherExamSettingsPayload {
@@ -67,4 +68,6 @@ export const defaultTeacherExamSettings: TeacherExamSettingsPayload = {
   tab_switch_thresh: 0,
   copy_paste_thresh: 0,
   auto_grade: true,
+  result_strategy: 'highest',
 };
+import type { ResultStrategy } from './teacher-results';

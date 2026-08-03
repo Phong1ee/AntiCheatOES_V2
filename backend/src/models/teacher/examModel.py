@@ -734,21 +734,23 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
     question_type = _question_type(question)
     selected_option_id = answer.get("selectedOptionId")
     answer_text = answer.get("answerText")
-    if selected_option_id is None and answer_text is None:
-        raise Exception("Answer is required")
     if question_type == "essay":
         if selected_option_id is not None:
             raise Exception("Essay questions do not accept selectedOptionId")
+        normalized_answer = "" if answer_text is None or not str(answer_text).strip() else str(answer_text)
+        score = 0 if normalized_answer == "" else None
         cursor.execute(
             """
             INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
-            VALUES (%s, %s, %s, NULL)
-            ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = NULL
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = VALUES(score)
             """,
-            (attempt_id, question["question_id"], answer_text),
+            (attempt_id, question["question_id"], normalized_answer, score),
         )
         return
 
+    if selected_option_id is None:
+        raise Exception("Answer is required")
     if answer_text is not None:
         raise Exception("MCQ questions do not accept answerText")
     option = _valid_snapshot_option(cursor, question, int(selected_option_id))
@@ -761,6 +763,83 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
         ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id)
         """,
         (attempt_id, question["question_id"], int(selected_option_id)),
+    )
+
+
+def _finalize_essay_answers(cursor, attempt_id: int, questions: dict[int, dict]) -> None:
+    """Ensure every Essay snapshot has a final row and only meaningful answers remain pending."""
+    for question in questions.values():
+        if _question_type(question) != "essay":
+            continue
+        cursor.execute(
+            "SELECT answer_text FROM essay_answers WHERE attempt_id = %s AND question_id = %s FOR UPDATE",
+            (attempt_id, question["question_id"]),
+        )
+        existing = cursor.fetchone()
+        normalized_answer = (
+            ""
+            if not existing or existing.get("answer_text") is None or not str(existing["answer_text"]).strip()
+            else str(existing["answer_text"])
+        )
+        score = 0 if normalized_answer == "" else None
+        cursor.execute(
+            """
+            INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = VALUES(score)
+            """,
+            (attempt_id, question["question_id"], normalized_answer, score),
+        )
+
+
+def _essay_pending(cursor, attempt_id: int) -> bool:
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS pending
+        FROM essay_answers
+        WHERE attempt_id = %s
+          AND score IS NULL
+          AND TRIM(
+              REPLACE(
+                  REPLACE(
+                      REPLACE(COALESCE(answer_text, ''), CHAR(9), ''),
+                      CHAR(10), ''
+                  ),
+                  CHAR(13), ''
+              )
+          ) <> ''
+        """,
+        (attempt_id,),
+    )
+    return bool(cursor.fetchone()["pending"])
+
+
+def _sync_student_final_score(cursor, exam_id: int, student_id: str) -> None:
+    cursor.execute("SELECT result_strategy FROM exam_setting WHERE exam_id = %s", (exam_id,))
+    settings = cursor.fetchone()
+    strategy = settings["result_strategy"] if settings else "highest"
+    cursor.execute(
+        """
+        SELECT score FROM attempt
+        WHERE exam_id = %s AND student_id = %s AND submitted_at IS NOT NULL
+        ORDER BY attempt_no, submitted_at, attempt_id
+        """,
+        (exam_id, student_id),
+    )
+    score_rows = cursor.fetchall()
+    scores = [Decimal(str(row["score"])) for row in score_rows if row["score"] is not None]
+    final_score = None
+    if scores:
+        if strategy == "average":
+            final_score = round(sum(scores, Decimal("0")) / len(scores), 2)
+        elif strategy == "last_attempt":
+            latest_score = score_rows[-1]["score"] if score_rows else None
+            final_score = Decimal(str(latest_score)) if latest_score is not None else None
+        else:
+            final_score = max(scores)
+    cursor.execute(
+        "UPDATE student_exam SET final_score = %s WHERE exam_id = %s AND student_id = %s",
+        (final_score, exam_id, student_id),
     )
 
 
@@ -815,15 +894,16 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
     try:
         cnx.start_transaction()
         cursor.execute(
-            "SELECT status, submitted_at, end_time, score FROM attempt WHERE attempt_id = %s FOR UPDATE",
+            "SELECT status, submitted_at, end_time, score, student_id FROM attempt WHERE attempt_id = %s FOR UPDATE",
             (attempt_id,),
         )
         attempt = cursor.fetchone()
         if not attempt:
             raise Exception("Attempt not found")
         if attempt["status"] in {"submitted", "terminated"}:
+            essay_pending = _essay_pending(cursor, attempt_id)
             cnx.commit()
-            return {"score": attempt["score"], "essayPending": False, "status": attempt["status"], "idempotent": True}
+            return {"score": attempt["score"], "essayPending": essay_pending, "status": attempt["status"], "idempotent": True}
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         questions = _load_attempt_questions(cursor, attempt_id, exam_id)
@@ -833,6 +913,8 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
             if not question:
                 raise Exception("Question does not belong to this attempt")
             _upsert_answer(cursor, attempt_id, question, answer)
+
+        _finalize_essay_answers(cursor, attempt_id, questions)
 
         cursor.execute(
             "SELECT question_id, selected_option_id FROM mcq_answers WHERE attempt_id = %s",
@@ -852,11 +934,7 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
                 if points is None:
                     points = question["question_point"]
                 total_score += Decimal(str(points or 0))
-        cursor.execute(
-            "SELECT COUNT(*) AS pending FROM essay_answers WHERE attempt_id = %s AND NULLIF(TRIM(answer_text), '') IS NOT NULL",
-            (attempt_id,),
-        )
-        essay_pending = bool(cursor.fetchone()["pending"])
+        essay_pending = _essay_pending(cursor, attempt_id)
         cursor.execute(
             """
             UPDATE attempt
@@ -871,6 +949,7 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
                 "INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details) VALUES (%s, %s, NOW(), %s)",
                 (attempt_id, "attempt_terminated", reason or "anti_cheat"),
             )
+        _sync_student_final_score(cursor, exam_id, attempt["student_id"])
         cnx.commit()
         return {"score": total_score, "essayPending": essay_pending, "status": status, "idempotent": False}
     except Exception:

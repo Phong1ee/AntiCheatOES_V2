@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle, Clock, Loader2, Save, Shield, Shuffle } from 'lucide-react';
+import { CheckCircle, Clock, GraduationCap, Loader2, Save, Shield, Shuffle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
@@ -11,13 +11,24 @@ import { Button } from '../../../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
+import type { ResultStrategy } from '../../../../types/teacher-results';
 
 interface SettingsTabProps {
   examId: string | null;
 }
 
 type ThresholdField = 'force_fullscreen_thresh' | 'tab_switch_thresh' | 'copy_paste_thresh';
+
+const gradingMethods: { value: ResultStrategy; label: string; description: string }[] = [
+  { value: 'highest', label: 'Highest', description: 'Use the highest score across all submitted attempts.' },
+  { value: 'last_attempt', label: 'Last Attempt', description: 'Use the score from the most recently submitted attempt.' },
+  { value: 'average', label: 'Average', description: 'Use the average score across all submitted attempts.' },
+];
+
+const isResultStrategy = (value: string): value is ResultStrategy =>
+  gradingMethods.some((method) => method.value === value);
 
 export function SettingsTab({ examId }: SettingsTabProps) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
@@ -60,6 +71,7 @@ export function SettingsTab({ examId }: SettingsTabProps) {
           tab_switch_thresh: data.tab_switch_thresh,
           copy_paste_thresh: data.copy_paste_thresh,
           auto_grade: data.auto_grade,
+          result_strategy: data.result_strategy,
         };
         (['force_fullscreen_thresh', 'tab_switch_thresh', 'copy_paste_thresh'] as ThresholdField[])
           .forEach((field) => {
@@ -165,6 +177,7 @@ export function SettingsTab({ examId }: SettingsTabProps) {
         tab_switch_thresh: saved.tab_switch_thresh,
         copy_paste_thresh: saved.copy_paste_thresh,
         auto_grade: saved.auto_grade,
+        result_strategy: saved.result_strategy,
       });
       toast.success('Exam settings saved.');
     } catch (saveError) {
@@ -242,7 +255,36 @@ export function SettingsTab({ examId }: SettingsTabProps) {
 
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader><CardTitle className="flex items-center gap-2"><CheckCircle className="size-5 text-teal-600" /> Grading Settings</CardTitle></CardHeader>
-        <CardContent><div className="flex items-center justify-between"><Label htmlFor="auto-grade">Auto-grade MCQ</Label><Switch id="auto-grade" checked={settings.auto_grade} onCheckedChange={(value) => setBoolean('auto_grade', value)} /></div></CardContent>
+        <CardContent className="space-y-5">
+          <div className="flex items-center justify-between"><Label htmlFor="auto-grade">Auto-grade MCQ</Label><Switch id="auto-grade" checked={settings.auto_grade} onCheckedChange={(value) => setBoolean('auto_grade', value)} /></div>
+          <div className="space-y-3 border-t border-gray-200 pt-4">
+            <div>
+              <Label htmlFor="grading-method" className="flex items-center gap-2"><GraduationCap className="size-4 text-teal-600" /> Grading Method</Label>
+              <p className="mt-1 text-xs text-gray-500">Choose which submitted attempt scores determine each Student's final Exam result.</p>
+            </div>
+            <Select
+              value={settings.result_strategy}
+              onValueChange={(value) => {
+                if (isResultStrategy(value)) {
+                  setSettings((current) => ({ ...current, result_strategy: value }));
+                }
+              }}
+            >
+              <SelectTrigger id="grading-method" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {gradingMethods.map((method) => (
+                  <SelectItem key={method.value} value={method.value}>
+                    <span className="font-medium">{method.label}</span>
+                    <span className="ml-2 text-xs text-gray-500">— {method.description}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-gray-600">
+              {gradingMethods.find((method) => method.value === settings.result_strategy)?.description}
+            </p>
+          </div>
+        </CardContent>
       </Card>
 
       <div className="flex justify-end">

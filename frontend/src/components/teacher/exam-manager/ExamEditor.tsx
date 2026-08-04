@@ -16,7 +16,7 @@ import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { Save, FileText, BookOpen, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ExamStatus, TeacherSubject } from '../../../types/teacher-exam';
+import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
 interface ExamEditorProps {
   examId: string | null;
@@ -34,6 +34,7 @@ interface ExamEditorProps {
     maxAttempt: number;
     totalPoints: number;
     passingScore: number;
+    resultVisibility: ResultVisibility;
   } | null;
   subjects: TeacherSubject[];
   initialTab?: 'general' | 'settings';
@@ -51,7 +52,9 @@ interface ExamEditorProps {
     startTime: string;
     endTime: string;
     status: ExamStatus;
+    resultVisibility: ResultVisibility;
   }) => Promise<void>;
+  onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
 }
 
 type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
@@ -59,7 +62,7 @@ type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
 const isExamEditorTab = (value: string): value is ExamEditorTab =>
   value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -70,6 +73,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [totalPoints, setTotalPoints] = useState(100);
   const [passingScore, setPassingScore] = useState(50);
   const [status, setStatus] = useState<ExamStatus>('draft');
+  const [resultVisibility, setResultVisibility] = useState<ResultVisibility>('hidden');
   const [startDate, setStartDate] = useState('');
   const [startClock, setStartClock] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -104,6 +108,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setTotalPoints(100);
       setPassingScore(50);
       setStatus('draft');
+      setResultVisibility('hidden');
       setStartDate('');
       setStartClock('');
       setEndDate('');
@@ -124,6 +129,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setTotalPoints(100);
       setPassingScore(50);
       setStatus('draft');
+      setResultVisibility('hidden');
       setStartDate('');
       setStartClock('');
       setEndDate('');
@@ -141,6 +147,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         setTotalPoints(exam.totalPoints);
         setPassingScore(exam.passingScore);
         setStatus(exam.status);
+        setResultVisibility(exam.resultVisibility);
         const [savedStartDate = '', savedStartTime = ''] = exam.startTime.split('T');
         const [savedEndDate = '', savedEndTime = ''] = exam.endTime.split('T');
         setStartDate(savedStartDate);
@@ -239,6 +246,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         startTime,
         endTime,
         status,
+        resultVisibility,
       });
       setLastSaved(new Date());
     } catch (error) {
@@ -426,7 +434,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 p-6">
-            <SettingsTab examId={examId} />
+            <SettingsTab
+              examId={examId}
+              resultVisibility={resultVisibility}
+              onResultVisibilityChange={async (nextVisibility) => {
+                await onResultVisibilityChange(examId, nextVisibility);
+                setResultVisibility(nextVisibility);
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="assignment" className="m-0 p-6">
@@ -453,19 +468,21 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             )}
           </div>
           {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!hasRequiredData || isSaving}
-              className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Save className="size-4 mr-2" />
-              {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
-            </Button>
-          </div>
+          {activeTab === 'general' && (
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={!hasRequiredData || isSaving}
+                className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save className="size-4 mr-2" />
+                {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

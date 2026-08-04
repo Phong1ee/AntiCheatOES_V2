@@ -6,6 +6,7 @@ export interface TeacherSubject {
 }
 
 export type ExamStatus = "draft" | "published";
+export type ResultVisibility = "hidden" | "score-only" | "full";
 
 export interface TeacherExamApi {
   exam_id: number;
@@ -22,7 +23,7 @@ export interface TeacherExamApi {
   schedule_status: "upcoming" | "ongoing" | "completed";
   subject: string | null;
   subject_id: string | null;
-  result_visibility: "hidden" | "score-only" | "full" | null;
+  result_visibility: ResultVisibility | null;
   total_points: number;
   passing_score: number;
   question_selection_mode: "manual" | "fixed_randomization" | "pool";
@@ -37,10 +38,19 @@ export interface TeacherExamRequest {
   start_time: string;
   end_time: string;
   status: ExamStatus;
-  result_visibility: "hidden" | "score-only" | "full";
+  result_visibility: ResultVisibility;
   subject_id: string;
   total_points: number;
   passing_score: number;
+}
+
+export interface TeacherResultVisibilityRequest {
+  result_visibility: ResultVisibility;
+}
+
+export interface TeacherResultVisibilityResponse {
+  exam_id: number;
+  result_visibility: ResultVisibility;
 }
 
 export interface AssignmentClass {

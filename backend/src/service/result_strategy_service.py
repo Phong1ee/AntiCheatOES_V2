@@ -5,13 +5,17 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from src.a_db_config import Attempt, Exam, ExamSetting, ResultStrategy, StudentExam
+from src.a_db_config import Attempt, AttemptStatus, Exam, ExamSetting, ResultStrategy, StudentExam
 
 
 def submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[Attempt]]:
     attempts = (
         db.query(Attempt)
-        .filter(Attempt.exam_id == exam_id, Attempt.submitted_at.isnot(None))
+        .filter(
+            Attempt.exam_id == exam_id,
+            Attempt.submitted_at.isnot(None),
+            Attempt.status.in_([AttemptStatus.submitted, AttemptStatus.terminated]),
+        )
         .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
         .all()
     )

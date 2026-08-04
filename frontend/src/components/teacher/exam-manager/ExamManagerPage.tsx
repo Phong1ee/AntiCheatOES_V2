@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { ExamEditor } from "./ExamEditor";
 import { ExamListSidebar } from "./ExamListSidebar";
 import { teacherExamService } from "../../../services/teacher-exam.service";
-import type { ExamStatus, TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
+import type { ExamStatus, ResultVisibility, TeacherExamApi, TeacherSubject } from "../../../types/teacher-exam";
 import { LoadingState } from "../common/LoadingState";
 
 interface Exam {
@@ -24,6 +24,7 @@ interface Exam {
   maxAttempt: number;
   totalPoints: number;
   passingScore: number;
+  resultVisibility: ResultVisibility;
 }
 
 const toManagerExam = (exam: TeacherExamApi): Exam => ({
@@ -44,6 +45,7 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   maxAttempt: exam.max_attempt ?? 1,
   totalPoints: exam.total_points,
   passingScore: exam.passing_score,
+  resultVisibility: exam.result_visibility ?? "hidden",
 });
 
 interface ExamManagerPageProps {
@@ -104,6 +106,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
     startTime: string;
     endTime: string;
     status: ExamStatus;
+    resultVisibility: ResultVisibility;
   }) => {
     const payload = {
       title: examData.title.trim(),
@@ -114,7 +117,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
       start_time: examData.startTime,
       end_time: examData.endTime,
       status: examData.status,
-      result_visibility: "full" as const,
+      result_visibility: examData.resultVisibility,
       subject_id: examData.subjectId,
       total_points: examData.totalPoints,
       passing_score: examData.passingScore,
@@ -126,6 +129,13 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
     await loadManagerData();
     setSelectedExamId(String(saved.exam_id));
     toast.success(examData.id.startsWith("new-") ? "Exam created successfully." : "Exam updated successfully.");
+  };
+
+  const handleResultVisibilityChange = async (examId: string, resultVisibility: ResultVisibility) => {
+    const saved = await teacherExamService.updateResultVisibility(Number(examId), resultVisibility);
+    setExams((current) => current.map((exam) => (
+      exam.id === examId ? { ...exam, resultVisibility: saved.result_visibility } : exam
+    )));
   };
 
   const handleDeleteExam = async (examId: string) => {
@@ -188,6 +198,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
           initialTab={initialTab}
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
+          onResultVisibilityChange={handleResultVisibilityChange}
         />
       </div>
     </div>

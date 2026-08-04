@@ -28,7 +28,8 @@ def _time_taken(start_time, end_time, submitted_at):
 
 def _visibility(value):
     if value is None:
-        return "full"
+        # Legacy rows without a visibility value must not expose results by default.
+        return "hidden"
     return str(value)
 
 
@@ -118,6 +119,7 @@ def get_student_results(user_id: int):
         AND ea.question_id = aq.question_id
     WHERE a.student_id = %s
       AND a.submitted_at IS NOT NULL
+      AND a.status IN ('submitted', 'terminated')
     GROUP BY
         a.attempt_id,
         a.exam_id,
@@ -231,6 +233,7 @@ def get_student_result_detail(user_id: int, attempt_id: int):
     WHERE a.student_id = %s
       AND a.attempt_id = %s
       AND a.submitted_at IS NOT NULL
+      AND a.status IN ('submitted', 'terminated')
     GROUP BY
         a.attempt_id,
         a.exam_id,

@@ -10,6 +10,11 @@ ExamStatusValue = Literal["draft", "published"]
 class TeacherExamStatusRequest(BaseModel):
     status: ExamStatusValue
 
+
+class TeacherResultVisibilityRequest(BaseModel):
+    result_visibility: Literal["hidden", "score-only", "full"]
+
+
 class TeacherExamRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

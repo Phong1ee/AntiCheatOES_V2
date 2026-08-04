@@ -35,13 +35,19 @@ from src.models.teacher.requestModel.ExamSettingsRequest import ExamSettingsRequ
 from src.models.teacher.requestModel.QuestionAddToDBRequest import QuestionAddToDBRequest
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
-from src.models.teacher.requestModel.TeacherExamRequest import TeacherExamRequest, TeacherExamStatusRequest
+from src.models.teacher.requestModel.TeacherExamRequest import (
+    TeacherExamRequest,
+    TeacherExamStatusRequest,
+    TeacherResultVisibilityRequest,
+)
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
+from src.middleware.authMiddleware import TEACHER_ONLY
 from src.route.teacherRoute.addExamRoute import (
     add_exam_to_database,
     delete_exam_from_database,
     duplicate_exam,
     update_exam_in_database,
+    update_result_visibility,
     update_exam_status,
 )
 from src.route.teacherRoute.addQuestionsRoute import (
@@ -253,6 +259,67 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             update_exam_in_database(other.exam_id, request, {"school_id": "T1"}, {}, self.db)
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_teacher_can_change_result_visibility_without_changing_scores(self):
+        exam = self.db.query(Exam).filter_by(examcode="A").one()
+        student = User(
+            school_id="S1",
+            full_name="Student One",
+            email="s1@example.test",
+            password_hash="x",
+            role="student",
+        )
+        self.db.add(student)
+        self.db.flush()
+        attempt = Attempt(exam_id=exam.exam_id, student_id=student.school_id, score=7)
+        student_exam = StudentExam(exam_id=exam.exam_id, student_id=student.school_id, final_score=8)
+        self.db.add_all([attempt, student_exam])
+        self.db.commit()
+
+        for visibility in ("score-only", "full", "hidden"):
+            response = update_result_visibility(
+                exam.exam_id,
+                TeacherResultVisibilityRequest(result_visibility=visibility),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+            self.db.expire_all()
+            self.assertEqual(response, {"exam_id": exam.exam_id, "result_visibility": visibility})
+            self.assertEqual(self.db.get(Exam, exam.exam_id).result_visibility.value, visibility)
+            self.assertEqual(self.db.get(Attempt, attempt.attempt_id).score, 7)
+            self.assertEqual(
+                self.db.get(StudentExam, (student.school_id, exam.exam_id)).final_score,
+                8,
+            )
+
+        detail = get_exam(exam.exam_id, {"school_id": "T1"}, {}, self.db)
+        listed = get_teacher_exams({"school_id": "T1"}, {}, self.db)
+        listed_exam = next(item for item in listed if item["exam_id"] == exam.exam_id)
+        self.assertEqual((detail["result_visibility"], listed_exam["result_visibility"]), ("hidden", "hidden"))
+
+    def test_other_teacher_cannot_change_result_visibility(self):
+        exam = self.db.query(Exam).filter_by(examcode="O").one()
+        with self.assertRaises(HTTPException) as raised:
+            update_result_visibility(
+                exam.exam_id,
+                TeacherResultVisibilityRequest(result_visibility="full"),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_result_visibility_request_rejects_invalid_values(self):
+        for visibility in ("score_only", "public", ""):
+            with self.assertRaises(ValidationError):
+                TeacherResultVisibilityRequest(result_visibility=visibility)
+
+    def test_student_and_admin_cannot_pass_teacher_authorization(self):
+        for role in ("student", "admin"):
+            with self.assertRaises(HTTPException) as raised:
+                TEACHER_ONLY({"school_id": "T1", "role": role})
+            self.assertEqual(raised.exception.status_code, 403)
 
     def test_duplicate_owned_manual_exam_copies_configuration_without_student_data(self):
         source = self.db.query(Exam).filter_by(examcode="A").one()
@@ -780,6 +847,39 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         )
         self.assertEqual((graded["attemptScore"], graded["finalScore"]), (4.0, 4.0))
         self.assertEqual(float(self.db.get(StudentExam, (student.school_id, exam.exam_id)).final_score), 4)
+
+        rollback_question = Question(
+            question_text="Rollback",
+            question_type="essay",
+            subject_id="DB",
+            created_by=teacher.school_id,
+            question_status=QuestionStatus.approved,
+        )
+        self.db.add(rollback_question)
+        self.db.flush()
+        self.db.add(AttemptQuestion(attempt_id=attempt.attempt_id, question_id=rollback_question.question_id, question_point=5))
+        rollback_essay = EssayAnswer(
+            attempt_id=attempt.attempt_id,
+            question_id=rollback_question.question_id,
+            answer_text="Must not persist after failure",
+            score=None,
+        )
+        self.db.add(rollback_essay)
+        self.db.commit()
+
+        with patch("src.route.teacherRoute.resultsRoute.sync_student_final_score", side_effect=RuntimeError("sync failed")):
+            with self.assertRaisesRegex(RuntimeError, "sync failed"):
+                grade_essay_answer(
+                    exam.exam_id,
+                    rollback_essay.essay_answer_id,
+                    GradeEssayRequest(score=3),
+                    {"school_id": "T1"},
+                    {},
+                    self.db,
+                )
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(EssayAnswer, rollback_essay.essay_answer_id).score)
+        self.assertEqual(float(self.db.get(Attempt, attempt.attempt_id).score), 4)
 
     def test_delete_exam_preserves_reusable_question(self):
         result, exam = self._create(options=[option("A", True), option("B")])

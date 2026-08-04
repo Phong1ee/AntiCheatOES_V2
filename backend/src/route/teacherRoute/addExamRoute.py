@@ -28,6 +28,7 @@ from src.a_db_config import (
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
 from src.models.teacher.requestModel.TeacherExamRequest import (
     TeacherExamRequest,
+    TeacherResultVisibilityRequest,
     TeacherExamStatusRequest,
 )
 
@@ -339,6 +340,32 @@ def update_exam_status(
         db.commit()
         db.refresh(exam)
         return _serialize(exam)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.patch("/exams/{exam_id}/result-visibility")
+def update_result_visibility(
+    exam_id: int,
+    request: TeacherResultVisibilityRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        exam.result_visibility = request.result_visibility
+        db.commit()
+        db.refresh(exam)
+        return {
+            "exam_id": exam.exam_id,
+            "result_visibility": exam.result_visibility.value,
+        }
     except HTTPException:
         db.rollback()
         raise

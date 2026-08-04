@@ -14,9 +14,12 @@ import { Label } from '../../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
 import type { ResultStrategy } from '../../../../types/teacher-results';
+import type { ResultVisibility } from '../../../../types/teacher-exam';
 
 interface SettingsTabProps {
   examId: string | null;
+  resultVisibility: ResultVisibility;
+  onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
 }
 
 type ThresholdField = 'force_fullscreen_thresh' | 'tab_switch_thresh' | 'copy_paste_thresh';
@@ -30,8 +33,18 @@ const gradingMethods: { value: ResultStrategy; label: string; description: strin
 const isResultStrategy = (value: string): value is ResultStrategy =>
   gradingMethods.some((method) => method.value === value);
 
-export function SettingsTab({ examId }: SettingsTabProps) {
+const visibilityOptions: { value: ResultVisibility; label: string; description: string }[] = [
+  { value: 'hidden', label: 'Hidden', description: 'Students cannot view scores or answer details.' },
+  { value: 'score-only', label: 'Score Only', description: 'Students can view their score after essay grading is complete, but cannot view answer details.' },
+  { value: 'full', label: 'Full Results', description: 'Students can view their score and answer details after essay grading is complete.' },
+];
+
+const isResultVisibility = (value: string): value is ResultVisibility =>
+  visibilityOptions.some((option) => option.value === value);
+
+export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange }: SettingsTabProps) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
+  const [draftResultVisibility, setDraftResultVisibility] = useState<ResultVisibility>(resultVisibility);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +57,10 @@ export function SettingsTab({ examId }: SettingsTabProps) {
   const persistedExamId = examId && !examId.startsWith('new-') ? Number(examId) : null;
   const currentExamId = useRef<number | null>(persistedExamId);
   currentExamId.current = persistedExamId;
+
+  useEffect(() => {
+    setDraftResultVisibility(resultVisibility);
+  }, [resultVisibility]);
 
   useEffect(() => {
     let active = true;
@@ -168,6 +185,10 @@ export function SettingsTab({ examId }: SettingsTabProps) {
       setError(null);
       const saved = await teacherExamSettingsService.update(targetExamId, payload);
       if (currentExamId.current !== targetExamId) return;
+      if (draftResultVisibility !== resultVisibility) {
+        await onResultVisibilityChange(draftResultVisibility);
+        if (currentExamId.current !== targetExamId) return;
+      }
       setSettings({
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
@@ -219,6 +240,40 @@ export function SettingsTab({ examId }: SettingsTabProps) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+
+      <Card className="rounded-2xl border-0 shadow-md">
+        <CardHeader>
+          <CardTitle>Result Visibility</CardTitle>
+          <CardDescription>Choose what students can see after their attempt is graded.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select
+            value={draftResultVisibility}
+            onValueChange={(value) => {
+              if (isResultVisibility(value)) {
+                setDraftResultVisibility(value);
+              }
+            }}
+          >
+            <SelectTrigger id="result-visibility" className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {visibilityOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <span className="font-medium">{option.label}</span>
+                  <span className="ml-2 text-xs text-gray-500">- {option.description}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-sm text-gray-600">
+            {visibilityOptions.find((option) => option.value === draftResultVisibility)?.description}
+          </p>
+          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            Essay grading takes precedence. Results remain pending until all submitted essay answers for the attempt are graded.
+          </p>
+          <p className="text-sm text-gray-500">This change is saved when you click Save Settings below.</p>
+        </CardContent>
+      </Card>
 
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader>

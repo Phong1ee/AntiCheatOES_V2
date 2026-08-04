@@ -3,8 +3,11 @@ import type {
   AssignmentOptions,
   AssignmentSyncResult,
   ExamStatus,
+  ResultVisibility,
   TeacherExamApi,
   TeacherExamRequest,
+  TeacherResultVisibilityRequest,
+  TeacherResultVisibilityResponse,
   TeacherSubject,
 } from "../types/teacher-exam";
 
@@ -42,6 +45,18 @@ export const teacherExamService = {
     const { data } = await apiClient.patch<TeacherExamApi>(`/api/teacher/exams/${examId}/status`, {
       status,
     });
+    return data;
+  },
+
+  async updateResultVisibility(
+    examId: number,
+    resultVisibility: ResultVisibility,
+  ): Promise<TeacherResultVisibilityResponse> {
+    const payload: TeacherResultVisibilityRequest = { result_visibility: resultVisibility };
+    const { data } = await apiClient.patch<TeacherResultVisibilityResponse>(
+      `/api/teacher/exams/${examId}/result-visibility`,
+      payload,
+    );
     return data;
   },
 

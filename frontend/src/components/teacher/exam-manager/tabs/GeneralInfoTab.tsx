@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
 import {
@@ -9,7 +10,7 @@ import {
   SelectValue,
 } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
-import { AlertCircle, Calendar, Clock, Hash } from 'lucide-react';
+import { AlertCircle, Calendar, Clock, Hash, Save } from 'lucide-react';
 import type { TeacherSubject } from '../../../../types/teacher-exam';
 
 interface GeneralInfoTabProps {
@@ -35,6 +36,12 @@ interface GeneralInfoTabProps {
   onStartTimeChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
+  canSave: boolean;
+  isSaving: boolean;
+  isNewExam: boolean;
+  saveError: string | null;
+  onCancel: () => void;
+  onSave: () => void;
 }
 
 export function GeneralInfoTab({
@@ -60,6 +67,12 @@ export function GeneralInfoTab({
   onStartTimeChange,
   onEndDateChange,
   onEndTimeChange,
+  canSave,
+  isSaving,
+  isNewExam,
+  saveError,
+  onCancel,
+  onSave,
 }: GeneralInfoTabProps) {
   const subjectSelectValue = subjectId;
 
@@ -288,6 +301,21 @@ export function GeneralInfoTab({
           </div>
         </CardContent>
       </Card>
+
+      {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          onClick={onSave}
+          disabled={!canSave || isSaving}
+          className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Save className="mr-2 size-4" />
+          {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
+        </Button>
+      </div>
 
     </div>
   );

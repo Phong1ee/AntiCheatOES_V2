@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
-import { Button } from '../../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import {
   Select,
@@ -14,7 +13,7 @@ import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
-import { Save, FileText, BookOpen, Clock, Hash } from 'lucide-react';
+import { FileText, BookOpen, Clock, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -426,6 +425,12 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               onStartTimeChange={setStartClock}
               onEndDateChange={setEndDate}
               onEndTimeChange={setEndClock}
+              canSave={hasRequiredData}
+              isSaving={isSaving}
+              isNewExam={isNewExam}
+              saveError={saveError}
+              onCancel={onClose}
+              onSave={() => void handleSave()}
             />
           </TabsContent>
 
@@ -451,40 +456,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         </div>
       </Tabs>
 
-      {/* Sticky Save Button */}
-      <div className="sticky bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg">
-          <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-600">
-            {hasRequiredData ? (
-              <span className="flex items-center gap-2">
-                <div className="size-2 bg-green-500 rounded-full animate-pulse" />
-                Ready to save
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 text-amber-600">
-                <div className="size-2 bg-amber-500 rounded-full" />
-                Please complete the required exam details and a valid schedule
-              </span>
-            )}
-          </div>
-          {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
-          {activeTab === 'general' && (
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={!hasRequiredData || isSaving}
-                className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Save className="size-4 mr-2" />
-                {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

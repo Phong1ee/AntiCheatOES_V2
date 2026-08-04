@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from decimal import Decimal
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -160,6 +161,40 @@ class _SelectionConnection:
 
 
 class StudentExamFlowTests(unittest.TestCase):
+    def test_code_free_exam_allows_omitted_code_and_protected_exam_rejects_wrong_code(self):
+        base_exam = {
+            "exam_id": 5,
+            "examcode": None,
+            "max_attempt": 1,
+            "duration_minutes": 60,
+            "start_time": None,
+            "end_time": None,
+        }
+        with (
+            patch.object(examModel, "getExamById", return_value=base_exam),
+            patch.object(examModel, "isStudentAssignedToExam", return_value=True),
+            patch.object(examModel, "getOpenAttempt", return_value=None),
+            patch.object(examModel, "countStudentAttempts", return_value=0),
+            patch.object(examModel, "validateExamQuestionPoints"),
+            patch.object(examModel, "get_database_now", return_value=datetime(2026, 8, 5, 10, 0)),
+            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"school_id": "S1"}),
+        ):
+            validated = ExamController._validateStudentExamAccess("S1", "student", 5, None)
+        self.assertEqual(validated["exam"]["examcode"], None)
+
+        protected = {**base_exam, "examcode": "SECRET"}
+        with (
+            patch.object(examModel, "getExamById", return_value=protected),
+            patch.object(examModel, "isStudentAssignedToExam", return_value=True),
+            patch.object(examModel, "getOpenAttempt", return_value=None),
+            patch.object(examModel, "countStudentAttempts", return_value=0),
+            patch.object(examModel, "validateExamQuestionPoints"),
+            patch.object(examModel, "get_database_now", return_value=datetime(2026, 8, 5, 10, 0)),
+            patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"school_id": "S1"}),
+        ):
+            with self.assertRaisesRegex(Exception, "Incorrect exam code"):
+                ExamController._validateStudentExamAccess("S1", "student", 5, "WRONG")
+
     def test_student_exam_list_includes_database_server_time(self):
         database_now = datetime(2026, 8, 4, 10, 0, 1, 987654)
         with (
@@ -323,7 +358,7 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(len(question_ids), 3)
         self.assertEqual(len(set(question_ids)), 3)
         self.assertTrue(set(question_ids).issubset({1, 2, 3, 4}))
-        self.assertEqual(sum(row[3] for row in first), 10)
+        self.assertEqual([row[3] for row in first], [Decimal("1.00")] * 3)
         shuffled_orders = {
             tuple(row[1] for row in self._snapshot_rows("pool", f"S{index}", True, False))
             for index in range(8)

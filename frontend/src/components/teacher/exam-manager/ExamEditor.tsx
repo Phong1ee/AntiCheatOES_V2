@@ -29,9 +29,8 @@ interface ExamEditorProps {
     startTime: string;
     endTime: string;
     duration?: number;
-    examCode?: string;
+    examCode: string | null;
     maxAttempt: number;
-    totalPoints: number;
     passingScore: number;
     resultVisibility: ResultVisibility;
   } | null;
@@ -44,9 +43,8 @@ interface ExamEditorProps {
     description: string;
     subjectId: string;
     duration: number;
-    examCode: string;
+    examCode: string | null;
     maxAttempt: number;
-    totalPoints: number;
     passingScore: number;
     startTime: string;
     endTime: string;
@@ -68,9 +66,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [subjectId, setSubjectId] = useState('');
   const [duration, setDuration] = useState(60);
   const [examCode, setExamCode] = useState('');
+  const [requireExamCode, setRequireExamCode] = useState(false);
   const [maxAttempt, setMaxAttempt] = useState(1);
-  const [totalPoints, setTotalPoints] = useState(100);
-  const [passingScore, setPassingScore] = useState(50);
+  const [passingScore, setPassingScore] = useState(5);
   const [status, setStatus] = useState<ExamStatus>('draft');
   const [resultVisibility, setResultVisibility] = useState<ResultVisibility>('hidden');
   const [startDate, setStartDate] = useState('');
@@ -103,9 +101,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setSubjectId('');
       setDuration(60);
       setExamCode('');
+      setRequireExamCode(false);
       setMaxAttempt(1);
-      setTotalPoints(100);
-      setPassingScore(50);
+      setPassingScore(5);
       setStatus('draft');
       setResultVisibility('hidden');
       setStartDate('');
@@ -124,9 +122,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setSubjectId('');
       setDuration(60);
       setExamCode(generateExamCode());
+      setRequireExamCode(true);
       setMaxAttempt(1);
-      setTotalPoints(100);
-      setPassingScore(50);
+      setPassingScore(5);
       setStatus('draft');
       setResultVisibility('hidden');
       setStartDate('');
@@ -141,9 +139,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         setSubject(exam.subject || '');
         setSubjectId(exam.subjectId || '');
         setDuration(exam.duration || 60);
-        setExamCode(exam.examCode || generateExamCode());
+        setExamCode(exam.examCode ?? '');
+        setRequireExamCode(exam.examCode !== null);
         setMaxAttempt(exam.maxAttempt);
-        setTotalPoints(exam.totalPoints);
         setPassingScore(exam.passingScore);
         setStatus(exam.status);
         setResultVisibility(exam.resultVisibility);
@@ -221,12 +219,13 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setSaveError('End date and time must be later than start date and time.');
       return;
     }
-    if (!Number.isInteger(totalPoints) || totalPoints <= 0) {
-      setSaveError('Total points must be a positive integer.');
+    if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 10) {
+      setSaveError('Passing score must be between 0 and 10.');
       return;
     }
-    if (!Number.isInteger(passingScore) || passingScore < 0 || passingScore > totalPoints) {
-      setSaveError('Passing score must be an integer between 0 and total points.');
+    const normalizedExamCode = examCode.trim();
+    if (requireExamCode && !normalizedExamCode) {
+      setSaveError('Exam code is required when code protection is enabled.');
       return;
     }
     try {
@@ -238,9 +237,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         description,
         subjectId,
         duration,
-        examCode,
+        examCode: requireExamCode ? normalizedExamCode : null,
         maxAttempt,
-        totalPoints,
         passingScore,
         startTime,
         endTime,
@@ -258,14 +256,16 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   };
 
   // Check if has unsaved changes
-  const scoresAreValid = Number.isInteger(totalPoints)
-    && totalPoints > 0
-    && Number.isInteger(passingScore)
+  const scoresAreValid = Number.isFinite(passingScore)
     && passingScore >= 0
-    && passingScore <= totalPoints;
+    && passingScore <= 10;
   const scheduleIsValid = Boolean(startDate && startClock && endDate && endClock)
     && `${endDate}T${endClock}` > `${startDate}T${startClock}`;
-  const hasRequiredData = title.trim() !== '' && subjectId !== '' && examCode.trim() !== '' && scoresAreValid && scheduleIsValid;
+  const hasRequiredData = title.trim() !== ''
+    && subjectId !== ''
+    && (!requireExamCode || examCode.trim() !== '')
+    && scoresAreValid
+    && scheduleIsValid;
 
   return (
     <div className="h-full flex flex-col bg-white relative exam-editor-container">
@@ -321,7 +321,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             </div>
             
             {/* Exam Info Bar - Only show for existing exams with data */}
-            {!isNewExam && (subject || duration || examCode) && (
+            {!isNewExam && (subject || duration || (requireExamCode && examCode)) && (
               <div className="flex flex-wrap items-center gap-4 pt-2 text-sm text-gray-600">
                 {subject && (
                   <div className="flex items-center gap-1.5">
@@ -335,7 +335,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                     <span>{duration} minutes</span>
                   </div>
                 )}
-                {examCode && (
+                {requireExamCode && examCode && (
                   <div className="flex items-center gap-1.5">
                     <Hash className="size-4 text-purple-600" />
                     <span className="font-mono">{examCode}</span>
@@ -404,9 +404,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               subjectId={subjectId}
               subjects={subjects}
               examCode={examCode}
+              requireExamCode={requireExamCode}
               duration={duration}
               maxAttempt={maxAttempt}
-              totalPoints={totalPoints}
               passingScore={passingScore}
               startDate={startDate}
               startTime={startClock}
@@ -417,9 +417,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                 setSubject(subjects.find((item) => item.subject_id === nextSubjectId)?.subject_name ?? '');
               }}
               onExamCodeChange={setExamCode}
+              onRequireExamCodeChange={(required) => {
+                setRequireExamCode(required);
+                setSaveError(null);
+                if (!required) setExamCode('');
+                else if (!examCode.trim()) setExamCode(generateExamCode());
+              }}
               onDurationChange={setDuration}
               onMaxAttemptChange={setMaxAttempt}
-              onTotalPointsChange={setTotalPoints}
               onPassingScoreChange={setPassingScore}
               onStartDateChange={setStartDate}
               onStartTimeChange={setStartClock}

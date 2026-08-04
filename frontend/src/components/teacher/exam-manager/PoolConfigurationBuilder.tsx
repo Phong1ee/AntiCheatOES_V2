@@ -25,6 +25,7 @@ interface PoolConfigurationBuilderProps {
 }
 
 type RuleCounts = Record<string, number>;
+type RuleMaxScores = Record<string, number>;
 
 const difficulties: QuestionDifficulty[] = ['easy', 'medium', 'hard'];
 const ruleKey = (row: Pick<PoolAvailabilityRow, 'chapter_id' | 'lo_id' | 'difficulty'>) =>
@@ -38,6 +39,7 @@ export function PoolConfigurationBuilder({
 }: PoolConfigurationBuilderProps) {
   const [availability, setAvailability] = useState<PoolAvailabilityRow[]>([]);
   const [counts, setCounts] = useState<RuleCounts>({});
+  const [maxScores, setMaxScores] = useState<RuleMaxScores>({});
   const [fixedRandomization, setFixedRandomization] = useState(
     initialConfig?.fixed_randomization ?? false,
   );
@@ -52,6 +54,14 @@ export function PoolConfigurationBuilder({
         (initialConfig?.rules ?? []).map((rule) => [
           `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`,
           rule.draw_count,
+        ]),
+      ),
+    );
+    setMaxScores(
+      Object.fromEntries(
+        (initialConfig?.rules ?? []).map((rule) => [
+          `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`,
+          rule.max_score_per_question,
         ]),
       ),
     );
@@ -97,18 +107,29 @@ export function PoolConfigurationBuilder({
           lo_id: row.lo_id,
           difficulty: row.difficulty,
           draw_count: counts[ruleKey(row)] ?? 0,
+          max_score_per_question: maxScores[ruleKey(row)] ?? 1,
         }))
         .filter((rule) => rule.draw_count > 0),
-    [availability, counts],
+    [availability, counts, maxScores],
   );
   const totalQuestions = rules.reduce((sum, rule) => sum + rule.draw_count, 0);
   const invalidRows = availability.filter(
     (row) => (counts[ruleKey(row)] ?? 0) > row.available_count,
   );
+  const invalidMaxScore = rules.some(
+    (rule) => !Number.isFinite(rule.max_score_per_question) || rule.max_score_per_question <= 0,
+  );
 
   const updateCount = (row: PoolAvailabilityRow, rawValue: string) => {
     const value = Math.max(0, Number.parseInt(rawValue || '0', 10) || 0);
     setCounts((current) => ({ ...current, [ruleKey(row)]: value }));
+  };
+
+  const updateMaxScore = (row: PoolAvailabilityRow, rawValue: string) => {
+    setMaxScores((current) => ({
+      ...current,
+      [ruleKey(row)]: Number(rawValue),
+    }));
   };
 
   const save = async () => {
@@ -118,6 +139,10 @@ export function PoolConfigurationBuilder({
     }
     if (invalidRows.length > 0) {
       setError('One or more requested counts exceed server-reported availability.');
+      return;
+    }
+    if (invalidMaxScore) {
+      setError('Every active pool rule requires a positive Max Score.');
       return;
     }
     try {
@@ -180,7 +205,8 @@ export function PoolConfigurationBuilder({
                       {rowValues.map((row) => {
                         const count = counts[ruleKey(row)] ?? 0;
                         const invalid = count > row.available_count;
-                        return <td key={row.difficulty} className="p-3 text-center"><Input aria-label={`${taxonomy.chapter_name} ${taxonomy.lo_name ?? 'all learning objectives'} ${row.difficulty} draw count`} type="number" min={0} max={row.available_count} value={count || ''} onChange={(event) => updateCount(row, event.target.value)} className={`mx-auto w-20 text-center ${invalid ? 'border-red-500' : ''}`} /><span className={`text-xs ${invalid ? 'text-red-600' : 'text-gray-500'}`}>of {row.available_count}</span></td>;
+                        const maxScore = maxScores[ruleKey(row)] ?? 1;
+                        return <td key={row.difficulty} className="p-3 text-center"><div className="mx-auto grid w-24 gap-1"><Input aria-label={`${taxonomy.chapter_name} ${taxonomy.lo_name ?? 'all learning objectives'} ${row.difficulty} draw count`} type="number" min={0} max={row.available_count} value={count || ''} onChange={(event) => updateCount(row, event.target.value)} className={`text-center ${invalid ? 'border-red-500' : ''}`} /><span className={`text-xs ${invalid ? 'text-red-600' : 'text-gray-500'}`}>Draw, of {row.available_count}</span>{count > 0 && <><Input aria-label={`${taxonomy.chapter_name} ${row.difficulty} max score per question`} type="number" min="0.01" step="0.01" value={maxScore} onChange={(event) => updateMaxScore(row, event.target.value)} className="text-center" /><span className="text-xs text-gray-500">Max each</span></>}</div></td>;
                       })}
                       <td className="p-3 text-center"><Badge variant="outline">{subtotal}</Badge></td>
                     </tr>
@@ -204,7 +230,7 @@ export function PoolConfigurationBuilder({
 
       <div className="sticky bottom-0 flex items-center justify-between border-t bg-white py-3">
         <span className="text-sm text-gray-600">{totalQuestions} question{totalQuestions === 1 ? '' : 's'} per attempt</span>
-        <Button onClick={() => void save()} disabled={saving || totalQuestions === 0 || invalidRows.length > 0}>
+        <Button onClick={() => void save()} disabled={saving || totalQuestions === 0 || invalidRows.length > 0 || invalidMaxScore}>
           {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}
           {saving ? 'Saving...' : 'Save Pool Configuration'}
         </Button>

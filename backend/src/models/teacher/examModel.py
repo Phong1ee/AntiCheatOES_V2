@@ -3,7 +3,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 from src.a_db_config.config import get_db_connection
-from src.service.exam_pool_service import distribute_points, seeded_random, select_unique_candidates
+from src.service.exam_pool_service import seeded_random, select_unique_candidates
+from src.service.scoring_service import GRADING_SCALE, normalize_score, validate_max_score
 
 
 def get_database_now():
@@ -319,12 +320,12 @@ def getExamById(exam_id: int):
 
 
 def validateExamQuestionPoints(exam_id: int):
-    """Reject starting an exam whose persisted selection cannot total its maximum."""
+    """Reject starting an exam without a positive raw-score denominator."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT question_selection_mode, total_points FROM exam WHERE exam_id = %s",
+            "SELECT question_selection_mode FROM exam WHERE exam_id = %s",
             (exam_id,),
         )
         exam = cursor.fetchone()
@@ -333,7 +334,9 @@ def validateExamQuestionPoints(exam_id: int):
         if str(exam["question_selection_mode"] or "manual") == "pool":
             cursor.execute(
                 """
-                SELECT COUNT(*) AS rule_count, COALESCE(SUM(r.draw_count), 0) AS draw_count
+                SELECT COUNT(*) AS rule_count,
+                       COALESCE(SUM(r.draw_count), 0) AS draw_count,
+                       COALESCE(SUM(r.draw_count * r.max_score_per_question), 0) AS possible_score
                 FROM exam_pool_config c
                 LEFT JOIN exam_pool_rule r ON r.pool_config_id = c.pool_config_id
                 WHERE c.exam_id = %s
@@ -341,13 +344,19 @@ def validateExamQuestionPoints(exam_id: int):
                 (exam_id,),
             )
             pool = cursor.fetchone()
-            if not pool or int(pool["rule_count"] or 0) == 0 or int(pool["draw_count"] or 0) == 0:
+            if (
+                not pool
+                or int(pool["rule_count"] or 0) == 0
+                or int(pool["draw_count"] or 0) == 0
+                or Decimal(str(pool["possible_score"] or 0)) <= 0
+            ):
                 raise Exception("Exam pool configuration is empty")
             return
         cursor.execute(
             """
             SELECT COUNT(*) AS question_count,
-                   COALESCE(SUM(question_point), 0) AS assigned_points
+                   COALESCE(SUM(question_point), 0) AS possible_score,
+                   COALESCE(SUM(question_point <= 0), 0) AS invalid_scores
             FROM exam_question
             WHERE exam_id = %s
             """,
@@ -356,8 +365,8 @@ def validateExamQuestionPoints(exam_id: int):
         points = cursor.fetchone()
         if int(points["question_count"] or 0) == 0:
             raise Exception("Exam has no questions")
-        if Decimal(str(points["assigned_points"])) != Decimal(str(exam["total_points"])):
-            raise Exception("Exam question points do not match total points")
+        if Decimal(str(points["possible_score"] or 0)) <= 0 or int(points["invalid_scores"] or 0) > 0:
+            raise Exception("Every exam question requires a positive max score")
     finally:
         cursor.close()
         cnx.close()
@@ -468,7 +477,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
         cursor.execute(insert_attempt, (exam_id, student_id, attempt_no))
         attempt_id = cursor.lastrowid
         cursor.execute(
-            "SELECT question_selection_mode, total_points FROM exam WHERE exam_id = %s FOR UPDATE",
+            "SELECT question_selection_mode FROM exam WHERE exam_id = %s FOR UPDATE",
             (exam_id,),
         )
         exam_row = cursor.fetchone()
@@ -499,7 +508,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 raise Exception("Pool configuration not found")
             cursor.execute(
                 """
-                SELECT rule_id, draw_count
+                SELECT rule_id, draw_count, max_score_per_question
                 FROM exam_pool_rule
                 WHERE pool_config_id = %s
                 ORDER BY rule_id
@@ -509,7 +518,10 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
             rule_rows = cursor.fetchall()
             candidate_map: dict[int, list[int]] = {}
             draw_counts: dict[int, int] = {}
-            for rule_id, draw_count in rule_rows:
+            max_scores: dict[int, Decimal] = {}
+            for rule_row in rule_rows:
+                rule_id, draw_count = rule_row[:2]
+                max_score_per_question = rule_row[2] if len(rule_row) > 2 else Decimal("1.00")
                 cursor.execute(
                     """
                     SELECT question_id
@@ -521,6 +533,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 )
                 candidate_map[int(rule_id)] = [int(row[0]) for row in cursor.fetchall()]
                 draw_counts[int(rule_id)] = int(draw_count)
+                max_scores[int(rule_id)] = validate_max_score(max_score_per_question)
             selected = select_unique_candidates(
                 candidate_map,
                 draw_counts,
@@ -535,7 +548,11 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 seeded_random(
                     "question-order", exam_id, student_id, attempt_no, int(config[1])
                 ).shuffle(selected_ids)
-            point_map = distribute_points(exam_row[1], selected_ids)
+            point_map = {
+                question_id: max_scores[rule_id]
+                for rule_id in sorted(selected)
+                for question_id in selected[rule_id]
+            }
         else:
             cursor.execute(
                 "SELECT version FROM exam_pool_config WHERE exam_id = %s",
@@ -557,7 +574,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
                 raise Exception("Exam has no questions")
             selected_ids = [int(row[0]) for row in fixed_rows]
             point_map = {
-                int(question_id): Decimal(str(question_point))
+                int(question_id): validate_max_score(question_point)
                 for question_id, question_point in fixed_rows
             }
             if shuffle_questions:
@@ -876,6 +893,40 @@ def _essay_pending(cursor, attempt_id: int) -> bool:
     return bool(cursor.fetchone()["pending"])
 
 
+def _attempt_raw_scores(cursor, attempt_id: int, questions: dict[int, dict]) -> tuple[Decimal, Decimal]:
+    cursor.execute(
+        "SELECT question_id, selected_option_id FROM mcq_answers WHERE attempt_id = %s",
+        (attempt_id,),
+    )
+    selected_answers = {row["question_id"]: row["selected_option_id"] for row in cursor.fetchall()}
+    cursor.execute(
+        "SELECT question_id, score FROM essay_answers WHERE attempt_id = %s",
+        (attempt_id,),
+    )
+    essay_scores = {row["question_id"]: row["score"] for row in cursor.fetchall()}
+    raw_earned = Decimal("0")
+    raw_possible = Decimal("0")
+    for question_id, question in questions.items():
+        maximum = validate_max_score(
+            question["question_point_snapshot"]
+            if question.get("question_point_snapshot") is not None
+            else question.get("question_point")
+        )
+        raw_possible += maximum
+        if str(_question_type(question)).lower() == "essay":
+            awarded = essay_scores.get(question_id)
+            if awarded is not None:
+                raw_earned += Decimal(str(awarded))
+            continue
+        option_id = selected_answers.get(question_id)
+        if option_id is None:
+            continue
+        option = _valid_snapshot_option(cursor, question, option_id)
+        if option and bool(option.get("isCorrect")):
+            raw_earned += maximum
+    return raw_earned, raw_possible
+
+
 def _sync_student_final_score(cursor, exam_id: int, student_id: str) -> None:
     cursor.execute("SELECT result_strategy FROM exam_setting WHERE exam_id = %s", (exam_id,))
     settings = cursor.fetchone()
@@ -884,6 +935,14 @@ def _sync_student_final_score(cursor, exam_id: int, student_id: str) -> None:
         """
         SELECT score FROM attempt
         WHERE exam_id = %s AND student_id = %s AND submitted_at IS NOT NULL
+          AND status IN ('submitted', 'terminated')
+          AND score_scale_version = 2
+          AND NOT EXISTS (
+              SELECT 1 FROM essay_answers ea
+              WHERE ea.attempt_id = attempt.attempt_id
+                AND ea.score IS NULL
+                AND TRIM(REPLACE(REPLACE(REPLACE(COALESCE(ea.answer_text, ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '')) <> ''
+          )
         ORDER BY attempt_no, submitted_at, attempt_id
         """,
         (exam_id, student_id),
@@ -967,9 +1026,19 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         if not attempt:
             raise Exception("Attempt not found")
         if attempt["status"] in {"submitted", "terminated"}:
+            questions = _load_attempt_questions(cursor, attempt_id, exam_id)
+            raw_earned, raw_possible = _attempt_raw_scores(cursor, attempt_id, questions)
             essay_pending = _essay_pending(cursor, attempt_id)
             cnx.commit()
-            return {"score": attempt["score"], "essayPending": essay_pending, "status": attempt["status"], "idempotent": True}
+            return {
+                "score": attempt["score"],
+                "rawEarnedScore": raw_earned,
+                "rawPossibleScore": raw_possible,
+                "gradingScale": GRADING_SCALE,
+                "essayPending": essay_pending,
+                "status": attempt["status"],
+                "idempotent": True,
+            }
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         questions = _load_attempt_questions(cursor, attempt_id, exam_id)
@@ -986,30 +1055,14 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
 
         _finalize_essay_answers(cursor, attempt_id, questions)
 
-        cursor.execute(
-            "SELECT question_id, selected_option_id FROM mcq_answers WHERE attempt_id = %s",
-            (attempt_id,),
-        )
-        selected_answers = {row["question_id"]: row["selected_option_id"] for row in cursor.fetchall()}
-        total_score = Decimal("0.00")
-        for question_id, question in questions.items():
-            if _question_type(question) == "essay":
-                continue
-            option_id = selected_answers.get(question_id)
-            if option_id is None:
-                continue
-            option = _valid_snapshot_option(cursor, question, option_id)
-            if option and bool(option.get("isCorrect")):
-                points = question["question_point_snapshot"]
-                if points is None:
-                    points = question["question_point"]
-                total_score += Decimal(str(points or 0))
+        raw_earned, raw_possible = _attempt_raw_scores(cursor, attempt_id, questions)
+        total_score = normalize_score(raw_earned, raw_possible)
         essay_pending = _essay_pending(cursor, attempt_id)
         cursor.execute(
             """
             UPDATE attempt
             SET score = %s, end_time = NOW(), submitted_at = NOW(), status = %s,
-                termination_reason = %s
+                termination_reason = %s, score_scale_version = 2
             WHERE attempt_id = %s
             """,
             (total_score, status, reason, attempt_id),
@@ -1021,7 +1074,15 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
             )
         _sync_student_final_score(cursor, exam_id, attempt["student_id"])
         cnx.commit()
-        return {"score": total_score, "essayPending": essay_pending, "status": status, "idempotent": False}
+        return {
+            "score": total_score,
+            "rawEarnedScore": raw_earned,
+            "rawPossibleScore": raw_possible,
+            "gradingScale": GRADING_SCALE,
+            "essayPending": essay_pending,
+            "status": status,
+            "idempotent": False,
+        }
     except Exception:
         cnx.rollback()
         raise
@@ -1031,102 +1092,8 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
 
 
 def submitAttempt(attempt_id: int, exam_id: int, answers: list):
-    """Save MCQ and essay answers, auto-grade MCQ, and close the attempt."""
-    cnx = get_db_connection()
-    cursor = cnx.cursor(dictionary=True)
-    try:
-        question_query = """
-        SELECT q.question_id, q.question_type, aq.question_point
-        FROM attempt_question aq
-        JOIN attempt a ON a.attempt_id = aq.attempt_id
-        JOIN question q ON q.question_id = aq.question_id
-        WHERE aq.attempt_id = %s AND a.exam_id = %s
-        """
-        cursor.execute(question_query, (attempt_id, exam_id))
-        question_rows = cursor.fetchall()
-        question_map = {row["question_id"]: row for row in question_rows}
-
-        delete_mcq_query = "DELETE FROM mcq_answers WHERE attempt_id = %s"
-        delete_essay_query = "DELETE FROM essay_answers WHERE attempt_id = %s"
-        cursor.execute(delete_mcq_query, (attempt_id,))
-        cursor.execute(delete_essay_query, (attempt_id,))
-        insert_mcq_query = """
-        INSERT INTO mcq_answers (attempt_id, question_id, selected_option_id)
-        VALUES (%s, %s, %s)
-        """
-        insert_essay_query = """
-        INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
-        VALUES (%s, %s, %s, NULL)
-        """
-        option_by_text_query = """
-        SELECT options_id, is_correct
-        FROM options
-        WHERE question_id = %s AND LOWER(options_text) = LOWER(%s)
-        LIMIT 1
-        """
-        option_by_id_query = """
-        SELECT options_id, is_correct
-        FROM options
-        WHERE question_id = %s AND options_id = %s
-        LIMIT 1
-        """
-
-        total_score = Decimal("0.00")
-        essay_pending = False
-
-        for index, answer in enumerate(answers, start=1):
-            question_id = int(answer["questionId"])
-            question_info = question_map.get(question_id)
-
-            if not question_info:
-                raise Exception(f"Question {question_id} does not belong to this exam")
-
-            selected_option_id = answer.get("selectedOptionId")
-            answer_text = (answer.get("answerText") or "").strip()
-
-            if question_info["question_type"] == "essay":
-                if not answer_text:
-                    raise Exception(f"Missing essay answer for question {question_id}")
-
-                cursor.execute(insert_essay_query, (attempt_id, question_id, answer_text))
-                essay_pending = True
-                continue
-
-            if selected_option_id is not None:
-                cursor.execute(option_by_id_query, (question_id, int(selected_option_id)))
-            elif answer_text:
-                cursor.execute(option_by_text_query, (question_id, answer_text))
-            else:
-                raise Exception(f"Missing answer for question {question_id}")
-
-            option_row = cursor.fetchone()
-            if not option_row:
-                raise Exception(f"Invalid selected option for question {question_id}")
-
-            cursor.execute(insert_mcq_query, (attempt_id, question_id, option_row["options_id"]))
-            if option_row["is_correct"]:
-                total_score += Decimal(str(question_info["question_point"] or 0))
-
-        update_attempt_query = """
-        UPDATE attempt
-        SET score = %s,
-            end_time = NOW(),
-            submitted_at = NOW()
-        WHERE attempt_id = %s
-        """
-        cursor.execute(update_attempt_query, (total_score, attempt_id))
-        cnx.commit()
-
-        return {
-            "score": total_score,
-            "essayPending": essay_pending
-        }
-    except Exception as e:
-        cnx.rollback()
-        raise e
-    finally:
-        cursor.close()
-        cnx.close()
+    """Backward-compatible entry point; the active atomic finalizer owns scoring."""
+    return finalizeAttempt(attempt_id, exam_id, answers)
 
 def addQuestionToExam(exam_id: int, question_data: dict):
     """Add a question to an exam."""

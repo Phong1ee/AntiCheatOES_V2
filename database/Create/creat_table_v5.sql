@@ -114,7 +114,7 @@ CREATE TABLE exam(
     subject_id VARCHAR(20) NOT NULL,
     manage_by INT,
     title VARCHAR(255) NOT NULL,
-    examcode VARCHAR(20) NOT NULL UNIQUE,
+    examcode VARCHAR(20) NULL UNIQUE,
     max_attempt INT,
     description TEXT,
     duration_minutes INT DEFAULT 90,

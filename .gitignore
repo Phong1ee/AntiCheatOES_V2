@@ -27,3 +27,6 @@ build/
 .vscode/
 .idea/
 .DS_Store
+
+redis-docker-compose.yml
+test_redis_connection.py

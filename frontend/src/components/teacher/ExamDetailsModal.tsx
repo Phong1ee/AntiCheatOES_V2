@@ -41,7 +41,7 @@ const statusConfig = {
 // Mock exam details data
 const getExamDetails = (examId: string) => ({
   description: 'Comprehensive assessment covering all topics from weeks 1-7 of the course.',
-  passingScore: 60,
+  passingScore: 6,
   totalQuestions: 40,
   questionBreakdown: [
     { type: 'Multiple Choice', count: 25, points: 50 },
@@ -147,7 +147,7 @@ export function ExamDetailsModal({ exam, onClose }: ExamDetailsModalProps) {
                 <Target className="size-4" />
                 <span className="text-xs">Passing Score</span>
               </div>
-              <p className="text-lg text-gray-800">{details.passingScore}%</p>
+              <p className="text-lg text-gray-800">{details.passingScore.toFixed(2)} / 10</p>
             </div>
           </div>
 
@@ -279,7 +279,7 @@ export function ExamDetailsModal({ exam, onClose }: ExamDetailsModalProps) {
               <div className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-xl p-4">
                 <div className="grid grid-cols-3 gap-4 text-center">
                   <div>
-                    <p className="text-2xl text-gray-800">{exam.averageScore.toFixed(1)}%</p>
+                    <p className="text-2xl text-gray-800">{exam.averageScore.toFixed(2)} / 10</p>
                     <p className="text-xs text-gray-600 mt-1">Average Score</p>
                   </div>
                   <div>

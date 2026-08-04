@@ -68,7 +68,7 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
       return;
     }
     if (scoreDraft > selectedAnswer.maxPoints) {
-      toast.error(`Score cannot exceed ${selectedAnswer.maxPoints} points`);
+      toast.error(`Awarded Score cannot exceed the snapshot maximum of ${selectedAnswer.maxPoints}`);
       return;
     }
 
@@ -248,7 +248,7 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
                           {selectedAnswer.question}
                         </p>
                         <p className="text-sm text-teal-600 mt-2">
-                          Max Points: {selectedAnswer.maxPoints}
+                          Snapshot Max Score: {selectedAnswer.maxPoints}
                         </p>
                       </div>
 
@@ -270,7 +270,7 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Score (out of {selectedAnswer.maxPoints})</Label>
+                          <Label>Awarded Score (out of {selectedAnswer.maxPoints})</Label>
                           <Input
                             type="number"
                             value={scoreDraft ?? ''}
@@ -278,7 +278,7 @@ export function ManualGradingModal({ examId, onClose }: ManualGradingModalProps)
                             placeholder="Enter score"
                             min="0"
                             max={selectedAnswer.maxPoints}
-                            step="0.5"
+                            step="0.01"
                           />
                         </div>
                       </div>

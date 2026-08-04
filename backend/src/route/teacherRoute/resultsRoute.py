@@ -5,7 +5,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
@@ -15,6 +15,8 @@ from src.a_db_config import (
     AttemptQuestion,
     Exam,
     ExamQuestion,
+    ExamPoolConfig,
+    ExamPoolRule,
     ExamSetting,
     ExamStatus,
     EssayAnswer,
@@ -36,6 +38,13 @@ from src.service.result_strategy_service import (
     sync_final_scores,
     sync_student_final_score,
 )
+from src.service.scoring_service import (
+    GRADING_SCALE,
+    decimal_score,
+    normalize_score,
+    validate_awarded_score,
+    validate_max_score,
+)
 
 router = APIRouter()
 
@@ -43,7 +52,7 @@ _SCHEDULE_STATUS_MAP = {"upcoming": "scheduled", "ongoing": "in-progress", "comp
 
 
 class GradeEssayRequest(BaseModel):
-    score: float
+    score: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
 
 
 class UpdateStrategyRequest(BaseModel):
@@ -54,6 +63,74 @@ def _score_value(value):
     if value is None:
         return 0
     return round(float(value), 2)
+
+
+def _max_score(link: AttemptQuestion) -> Decimal:
+    return validate_max_score(
+        link.question_point_snapshot
+        if link.question_point_snapshot is not None
+        else link.question_point
+    )
+
+
+def _question_type_value(link: AttemptQuestion) -> str:
+    value = link.question_type_snapshot or link.question.question_type
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _snapshot_option(link: AttemptQuestion, option_id: int | None):
+    if option_id is None:
+        return None
+    if link.options_snapshot is not None:
+        return next(
+            (item for item in link.options_snapshot if int(item["id"]) == int(option_id)),
+            None,
+        )
+    return next(
+        (item for item in link.question.options if item.options_id == option_id),
+        None,
+    )
+
+
+def _option_is_correct(option) -> bool:
+    if option is None:
+        return False
+    if isinstance(option, dict):
+        return bool(option.get("isCorrect"))
+    return bool(option.is_correct)
+
+
+def _attempt_raw_totals(db: Session, attempt_id: int) -> tuple[Decimal, Decimal]:
+    links = (
+        db.query(AttemptQuestion)
+        .options(selectinload(AttemptQuestion.question).selectinload(Question.options))
+        .filter(AttemptQuestion.attempt_id == attempt_id)
+        .all()
+    )
+    mcq_by_question = {
+        answer.question_id: answer
+        for answer in db.query(MCQAnswer).filter(MCQAnswer.attempt_id == attempt_id).all()
+    }
+    essay_by_question = {
+        answer.question_id: answer
+        for answer in db.query(EssayAnswer).filter(EssayAnswer.attempt_id == attempt_id).all()
+    }
+    raw_earned = Decimal("0")
+    raw_possible = Decimal("0")
+    for link in links:
+        maximum = _max_score(link)
+        raw_possible += maximum
+        question_type = _question_type_value(link)
+        if question_type == QuestionType.essay.value:
+            essay = essay_by_question.get(link.question_id)
+            if essay and essay.score is not None:
+                raw_earned += decimal_score(essay.score, field_name="essay score")
+            continue
+        answer = mcq_by_question.get(link.question_id)
+        selected = _snapshot_option(link, answer.selected_option_id if answer else None)
+        if _option_is_correct(selected):
+            raw_earned += maximum
+    return raw_earned, raw_possible
 
 
 def _time_taken(start_time, end_time, submitted_at):
@@ -84,23 +161,32 @@ def _sync_final_scores(db: Session, exam: Exam) -> str:
 
 
 def _attempt_breakdown(db: Session, attempt_id: int):
-    total_questions = (
-        db.query(func.count(AttemptQuestion.question_id))
+    links = (
+        db.query(AttemptQuestion)
+        .options(selectinload(AttemptQuestion.question).selectinload(Question.options))
         .filter(AttemptQuestion.attempt_id == attempt_id)
-        .scalar()
-        or 0
+        .all()
     )
-    correct = (
-        db.query(func.count(MCQAnswer.mcq_answer_id))
-        .join(Option, Option.options_id == MCQAnswer.selected_option_id)
-        .filter(MCQAnswer.attempt_id == attempt_id, Option.is_correct == True)  # noqa: E712
-        .scalar()
-        or 0
+    answers = {
+        answer.question_id: answer
+        for answer in db.query(MCQAnswer).filter(MCQAnswer.attempt_id == attempt_id).all()
+    }
+    correct = sum(
+        1
+        for link in links
+        if _option_is_correct(
+            _snapshot_option(
+                link,
+                answers[link.question_id].selected_option_id if link.question_id in answers else None,
+            )
+        )
     )
-    return correct, total_questions
+    return correct, len(links)
 
 
-def _attempt_status(attempt, exam: Exam) -> str:
+def _attempt_status(attempt, exam: Exam, essay_pending: bool = False) -> str:
+    if essay_pending:
+        return "pending-grading"
     if exam.end_time and attempt.submitted_at and attempt.submitted_at > exam.end_time:
         return "late"
     return "submitted"
@@ -113,6 +199,25 @@ def _essay_counts(db: Session, attempt_ids: list):
     total = len(rows)
     pending = sum(1 for answer_text, score in rows if score is None and answer_text and answer_text.strip())
     return total, pending
+
+
+def _all_submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[Attempt]]:
+    attempts = (
+        db.query(Attempt)
+        .filter(
+            Attempt.exam_id == exam_id,
+            Attempt.submitted_at.isnot(None),
+            Attempt.status.in_(["submitted", "terminated"]),
+            Attempt.score_scale_version == 2,
+        )
+        .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
+        .all()
+    )
+    grouped: dict[str, list[Attempt]] = {}
+    for attempt in attempts:
+        if attempt.student_id:
+            grouped.setdefault(attempt.student_id, []).append(attempt)
+    return grouped
 
 
 def _has_essay_questions(db: Session, exam_id: int) -> bool:
@@ -134,20 +239,38 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
         .all()
     )
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
+    all_submitted_by_student = _all_submitted_attempts_by_student(db, exam.exam_id)
     scores = []
     submitted_count = 0
     for student_exam, user in roster:
-        if submitted_by_student.get(user.school_id):
+        if all_submitted_by_student.get(user.school_id):
             submitted_count += 1
             if student_exam.final_score is not None:
                 scores.append(float(student_exam.final_score))
 
-    total_questions = (
-        db.query(func.count(ExamQuestion.question_id)).filter(ExamQuestion.exam_id == exam.exam_id).scalar() or 0
+    selection_mode = (
+        exam.question_selection_mode.value
+        if hasattr(exam.question_selection_mode, "value")
+        else str(exam.question_selection_mode or "manual")
     )
+    if selection_mode == "pool":
+        total_questions = (
+            db.query(func.coalesce(func.sum(ExamPoolRule.draw_count), 0))
+            .join(ExamPoolConfig, ExamPoolConfig.pool_config_id == ExamPoolRule.pool_config_id)
+            .filter(ExamPoolConfig.exam_id == exam.exam_id)
+            .scalar()
+            or 0
+        )
+    else:
+        total_questions = (
+            db.query(func.count(ExamQuestion.question_id))
+            .filter(ExamQuestion.exam_id == exam.exam_id)
+            .scalar()
+            or 0
+        )
     # Essay counts span every submitted attempt (not just each student's final attempt) so a teacher
     # can grade essays from any attempt, since grading can itself change the computed final score.
-    all_submitted_ids = [attempt.attempt_id for attempts in submitted_by_student.values() for attempt in attempts]
+    all_submitted_ids = [attempt.attempt_id for attempts in all_submitted_by_student.values() for attempt in attempts]
     total_essay, pending_essay = _essay_counts(db, all_submitted_ids)
 
     return {
@@ -161,6 +284,8 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
         "pendingEssayCount": pending_essay,
         "totalEssayCount": total_essay,
         "resultStrategy": strategy,
+        "gradingScale": float(GRADING_SCALE),
+        "passingScore": _score_value(exam.passing_score),
     }
 
 
@@ -174,37 +299,53 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
         .all()
     )
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
+    all_submitted_by_student = _all_submitted_attempts_by_student(db, exam.exam_id)
     rows = []
     for student_exam, user in roster:
-        attempts_list = submitted_by_student.get(user.school_id, [])
+        finalized_attempts = submitted_by_student.get(user.school_id, [])
+        attempts_list = all_submitted_by_student.get(user.school_id, [])
 
         attempt_summaries = []
         for attempt in attempts_list:
             correct, total_questions = _attempt_breakdown(db, attempt.attempt_id)
+            _, pending_count = _essay_counts(db, [attempt.attempt_id])
             attempt_summaries.append({
                 "attemptId": attempt.attempt_id,
                 "attemptNumber": attempt.attempt_no,
                 "score": _score_value(attempt.score),
+                "gradingScale": float(GRADING_SCALE),
                 "correctAnswers": correct,
                 "totalQuestions": total_questions,
                 "timeSpent": _time_taken(attempt.start_time, attempt.end_time, attempt.submitted_at),
-                "status": _attempt_status(attempt, exam),
+                "status": _attempt_status(attempt, exam, pending_count > 0),
+                "provisional": pending_count > 0,
                 "submittedAt": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
             })
 
-        representative = _representative_attempt(strategy, attempts_list)
+        representative = _representative_attempt(strategy, finalized_attempts)
+        display_attempt = representative or (attempts_list[-1] if attempts_list else None)
         representative_summary = (
-            next(s for s in attempt_summaries if s["attemptId"] == representative.attempt_id)
-            if representative
+            next(s for s in attempt_summaries if s["attemptId"] == display_attempt.attempt_id)
+            if display_attempt
             else None
         )
 
         rows.append({
-            "id": str(representative.attempt_id) if representative else user.school_id,
-            "attemptId": representative.attempt_id if representative else None,
+            "id": str(display_attempt.attempt_id) if display_attempt else user.school_id,
+            "attemptId": display_attempt.attempt_id if display_attempt else None,
             "studentId": user.school_id,
             "name": user.full_name,
             "score": _score_value(student_exam.final_score) if representative else 0,
+            "provisional": bool(display_attempt and not representative),
+            "passed": (
+                student_exam.final_score >= exam.passing_score
+                if representative
+                and student_exam.final_score is not None
+                and exam.passing_score is not None
+                else None
+            ),
+            "gradingScale": float(GRADING_SCALE),
+            "passingScore": _score_value(exam.passing_score),
             "correctAnswers": representative_summary["correctAnswers"] if representative_summary else 0,
             "totalQuestions": representative_summary["totalQuestions"] if representative_summary else 0,
             "timeSpent": representative_summary["timeSpent"] if representative_summary else "-",
@@ -216,78 +357,97 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
 
 
 def _build_question_stats(db: Session, exam: Exam) -> list:
-    # One data point per student (their representative attempt per the exam's strategy), so a
-    # student who retried isn't counted multiple times.
+    # One data point per student using the strategy's representative, finalized
+    # attempt. Pool statistics therefore include only questions actually drawn.
     strategy = _get_or_create_settings(db, exam).result_strategy.value
     submitted_by_student = _submitted_attempts_by_student(db, exam.exam_id)
-    submitted_attempt_ids = []
-    for attempts in submitted_by_student.values():
-        representative = _representative_attempt(strategy, attempts)
-        if representative:
-            submitted_attempt_ids.append(representative.attempt_id)
+    submitted_attempt_ids = [
+        representative.attempt_id
+        for attempts in submitted_by_student.values()
+        if (representative := _representative_attempt(strategy, attempts)) is not None
+    ]
+    if not submitted_attempt_ids:
+        return []
+
     links = (
-        db.query(ExamQuestion)
-        .options(selectinload(ExamQuestion.question).selectinload(Question.options))
-        .filter(ExamQuestion.exam_id == exam.exam_id)
-        .order_by(ExamQuestion.question_id)
+        db.query(AttemptQuestion)
+        .options(selectinload(AttemptQuestion.question).selectinload(Question.options))
+        .filter(AttemptQuestion.attempt_id.in_(submitted_attempt_ids))
+        .order_by(AttemptQuestion.question_id, AttemptQuestion.attempt_id)
         .all()
     )
+    mcq_answers = {
+        (answer.attempt_id, answer.question_id): answer
+        for answer in db.query(MCQAnswer).filter(MCQAnswer.attempt_id.in_(submitted_attempt_ids)).all()
+    }
+    essay_answers = {
+        (answer.attempt_id, answer.question_id): answer
+        for answer in db.query(EssayAnswer).filter(EssayAnswer.attempt_id.in_(submitted_attempt_ids)).all()
+    }
+    links_by_question: dict[int, list[AttemptQuestion]] = {}
+    for link in links:
+        links_by_question.setdefault(link.question_id, []).append(link)
 
     stats = []
-    for index, link in enumerate(links, start=1):
-        question = link.question
-        points = link.question_point_snapshot
-        max_points = float(points if points is not None else link.question_point or 0)
+    for index, question_links in enumerate(links_by_question.values(), start=1):
+        first_link = question_links[0]
+        question = first_link.question
+        question_type = _question_type_value(first_link)
+        question_text = first_link.question_text_snapshot or question.question_text
 
-        if question.question_type == QuestionType.essay:
-            essays = (
-                db.query(EssayAnswer)
-                .filter(
-                    EssayAnswer.question_id == question.question_id,
-                    EssayAnswer.attempt_id.in_(submitted_attempt_ids or [-1]),
-                )
-                .all()
+        if question_type == QuestionType.essay.value:
+            graded_ratios = []
+            essay_count = 0
+            for link in question_links:
+                essay = essay_answers.get((link.attempt_id, link.question_id))
+                if essay is None:
+                    continue
+                essay_count += 1
+                if essay.score is not None:
+                    graded_ratios.append(
+                        decimal_score(essay.score, field_name="essay score") / _max_score(link)
+                    )
+            correct_rate = (
+                round(float(sum(graded_ratios, Decimal("0")) / len(graded_ratios) * 100), 1)
+                if graded_ratios
+                else 0
             )
-            graded = [essay.score for essay in essays if essay.score is not None]
-            correct_rate = round((sum(graded) / len(graded)) / max_points * 100, 1) if graded and max_points else 0
             stats.append({
                 "questionNumber": index,
-                "questionText": question.question_text,
+                "questionText": question_text,
                 "type": "essay",
                 "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
                 "correctRate": correct_rate,
-                "totalAttempts": len(essays),
+                "totalAttempts": essay_count,
                 "correctOption": None,
                 "optionStats": None,
             })
             continue
 
-        mcqs = (
-            db.query(MCQAnswer)
-            .options(selectinload(MCQAnswer.selected_option))
-            .filter(
-                MCQAnswer.question_id == question.question_id,
-                MCQAnswer.attempt_id.in_(submitted_attempt_ids or [-1]),
-            )
-            .all()
-        )
-        total_attempts = len(mcqs)
-        correct_count = sum(1 for mcq in mcqs if mcq.selected_option and mcq.selected_option.is_correct)
-
-        is_true_false = question.question_type == QuestionType.true_false
-        options_sorted = sorted(question.options, key=lambda item: item.options_id)
-        option_meta = {
-            option.options_id: {
-                "letter": option.options_text if is_true_false else chr(65 + idx),
-                "label": option.options_text,
-                "isCorrect": bool(option.is_correct),
+        total_attempts = len(question_links)
+        correct_count = 0
+        is_true_false = question_type == QuestionType.true_false.value
+        first_options = first_link.options_snapshot if first_link.options_snapshot is not None else question.options
+        option_meta = []
+        for option_index, option in enumerate(first_options):
+            label = option.get("text") if isinstance(option, dict) else option.options_text
+            option_meta.append({
+                "letter": label if is_true_false else chr(65 + option_index),
+                "label": label,
+                "isCorrect": _option_is_correct(option),
                 "count": 0,
-            }
-            for idx, option in enumerate(options_sorted)
-        }
-        for mcq in mcqs:
-            if mcq.selected_option_id in option_meta:
-                option_meta[mcq.selected_option_id]["count"] += 1
+            })
+        for link in question_links:
+            answer = mcq_answers.get((link.attempt_id, link.question_id))
+            selected = _snapshot_option(link, answer.selected_option_id if answer else None)
+            if _option_is_correct(selected):
+                correct_count += 1
+            selected_label = (
+                selected.get("text") if isinstance(selected, dict) else selected.options_text
+            ) if selected is not None else None
+            matching = next((item for item in option_meta if item["label"] == selected_label), None)
+            if matching:
+                matching["count"] += 1
         option_stats = [
             {
                 "option": info["letter"],
@@ -295,12 +455,12 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
                 "isCorrect": info["isCorrect"],
                 "percentage": round(info["count"] / total_attempts * 100, 1) if total_attempts else 0,
             }
-            for info in option_meta.values()
+            for info in option_meta
         ]
-        correct_option = next((info["letter"] for info in option_meta.values() if info["isCorrect"]), None)
+        correct_option = next((info["letter"] for info in option_meta if info["isCorrect"]), None)
         stats.append({
             "questionNumber": index,
-            "questionText": question.question_text,
+            "questionText": question_text,
             "type": "true-false" if is_true_false else "mcq",
             "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
             "correctRate": round(correct_count / total_attempts * 100, 1) if total_attempts else 0,
@@ -312,25 +472,12 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
 
 
 def _recompute_attempt_score(db: Session, attempt_id: int) -> Attempt:
-    mcq_rows = (
-        db.query(
-            func.coalesce(AttemptQuestion.question_point_snapshot, AttemptQuestion.question_point),
-            Option.is_correct,
-        )
-        .join(
-            MCQAnswer,
-            (MCQAnswer.attempt_id == AttemptQuestion.attempt_id) & (MCQAnswer.question_id == AttemptQuestion.question_id),
-        )
-        .join(Option, Option.options_id == MCQAnswer.selected_option_id)
-        .filter(AttemptQuestion.attempt_id == attempt_id)
-        .all()
-    )
-    mcq_total = sum((points for points, is_correct in mcq_rows if is_correct), Decimal("0"))
-    essay_total = (
-        db.query(func.coalesce(func.sum(EssayAnswer.score), 0)).filter(EssayAnswer.attempt_id == attempt_id).scalar()
-    )
+    raw_earned, raw_possible = _attempt_raw_totals(db, attempt_id)
     attempt = db.get(Attempt, attempt_id)
-    attempt.score = mcq_total + Decimal(str(essay_total or 0))
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    attempt.score = normalize_score(raw_earned, raw_possible)
+    attempt.score_scale_version = 2
     db.flush()
     return attempt
 
@@ -450,10 +597,12 @@ def get_student_attempt_detail(
     correct_count = 0
     for index, link in enumerate(links, start=1):
         question = link.question
-        points = link.question_point_snapshot
-        max_points = float(points if points is not None else link.question_point or 0)
+        maximum = _max_score(link)
+        max_points = float(maximum)
+        question_type = _question_type_value(link)
+        question_text = link.question_text_snapshot or question.question_text
 
-        if question.question_type == QuestionType.essay:
+        if question_type == QuestionType.essay.value:
             essay = (
                 db.query(EssayAnswer)
                 .filter(EssayAnswer.attempt_id == attempt_id, EssayAnswer.question_id == question.question_id)
@@ -462,7 +611,7 @@ def get_student_attempt_detail(
             is_correct = essay.score is not None and essay.score > 0 if essay else None
             questions.append({
                 "questionNumber": index,
-                "question": question.question_text,
+                "question": question_text,
                 "type": "essay",
                 "correctAnswer": None,
                 "studentAnswer": essay.answer_text if essay else None,
@@ -478,28 +627,38 @@ def get_student_attempt_detail(
             .filter(MCQAnswer.attempt_id == attempt_id, MCQAnswer.question_id == question.question_id)
             .first()
         )
-        selected_option = mcq.selected_option if mcq else None
-        correct_option = next((option for option in question.options if option.is_correct), None)
-        is_correct = bool(selected_option.is_correct) if selected_option else None
+        selected_option = _snapshot_option(link, mcq.selected_option_id if mcq else None)
+        options = link.options_snapshot if link.options_snapshot is not None else question.options
+        correct_option = next((option for option in options if _option_is_correct(option)), None)
+        is_correct = _option_is_correct(selected_option) if selected_option else None
         if is_correct:
             correct_count += 1
 
+        def option_text(option):
+            if option is None:
+                return None
+            return option.get("text") if isinstance(option, dict) else option.options_text
+
         questions.append({
             "questionNumber": index,
-            "question": question.question_text,
-            "type": "true-false" if question.question_type == QuestionType.true_false else "mcq",
-            "correctAnswer": correct_option.options_text if correct_option else None,
-            "studentAnswer": selected_option.options_text if selected_option else None,
+            "question": question_text,
+            "type": "true-false" if question_type == QuestionType.true_false.value else "mcq",
+            "correctAnswer": option_text(correct_option),
+            "studentAnswer": option_text(selected_option),
             "isCorrect": is_correct,
             "points": max_points if is_correct else 0,
             "maxPoints": max_points,
         })
 
+    raw_earned, raw_possible = _attempt_raw_totals(db, attempt_id)
     return {
         "attemptId": attempt.attempt_id,
         "studentId": student.school_id if student else None,
         "studentName": student.full_name if student else "Unknown",
         "score": _score_value(attempt.score),
+        "rawEarnedScore": _score_value(raw_earned),
+        "rawPossibleScore": _score_value(raw_possible),
+        "gradingScale": float(GRADING_SCALE),
         "correctAnswers": correct_count,
         "totalQuestions": len(links),
         "timeSpent": _time_taken(attempt.start_time, attempt.end_time, attempt.submitted_at),
@@ -601,13 +760,16 @@ def grade_essay_answer(
         .filter(AttemptQuestion.attempt_id == essay.attempt_id, AttemptQuestion.question_id == essay.question_id)
         .first()
     )
-    points = attempt_question.question_point_snapshot if attempt_question else None
-    max_points = float(points if points is not None else attempt_question.question_point or 0) if attempt_question else 0
-    if payload.score < 0 or payload.score > max_points:
-        raise HTTPException(status_code=400, detail=f"Score must be between 0 and {max_points}")
+    if attempt_question is None:
+        raise HTTPException(status_code=409, detail="Attempt question snapshot not found")
+    max_points = _max_score(attempt_question)
+    try:
+        awarded_score = validate_awarded_score(payload.score, max_points)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     try:
-        essay.score = int(round(payload.score))
+        essay.score = awarded_score
         attempt = _recompute_attempt_score(db, essay.attempt_id)
         exam = db.get(Exam, exam_id)
         final_score = sync_student_final_score(db, exam, attempt.student_id)
@@ -617,6 +779,7 @@ def grade_essay_answer(
             "currentScore": essay.score,
             "status": "graded",
             "attemptScore": _score_value(attempt.score),
+            "gradingScale": float(GRADING_SCALE),
             "finalScore": _score_value(final_score) if final_score is not None else None,
         }
     except Exception:
@@ -642,7 +805,7 @@ def export_exam_results_xlsx(
     results_sheet = workbook.active
     results_sheet.title = "Student Results"
     results_sheet.append(
-        ["Student ID", "Name", "Score", "Correct Answers", "Total Questions", "Time Spent", "Status", "Submitted At"]
+        ["Student ID", "Name", "Score (/10)", "Correct Answers", "Total Questions", "Time Spent", "Status", "Submitted At"]
     )
     for row in students:
         results_sheet.append([

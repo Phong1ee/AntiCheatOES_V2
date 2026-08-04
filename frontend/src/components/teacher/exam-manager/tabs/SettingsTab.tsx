@@ -24,19 +24,19 @@ interface SettingsTabProps {
 
 type ThresholdField = 'force_fullscreen_thresh' | 'tab_switch_thresh' | 'copy_paste_thresh';
 
-const gradingMethods: { value: ResultStrategy; label: string; description: string }[] = [
-  { value: 'highest', label: 'Highest', description: 'Use the highest score across all submitted attempts.' },
-  { value: 'last_attempt', label: 'Last Attempt', description: 'Use the score from the most recently submitted attempt.' },
-  { value: 'average', label: 'Average', description: 'Use the average score across all submitted attempts.' },
+const gradingMethods: { value: ResultStrategy; label: string}[] = [
+  { value: 'highest', label: 'Highest'},
+  { value: 'last_attempt', label: 'Last Attempt'},
+  { value: 'average', label: 'Average'},
 ];
 
 const isResultStrategy = (value: string): value is ResultStrategy =>
   gradingMethods.some((method) => method.value === value);
 
-const visibilityOptions: { value: ResultVisibility; label: string; description: string }[] = [
-  { value: 'hidden', label: 'Hidden', description: 'Students cannot view scores or answer details.' },
-  { value: 'score-only', label: 'Score Only', description: 'Students can view their score after essay grading is complete, but cannot view answer details.' },
-  { value: 'full', label: 'Full Results', description: 'Students can view their score and answer details after essay grading is complete.' },
+const visibilityOptions: { value: ResultVisibility; label: string}[] = [
+  { value: 'hidden', label: 'Hidden'},
+  { value: 'score-only', label: 'Score Only'},
+  { value: 'full', label: 'Full Results'},
 ];
 
 const isResultVisibility = (value: string): value is ResultVisibility =>
@@ -246,7 +246,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader>
           <CardTitle>Result Visibility</CardTitle>
-          <CardDescription>Choose what students can see after their attempt is graded.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Select
@@ -262,14 +261,11 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
               {visibilityOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   <span className="font-medium">{option.label}</span>
-                  <span className="ml-2 text-xs text-gray-500">- {option.description}</span>
+                  <span className="ml-2 text-xs text-gray-500"></span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-sm text-gray-600">
-            {visibilityOptions.find((option) => option.value === draftResultVisibility)?.description}
-          </p>
           <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
             Essay grading takes precedence. Results remain pending until all submitted essay answers for the attempt are graded.
           </p>
@@ -342,7 +338,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
           <div className="space-y-3 border-t border-gray-200 pt-4">
             <div>
               <Label htmlFor="grading-method" className="flex items-center gap-2"><GraduationCap className="size-4 text-teal-600" /> Grading Method</Label>
-              <p className="mt-1 text-xs text-gray-500">Choose which submitted attempt scores determine each Student's final Exam result.</p>
             </div>
             <Select
               value={settings.result_strategy}
@@ -357,14 +352,10 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
                 {gradingMethods.map((method) => (
                   <SelectItem key={method.value} value={method.value}>
                     <span className="font-medium">{method.label}</span>
-                    <span className="ml-2 text-xs text-gray-500">— {method.description}</span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-sm text-gray-600">
-              {gradingMethods.find((method) => method.value === settings.result_strategy)?.description}
-            </p>
           </div>
         </CardContent>
       </Card>

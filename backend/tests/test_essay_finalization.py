@@ -17,10 +17,26 @@ def essay_question(question_id: int) -> dict:
     }
 
 
+def objective_question(question_id: int, maximum: str, question_type: str = "MCQ") -> dict:
+    return {
+        "question_id": question_id,
+        "display_order": question_id,
+        "question_point": Decimal(maximum),
+        "question_type_snapshot": question_type,
+        "question_point_snapshot": Decimal(maximum),
+        "options_snapshot": [
+            {"id": question_id * 10 + 1, "text": "Correct", "isCorrect": True},
+            {"id": question_id * 10 + 2, "text": "Incorrect", "isCorrect": False},
+        ],
+        "question_type": question_type,
+    }
+
+
 class _EssayCursor:
     def __init__(self, questions: list[dict], existing: dict[int, dict] | None = None):
         self.questions = questions
         self.essays = existing or {}
+        self.mcqs: dict[int, int] = {}
         self.attempt = {
             "status": "in_progress",
             "submitted_at": None,
@@ -38,6 +54,8 @@ class _EssayCursor:
         self.fetchall_value = []
         if normalized.startswith("SELECT status, submitted_at"):
             self.fetchone_value = dict(self.attempt)
+        elif normalized.startswith("SELECT sequential_navigation"):
+            self.fetchone_value = {"sequential_navigation": False}
         elif "FROM attempt_question aq" in normalized:
             self.fetchall_value = list(self.questions)
         elif normalized.startswith("SELECT answer_text, score FROM essay_answers"):
@@ -48,8 +66,19 @@ class _EssayCursor:
         elif normalized.startswith("UPDATE essay_answers SET answer_text"):
             _answer_text, _attempt_id, question_id = params
             self.essays[int(question_id)]["answer_text"] = _answer_text
+        elif normalized.startswith("INSERT INTO mcq_answers"):
+            _, question_id, option_id = params
+            self.mcqs[int(question_id)] = int(option_id)
         elif normalized.startswith("SELECT question_id, selected_option_id"):
-            self.fetchall_value = []
+            self.fetchall_value = [
+                {"question_id": question_id, "selected_option_id": option_id}
+                for question_id, option_id in self.mcqs.items()
+            ]
+        elif normalized.startswith("SELECT question_id, score FROM essay_answers"):
+            self.fetchall_value = [
+                {"question_id": question_id, "score": answer["score"]}
+                for question_id, answer in self.essays.items()
+            ]
         elif normalized.startswith("SELECT COUNT(*) AS pending"):
             self.fetchone_value = {
                 "pending": sum(1 for answer in self.essays.values() if answer["score"] is None)
@@ -173,8 +202,38 @@ class EssayFinalizationTests(unittest.TestCase):
         existing = {11: {"answer_text": "Teacher-reviewed answer", "score": 4}}
         result, cursor, _ = self._finalize([essay_question(11)], [], existing=existing)
         self.assertEqual(cursor.essays[11], existing[11])
-        self.assertEqual(result["score"], Decimal("0.00"))
+        self.assertEqual(result["score"], Decimal("8.00"))
         self.assertFalse(result["essayPending"])
+
+    def test_objective_questions_award_full_or_zero_raw_score_before_normalization(self):
+        questions = [
+            objective_question(1, "2"),
+            objective_question(2, "3", "true_false"),
+            objective_question(3, "5"),
+        ]
+        result, _, _ = self._finalize(
+            questions,
+            [
+                {"questionId": 1, "selectedOptionId": 11},
+                {"questionId": 2, "selectedOptionId": 22},
+            ],
+        )
+        self.assertEqual(result["rawEarnedScore"], Decimal("2"))
+        self.assertEqual(result["rawPossibleScore"], Decimal("10"))
+        self.assertEqual(result["score"], Decimal("2.00"))
+
+    def test_mixed_objective_max_scores_normalize_after_exact_sum(self):
+        questions = [objective_question(1, "1.5"), objective_question(2, "2.5")]
+        result, _, _ = self._finalize(
+            questions,
+            [
+                {"questionId": 1, "selectedOptionId": 11},
+                {"questionId": 2, "selectedOptionId": 21},
+            ],
+        )
+        self.assertEqual(result["rawEarnedScore"], Decimal("4.0"))
+        self.assertEqual(result["rawPossibleScore"], Decimal("4.0"))
+        self.assertEqual(result["score"], Decimal("10.00"))
 
 
 if __name__ == "__main__":

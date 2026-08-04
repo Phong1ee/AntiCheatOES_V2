@@ -5,7 +5,7 @@ from datetime import timedelta
 
 class ExamController:
     @staticmethod
-    def _validateStudentExamAccess(school_id: str, role: str, exam_id: int, code: str):
+    def _validateStudentExamAccess(school_id: str, role: str, exam_id: int, code: str | None):
         if role != "student":
             raise Exception("Only students can start exams")
 
@@ -31,7 +31,8 @@ class ExamController:
         if end_time and now_time > end_time:
             raise Exception("Exam has closed")
 
-        if exam["examcode"].strip().lower() != code.strip().lower():
+        required_code = exam.get("examcode")
+        if required_code and required_code.strip().lower() != (code or "").strip().lower():
             raise Exception("Incorrect exam code")
 
         open_attempt = examModel.getOpenAttempt(exam_id, user.get("school_id", school_id))
@@ -157,7 +158,7 @@ class ExamController:
             raise e
 
     @staticmethod
-    def verifyExamCode(school_id: str, role: str, exam_id: int, code: str):
+    def verifyExamCode(school_id: str, role: str, exam_id: int, code: str | None):
         """Verify exam code for an assigned student without creating an attempt."""
         try:
             if role != "student":
@@ -183,7 +184,7 @@ class ExamController:
             raise e
 
     @staticmethod
-    def startExam(school_id: str, role: str, exam_id: int, code: str):
+    def startExam(school_id: str, role: str, exam_id: int, code: str | None):
         """Start an exam and create or reuse an open attempt."""
         try:
             validated = ExamController._validateStudentExamAccess(school_id, role, exam_id, code)

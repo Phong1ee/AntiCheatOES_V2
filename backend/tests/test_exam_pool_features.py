@@ -35,7 +35,6 @@ from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptio
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.route.teacherRoute.addQuestionsRoute import (
     bulk_remove_questions_from_exam,
-    distribute_exam_question_points,
     update_question_in_exam,
 )
 from src.route.teacherRoute.examPoolRoute import (
@@ -45,11 +44,7 @@ from src.route.teacherRoute.examPoolRoute import (
     put_pool_config,
     replace_pool_rule_candidates,
 )
-from src.service.exam_pool_service import (
-    distribute_points,
-    seeded_random,
-    select_unique_candidates,
-)
+from src.service.exam_pool_service import seeded_random, select_unique_candidates
 
 
 def option(text: str, correct: bool = False, option_id: int | None = None):
@@ -113,7 +108,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
                     max_attempt=2,
                     duration_minutes=60,
                     subject_id="DB",
-                    total_points=100,
+                    total_points=10,
                 ),
             ]
         )
@@ -312,7 +307,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
             {1},
         )
 
-    def test_bulk_remove_and_even_distribution_preserve_reusable_data(self):
+    def test_bulk_remove_preserves_raw_max_scores_and_reusable_data(self):
         exam = self.db.query(Exam).one()
         questions = [self._question(f"Question {index}") for index in range(3)]
         self.db.add_all(
@@ -326,13 +321,9 @@ class ExamPoolFeatureTests(unittest.TestCase):
             ]
         )
         self.db.commit()
-        result = distribute_exam_question_points(
-            exam.exam_id, {"school_id": "T1"}, {}, self.db
-        )
-        self.assertEqual(result["total_points"], "100.00")
         self.assertEqual(
             [row.question_point for row in self.db.query(ExamQuestion).order_by(ExamQuestion.question_id)],
-            [Decimal("33.33"), Decimal("33.33"), Decimal("33.34")],
+            [Decimal("1.00"), Decimal("1.00"), Decimal("1.00")],
         )
         removed = bulk_remove_questions_from_exam(
             exam.exam_id,
@@ -379,6 +370,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
                         lo_id=1,
                         difficulty="easy",
                         draw_count=2,
+                        max_score_per_question=Decimal("2.50"),
                     )
                 ],
             ),
@@ -456,6 +448,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
                         lo_id=1,
                         difficulty="easy",
                         draw_count=2,
+                        max_score_per_question=Decimal("2.50"),
                     )
                 ],
             ),
@@ -480,7 +473,7 @@ class ExamPoolFeatureTests(unittest.TestCase):
                 row.question_point
                 for row in self.db.query(ExamQuestion).filter_by(exam_id=exam.exam_id)
             ),
-            Decimal("100.00"),
+            Decimal("5.00"),
         )
         self.assertTrue(first_ids.issubset({question.question_id for question in questions}))
 
@@ -559,10 +552,6 @@ class ExamPoolFeatureTests(unittest.TestCase):
         self.assertEqual(first, second)
         selected = [question_id for values in first.values() for question_id in values]
         self.assertEqual((len(selected), len(set(selected))), (3, 3))
-        self.assertEqual(
-            sum(distribute_points(Decimal("10.00"), selected).values()),
-            Decimal("10.00"),
-        )
         student_sets = {
             tuple(
                 sorted(

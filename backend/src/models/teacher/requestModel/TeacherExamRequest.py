@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -19,7 +20,7 @@ class TeacherExamRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     title: str = Field(..., description="The title of the exam.")
-    examcode: str = Field(..., description="The unique code for the exam.")
+    examcode: str | None = Field(default=None, max_length=20, description="The optional unique code for the exam.")
     max_attempt: int = Field(
         ...,
         ge=0,
@@ -34,13 +35,11 @@ class TeacherExamRequest(BaseModel):
     result_visibility: Literal["hidden", "score-only", "full"] = Field(...)
     subject_id: str = Field(..., description="The ID of the subject associated with the exam.")
 
-    total_points: int = Field(default=100, strict=True, gt=0)
-    passing_score: int = Field(default=50, strict=True, ge=0)
+    total_points: Literal[10] = Field(default=10, description="Deprecated fixed grading scale.")
+    passing_score: Decimal = Field(default=Decimal("5.00"), ge=0, le=10, max_digits=4, decimal_places=2)
 
     @model_validator(mode="after")
     def validate_score_range(self):
-        if self.passing_score > self.total_points:
-            raise ValueError("passing_score must not exceed total_points")
         if self.start_time.tzinfo is not None or self.end_time.tzinfo is not None:
             raise ValueError("start_time and end_time must use local date-time values without a timezone")
         if self.end_time <= self.start_time:

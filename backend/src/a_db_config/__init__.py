@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    SmallInteger,
     Numeric,
     String,
     Text,
@@ -394,7 +395,7 @@ class Exam(Base):
         String(30), ForeignKey("user.school_id", ondelete="SET NULL")
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    examcode: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    examcode: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True)
     max_attempt: Mapped[Optional[int]] = mapped_column(Integer)
     description: Mapped[Optional[str]] = mapped_column(Text)
     duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, default=90)
@@ -418,8 +419,11 @@ class Exam(Base):
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam")
     student_exams: Mapped[list["StudentExam"]] = relationship(back_populates="exam")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="exam")
-    total_points: Mapped[Optional[int]] = mapped_column(Integer, default=100)
-    passing_score: Mapped[Optional[int]] = mapped_column(Integer, default=50)
+    # Deprecated compatibility field. All authoritative scores use the fixed 10-point scale.
+    total_points: Mapped[Optional[int]] = mapped_column(Integer, default=10, server_default=text("10"))
+    passing_score: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(4, 2), default=Decimal("5.00"), server_default=text("5.00")
+    )
     question_selection_mode: Mapped[QuestionSelectionMode] = mapped_column(
         Enum(QuestionSelectionMode),
         nullable=False,
@@ -537,6 +541,9 @@ class Attempt(Base):
     student_id: Mapped[Optional[str]] = mapped_column(String(30), ForeignKey("user.school_id"))
     attempt_no: Mapped[Optional[int]] = mapped_column(Integer)
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    score_scale_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=2, server_default=text("2")
+    )
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -597,8 +604,8 @@ class AttemptQuestion(Base):
         nullable=True,
     )
 
-    question_point_snapshot: Mapped[Optional[int]] = mapped_column(
-        Integer,
+    question_point_snapshot: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
         nullable=True,
     )
 
@@ -655,6 +662,10 @@ class ExamPoolRule(Base):
             name="uq_exam_pool_rule_taxonomy",
         ),
         CheckConstraint("draw_count > 0", name="ck_exam_pool_rule_draw_positive"),
+        CheckConstraint(
+            "max_score_per_question > 0",
+            name="ck_exam_pool_rule_max_score_positive",
+        ),
     )
 
     rule_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -671,6 +682,9 @@ class ExamPoolRule(Base):
         Enum(QuestionDifficulty), nullable=False
     )
     draw_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_score_per_question: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal("1.00"), server_default=text("1.00")
+    )
 
     config: Mapped["ExamPoolConfig"] = relationship(back_populates="rules")
     chapter: Mapped["Chapter"] = relationship()
@@ -756,7 +770,7 @@ class EssayAnswer(Base):
     attempt_id: Mapped[Optional[int]] = mapped_column(Integer)
     question_id: Mapped[Optional[int]] = mapped_column(Integer)
     answer_text: Mapped[Optional[str]] = mapped_column(Text)
-    score: Mapped[Optional[int]] = mapped_column(Integer)
+    score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
 
     attempt_question: Mapped[Optional["AttemptQuestion"]] = relationship(
         back_populates="essay_answer",

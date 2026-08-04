@@ -1,4 +1,3 @@
-// @ts-ignore: Allow side-effect CSS import without type declarations
 import './QuestionPoolModal.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, Database, Loader2, Search, Settings2, X } from 'lucide-react';
@@ -45,7 +44,7 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
 export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
   const [mode, setMode] = useState<'manual' | 'pool'>('manual');
   const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
-  const [selectedPoints, setSelectedPoints] = useState<Record<number, number>>({});
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<number>>(() => new Set());
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [questionType, setQuestionType] = useState<QuestionType | 'all'>('all');
@@ -110,52 +109,46 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
     questionListRef.current?.scrollTo({ top: 0, behavior: 'auto' });
   }, [page, pageSize, debouncedSearch, questionType, difficulty, subjectId, questionStatus, createdBy]);
 
-  const selectedIds = Object.keys(selectedPoints).map(Number);
+  const selectedIds = Array.from(selectedQuestionIds);
   const selectablePageIds = questions
     .filter((question) => !question.already_added && !existingIds.has(question.question_id))
     .map((question) => question.question_id);
   const allPageSelected = selectablePageIds.length > 0
-    && selectablePageIds.every((questionId) => questionId in selectedPoints);
+    && selectablePageIds.every((questionId) => selectedQuestionIds.has(questionId));
   const firstShown = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const lastShown = total === 0 ? 0 : Math.min(page * pageSize, total);
 
   const resetPage = () => setPage(1);
   const toggleQuestion = (questionId: number) => {
-    setSelectedPoints((current) => {
-      const next = { ...current };
-      if (questionId in next) delete next[questionId];
-      else next[questionId] = 1;
+    if (importing || existingIds.has(questionId)) return;
+    setSelectedQuestionIds((current) => {
+      const next = new Set(current);
+      if (next.has(questionId)) next.delete(questionId);
+      else next.add(questionId);
       return next;
     });
   };
   const togglePageSelection = () => {
-    setSelectedPoints((current) => {
-      const next = { ...current };
-      if (allPageSelected) selectablePageIds.forEach((id) => delete next[id]);
-      else selectablePageIds.forEach((id) => { if (!(id in next)) next[id] = 1; });
+    if (importing) return;
+    setSelectedQuestionIds((current) => {
+      const next = new Set(current);
+      if (allPageSelected) selectablePageIds.forEach((id) => next.delete(id));
+      else selectablePageIds.forEach((id) => next.add(id));
       return next;
     });
   };
-  const updatePoints = (questionId: number, rawValue: string) => {
-    const value = Number(rawValue);
-    setSelectedPoints((current) => ({
-      ...current,
-      [questionId]: rawValue.trim() !== '' && Number.isFinite(value) ? value : Number.NaN,
-    }));
-  };
 
   const importQuestions = async () => {
-    const payload = selectedIds.map((questionId) => ({ question_id: questionId, question_point: selectedPoints[questionId] }));
-    if (payload.some((item) => !Number.isFinite(item.question_point) || item.question_point <= 0)) {
-      setError('Every selected question must have a positive point value.');
-      return;
-    }
+    const payload = selectedIds
+      .filter((questionId) => !existingIds.has(questionId))
+      .map((questionId) => ({ question_id: questionId }));
+    if (payload.length === 0) return;
     try {
       setImporting(true);
       setError(null);
       const result = await questionService.importFromBank(examId, payload);
       await onImported();
-      setSelectedPoints({});
+      setSelectedQuestionIds(new Set());
       toast.success(`${result.imported_count} question${result.imported_count === 1 ? '' : 's'} imported.`);
       onClose();
     } catch (importError) {
@@ -212,16 +205,30 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
             : questions.length === 0 ? <div className="flex h-48 items-center justify-center text-gray-500">No questions match the current filters.</div>
             : <div className="space-y-3">{questions.map((question) => {
               const alreadyAdded = question.already_added || existingIds.has(question.question_id);
-              const selected = question.question_id in selectedPoints;
-              const pointsInputId = `question-points-${question.question_id}`;
+              const selected = selectedQuestionIds.has(question.question_id);
+              const disabled = alreadyAdded || importing;
               const subjectLabel = question.subject
                 ? `${question.subject.subject_id} · ${question.subject.subject_name}`
                 : '';
               const creatorLabel = question.creator
                 ? `By ${question.creator.school_id === metadata.current_teacher_school_id ? 'Me' : question.creator.full_name}`
                 : '';
-              return <Card key={question.question_id} className={selected ? 'border-teal-500 bg-teal-50/30' : ''}><CardContent className="flex min-w-0 items-start gap-3 p-3 sm:gap-4 sm:p-4">
-                <input type="checkbox" checked={selected} disabled={alreadyAdded || importing} onChange={() => toggleQuestion(question.question_id)} className="mt-1 size-4 shrink-0" aria-label={`Select question ${question.question_id}`} />
+              return <Card
+                key={question.question_id}
+                role={disabled ? undefined : 'checkbox'}
+                aria-checked={disabled ? undefined : selected}
+                aria-disabled={disabled || undefined}
+                tabIndex={disabled ? -1 : 0}
+                onClick={disabled ? undefined : () => toggleQuestion(question.question_id)}
+                onKeyDown={disabled ? undefined : (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleQuestion(question.question_id);
+                  }
+                }}
+                className={`question-import-card ${selected ? 'border-teal-500 bg-teal-50/30' : ''} ${disabled ? 'question-import-card-disabled' : 'question-import-card-selectable'}`}
+              ><CardContent className="flex min-w-0 items-start gap-3 p-3 sm:gap-4 sm:p-4">
+                <input type="checkbox" checked={selected} disabled={disabled} onClick={(event) => event.stopPropagation()} onChange={() => toggleQuestion(question.question_id)} className="mt-1 size-4 shrink-0" aria-label={`Select question ${question.question_id}`} />
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex min-w-0 items-start gap-2">
                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -232,7 +239,6 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
                       {question.creator && <Badge variant="outline" className="max-w-full sm:max-w-44"><span className="truncate" title={creatorLabel}>{creatorLabel}</span></Badge>}
                       {alreadyAdded && <Badge variant="secondary">Already added</Badge>}
                     </div>
-                    {selected && <div className="ml-auto flex shrink-0 items-center gap-1.5"><label htmlFor={pointsInputId} className="text-xs text-gray-600">Points</label><Input id={pointsInputId} aria-label={`Points for question ${question.question_id}`} type="number" min="0.01" step="0.01" value={Number.isFinite(selectedPoints[question.question_id]) ? selectedPoints[question.question_id] : ''} onChange={(event) => updatePoints(question.question_id, event.target.value)} disabled={importing} className="h-8 w-16 px-2 text-center" /></div>}
                   </div>
                   <p className="w-full whitespace-normal break-words text-sm text-gray-800">{question.question_text}</p>
                   {question.question_type === 'MCQ' && <p className="mt-1 text-xs text-gray-500">{question.option_count} options</p>}

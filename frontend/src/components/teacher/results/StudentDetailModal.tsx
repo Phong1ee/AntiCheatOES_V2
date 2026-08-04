@@ -147,8 +147,8 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
             {/* Score Badge */}
             <div className="text-center bg-white/20 backdrop-blur-sm px-6 py-4 rounded-2xl border-2 border-white/30">
               <Trophy className="size-8 mx-auto mb-2 text-amber-300" />
-              <p className="text-4xl mb-1">{attempt.score}</p>
-              <p className="text-sm text-teal-100">Score</p>
+              <p className="text-4xl mb-1">{attempt.score.toFixed(2)}</p>
+              <p className="text-sm text-teal-100">Score / 10</p>
             </div>
           </div>
         </div>
@@ -374,15 +374,15 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm text-gray-700">Overall Score</span>
-                        <span className="text-2xl text-gray-800">{attempt.score}</span>
+                        <span className="text-2xl text-gray-800">{attempt.score.toFixed(2)} / 10</span>
                       </div>
-                      <Progress value={Math.min(attempt.score, 100)} className="h-3" />
+                      <Progress value={Math.min(attempt.score * 10, 100)} className="h-3" />
                       <p className="text-xs text-gray-500 mt-1">
-                        {attempt.score >= 90
+                        {attempt.score >= 9
                           ? '🎉 Excellent performance!'
-                          : attempt.score >= 75
+                          : attempt.score >= 7.5
                           ? '👍 Good job!'
-                          : attempt.score >= 60
+                          : attempt.score >= 6
                           ? '✓ Satisfactory'
                           : '⚠ Needs improvement'}
                       </p>
@@ -483,7 +483,7 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center justify-between py-2 border-b border-gray-200">
                       <span className="text-gray-600">Total Score</span>
-                      <span className="text-gray-800">{attempt.score}</span>
+                      <span className="text-gray-800">{attempt.score.toFixed(2)} / 10</span>
                     </div>
                     <div className="flex items-center justify-between py-2 border-b border-gray-200">
                       <span className="text-gray-600">Questions Attempted</span>

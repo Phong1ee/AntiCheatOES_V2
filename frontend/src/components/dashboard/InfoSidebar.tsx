@@ -37,10 +37,9 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
     result.status === 'published'
     && result.scoreVisible
     && result.score !== null
-    && result.totalPoints > 0
   ));
   const averageScore = scoredResults.length
-    ? scoredResults.reduce((sum, result) => sum + (result.score! / result.totalPoints) * 100, 0) / scoredResults.length
+    ? scoredResults.reduce((sum, result) => sum + result.score!, 0) / scoredResults.length
     : null;
   const passableResults = scoredResults.filter((result) => result.passingScore !== null);
   const passedCount = passableResults.filter((result) => result.score! >= result.passingScore!).length;
@@ -74,7 +73,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
               <div>
                 <p className="text-sm text-gray-600">Average Score</p>
                 <p className="text-xl text-gray-800">
-                  {averageScore === null ? 'No scores available yet' : `${averageScore.toFixed(1)} / 100`}
+                  {averageScore === null ? 'No scores available yet' : `${averageScore.toFixed(2)} / 10`}
                 </p>
               </div>
             </div>
@@ -141,7 +140,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
               </div>
               {result.scoreVisible && result.score !== null ? (
                 <Badge className="bg-teal-100 text-teal-700 hover:bg-teal-100 whitespace-nowrap">
-                  {result.score} / {result.totalPoints}
+                  {result.score.toFixed(2)} / 10
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-gray-600 whitespace-nowrap">

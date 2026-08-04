@@ -4,7 +4,7 @@ from datetime import datetime
 class TeacherExam(BaseModel):
     exam_id: int
     title: str
-    examcode: str
+    examcode: str | None
     description: str
     max_attempt: int
     duration_minutes: int

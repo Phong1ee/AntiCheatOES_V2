@@ -139,8 +139,9 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": get_exam_status(exam, now_time),
         "subject": exam.subject.subject_name if exam.subject else None,
-        "total_points": exam.total_points if exam.total_points is not None else 100,
-        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
+        "total_points": 10,
+        "grading_scale": 10,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 5,
         "question_selection_mode": (
             exam.question_selection_mode.value
             if hasattr(exam.question_selection_mode, "value")
@@ -162,6 +163,7 @@ def _serialize_question(link: ExamQuestion) -> dict:
         "created_by": question.created_by,
         "question_status": question.question_status.value if question.question_status else None,
         "question_point": link.question_point,
+        "max_score": link.question_point,
         "options": [
             {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
             for option in sorted(question.options, key=lambda item: item.options_id)

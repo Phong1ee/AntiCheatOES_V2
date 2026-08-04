@@ -131,7 +131,7 @@ export const studentExamService = {
     };
   },
 
-  async verifyCode(examId: string | number, code: string): Promise<VerifyCodeResult> {
+  async verifyCode(examId: string | number, code?: string): Promise<VerifyCodeResult> {
     const { data } = await apiClient.post<RawVerifyCodeResult>(`/api/exams/${examId}/verify-code`, { code });
     return {
       examId: Number(data.examId ?? data.exam_id ?? examId),
@@ -140,7 +140,7 @@ export const studentExamService = {
     };
   },
 
-  async start(examId: string | number, code: string): Promise<StartExamResult> {
+  async start(examId: string | number, code?: string): Promise<StartExamResult> {
     const { data } = await apiClient.post<Record<string, unknown>>(`/api/exams/${examId}/start`, { code });
     return {
       examId: Number(data.examId ?? data.exam_id), attemptId: Number(data.attemptId ?? data.attempt_id),

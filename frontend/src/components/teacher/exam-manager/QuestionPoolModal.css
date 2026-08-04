@@ -46,3 +46,23 @@
 .question-pool-modal-list::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
 }
+
+.question-import-card-selectable {
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.question-import-card-selectable:hover {
+  border-color: rgb(20 184 166 / 0.65);
+  background: rgb(240 253 250 / 0.55);
+}
+
+.question-import-card-selectable:focus-visible {
+  outline: 2px solid rgb(13 148 136);
+  outline-offset: 2px;
+}
+
+.question-import-card-disabled {
+  cursor: default;
+  opacity: 0.65;
+}

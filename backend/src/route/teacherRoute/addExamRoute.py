@@ -2,7 +2,6 @@ from datetime import datetime
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -79,8 +78,9 @@ def _serialize(exam: Exam) -> dict:
         "totalStudents": len(exam.student_exams),
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": schedule_status,
-        "total_points": exam.total_points if exam.total_points is not None else 100,
-        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
+        "total_points": 10,
+        "grading_scale": 10,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 5,
         "question_selection_mode": (
             exam.question_selection_mode.value
             if hasattr(exam.question_selection_mode, "value")
@@ -89,7 +89,7 @@ def _serialize(exam: Exam) -> dict:
     }
 
 
-def _validate_publishable(db: Session, exam: Exam, total_points: int) -> None:
+def _validate_publishable(db: Session, exam: Exam) -> None:
     mode = (
         exam.question_selection_mode.value
         if hasattr(exam.question_selection_mode, "value")
@@ -97,25 +97,24 @@ def _validate_publishable(db: Session, exam: Exam, total_points: int) -> None:
     )
     if mode == "pool":
         config = db.query(ExamPoolConfig).filter_by(exam_id=exam.exam_id).first()
-        rule_count = (
-            db.query(func.count(ExamPoolRule.rule_id))
+        rule_count, possible = (
+            db.query(
+                func.count(ExamPoolRule.rule_id),
+                func.coalesce(func.sum(ExamPoolRule.draw_count * ExamPoolRule.max_score_per_question), 0),
+            )
             .filter(ExamPoolRule.pool_config_id == config.pool_config_id)
-            .scalar()
+            .one()
             if config
-            else 0
+            else (0, 0)
         )
-        if not config or not rule_count:
+        if not config or not rule_count or not possible or possible <= 0:
             raise HTTPException(status_code=422, detail="A published pool exam requires a saved pool configuration")
         return
     links = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.exam_id).all()
     if not links:
         raise HTTPException(status_code=422, detail="A published exam requires at least one question")
-    assigned = sum((Decimal(str(link.question_point)) for link in links), Decimal("0.00"))
-    if assigned != Decimal(str(total_points)).quantize(Decimal("0.01")):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Assigned question points ({assigned}) must equal exam total points ({total_points})",
-        )
+    if any(link.question_point is None or link.question_point <= 0 for link in links):
+        raise HTTPException(status_code=422, detail="Every exam question requires a positive max score")
 
 
 def _new_exam_code(db: Session) -> str:
@@ -125,6 +124,13 @@ def _new_exam_code(db: Session) -> str:
         if not db.query(Exam.exam_id).filter(Exam.examcode == candidate).first():
             return candidate
     raise HTTPException(status_code=409, detail="Unable to generate a unique exam code")
+
+
+def _normalize_exam_code(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _copy_exam_settings(db: Session, source_exam_id: int, target_exam_id: int) -> None:
@@ -173,6 +179,7 @@ def _copy_pool_configuration(db: Session, source_exam_id: int, target_exam_id: i
             lo_id=source_rule.lo_id,
             difficulty=source_rule.difficulty,
             draw_count=source_rule.draw_count,
+            max_score_per_question=source_rule.max_score_per_question,
         )
         db.add(target_rule)
         db.flush()
@@ -200,7 +207,7 @@ def add_exam_to_database(
         _validate_subject(db, request.subject_id)
         exam = Exam(
             title=request.title.strip(),
-            examcode=request.examcode.strip(),
+            examcode=_normalize_exam_code(request.examcode),
             duration_minutes=request.duration_minutes,
             manage_by=teacher.school_id,
             max_attempt=request.max_attempt,
@@ -210,13 +217,13 @@ def add_exam_to_database(
             status=request.status,
             result_visibility=request.result_visibility,
             subject_id=request.subject_id,
-            total_points=request.total_points,
+            total_points=10,
             passing_score=request.passing_score,
         )
         db.add(exam)
         db.flush()
         if request.status == "published":
-            _validate_publishable(db, exam, request.total_points)
+            _validate_publishable(db, exam)
         db.commit()
         db.refresh(exam)
         return _serialize(exam)
@@ -241,7 +248,7 @@ def update_exam_in_database(
         exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
         _validate_subject(db, request.subject_id)
         exam.title = request.title.strip()
-        exam.examcode = request.examcode.strip()
+        exam.examcode = _normalize_exam_code(request.examcode)
         exam.duration_minutes = request.duration_minutes
         exam.max_attempt = request.max_attempt
         exam.description = request.description
@@ -250,9 +257,9 @@ def update_exam_in_database(
         exam.start_time = request.start_time
         exam.end_time = request.end_time
         if request.status == "published":
-            _validate_publishable(db, exam, request.total_points)
+            _validate_publishable(db, exam)
         exam.status = request.status
-        exam.total_points = request.total_points
+        exam.total_points = 10
         exam.passing_score = request.passing_score
         db.commit()
         db.refresh(exam)
@@ -278,7 +285,7 @@ def duplicate_exam(
         duplicate = Exam(
             manage_by=current_user["school_id"],
             title=f"Copy of {source.title}"[:255],
-            examcode=_new_exam_code(db),
+            examcode=_new_exam_code(db) if source.examcode else None,
             max_attempt=source.max_attempt,
             description=source.description,
             duration_minutes=source.duration_minutes,
@@ -287,7 +294,7 @@ def duplicate_exam(
             status="draft",
             result_visibility=source.result_visibility,
             subject_id=source.subject_id,
-            total_points=source.total_points,
+            total_points=10,
             passing_score=source.passing_score,
             question_selection_mode=source.question_selection_mode,
         )
@@ -332,11 +339,7 @@ def update_exam_status(
     try:
         exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
         if request.status == "published":
-            _validate_publishable(
-                db,
-                exam,
-                exam.total_points if exam.total_points is not None else 100,
-            )
+            _validate_publishable(db, exam)
         exam.status = request.status
         db.commit()
         db.refresh(exam)

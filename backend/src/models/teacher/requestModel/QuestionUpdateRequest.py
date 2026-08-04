@@ -1,13 +1,21 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 
 
 class QuestionUpdateRequest(BaseModel):
-    question_point: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+    model_config = ConfigDict(populate_by_name=True)
+
+    question_point: Decimal = Field(
+        validation_alias=AliasChoices("max_score", "question_point"),
+        serialization_alias="max_score",
+        gt=0,
+        max_digits=10,
+        decimal_places=2,
+    )
     question_text: str | None = Field(default=None, min_length=1, max_length=255)
     question_difficulties: Literal["easy", "medium", "hard"] | None = None
     question_type: Literal["MCQ", "essay", "true-false"] | None = None

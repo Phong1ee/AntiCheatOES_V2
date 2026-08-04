@@ -7,14 +7,14 @@ interface ExamResultsStatsProps {
 }
 
 function normalizedScore(result: StudentExamResult): number | null {
-  if (result.status !== "published" || !result.scoreVisible || result.score === null || result.totalPoints <= 0) {
+  if (result.status !== "published" || !result.scoreVisible || result.score === null) {
     return null;
   }
-  return (result.score / result.totalPoints) * 100;
+  return result.score;
 }
 
 function formatNormalizedScore(score: number): string {
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+  return score.toFixed(2);
 }
 
 export function ExamResultsStats({ results }: ExamResultsStatsProps) {
@@ -38,13 +38,13 @@ export function ExamResultsStats({ results }: ExamResultsStatsProps) {
           <div className="flex justify-between"><span className="text-sm text-gray-600">Completed Exams</span><span>{results.length}</span></div>
           <div className="flex justify-between"><span className="text-sm text-gray-600">Published Results</span><span className="text-green-600">{results.filter((result) => result.status === "published").length}</span></div>
           <div className="flex justify-between"><span className="text-sm text-gray-600">Pending Results</span><span className="text-yellow-600">{pending}</span></div>
-          <div className="pt-3 border-t border-gray-200 flex justify-between items-center"><span className="text-sm text-gray-600">Average Score</span>{averageNormalizedScore === null ? <span className="text-sm text-gray-500">No scores available yet</span> : <span className="text-xl text-teal-700">{formatNormalizedScore(averageNormalizedScore)} / 100</span>}</div>
+          <div className="pt-3 border-t border-gray-200 flex justify-between items-center"><span className="text-sm text-gray-600">Average Score</span>{averageNormalizedScore === null ? <span className="text-sm text-gray-500">No scores available yet</span> : <span className="text-xl text-teal-700">{formatNormalizedScore(averageNormalizedScore)} / 10</span>}</div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><span className="p-2 bg-yellow-100 rounded-lg"><Trophy className="size-4 text-yellow-600" /></span>Top Scores</CardTitle></CardHeader>
-        <CardContent>{topScores.length ? <div className="space-y-3">{topScores.map((result, index) => <div key={result.id} className="flex items-center gap-3 p-3 bg-gradient-to-r from-teal-50 to-blue-50 rounded-lg border border-teal-100"><span className="size-7 rounded-full bg-teal-600 text-white flex items-center justify-center text-sm">{index + 1}</span><div className="flex-1 min-w-0"><p className="text-sm text-gray-800 truncate">{result.examTitle}</p><p className="text-xs text-gray-600">{result.subject}</p></div><span className="text-sm text-teal-700">{result.score} / {result.totalPoints}</span></div>)}</div> : <p className="text-sm text-gray-600 text-center py-4">No scores available yet</p>}</CardContent>
+        <CardContent>{topScores.length ? <div className="space-y-3">{topScores.map((result, index) => <div key={result.id} className="flex items-center gap-3 p-3 bg-gradient-to-r from-teal-50 to-blue-50 rounded-lg border border-teal-100"><span className="size-7 rounded-full bg-teal-600 text-white flex items-center justify-center text-sm">{index + 1}</span><div className="flex-1 min-w-0"><p className="text-sm text-gray-800 truncate">{result.examTitle}</p><p className="text-xs text-gray-600">{result.subject}</p></div><span className="text-sm text-teal-700">{result.score?.toFixed(2)} / 10</span></div>)}</div> : <p className="text-sm text-gray-600 text-center py-4">No scores available yet</p>}</CardContent>
       </Card>
 
       <Card>

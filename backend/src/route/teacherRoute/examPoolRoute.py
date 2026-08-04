@@ -36,7 +36,6 @@ from src.route.teacherRoute.addQuestionsRoute import (
     _validate_taxonomy,
 )
 from src.service.exam_pool_service import (
-    distribute_points,
     eligible_question_ids,
     eligible_question_ids_by_rule,
     ensure_pool_satisfiable,
@@ -93,6 +92,7 @@ def _serialize_config(db: Session, teacher: User, config: ExamPoolConfig, mode: 
                 "lo_name": rule.lo.lo_name if rule.lo else None,
                 "difficulty": difficulty,
                 "draw_count": rule.draw_count,
+                "max_score_per_question": float(rule.max_score_per_question),
                 "available_count": included_count,
                 "eligible_count": eligible_count,
                 "included_count": included_count,
@@ -227,6 +227,7 @@ def put_pool_config(
         db.flush()
         candidates_by_rule: dict[int, list[int]] = {}
         draw_counts: dict[int, int] = {}
+        max_scores_by_rule: dict[int, Decimal] = {}
         for index, requested_rule in enumerate(request.rules):
             validate_rule_taxonomy(
                 db,
@@ -258,6 +259,7 @@ def put_pool_config(
                 lo_id=requested_rule.lo_id,
                 difficulty=requested_rule.difficulty,
                 draw_count=requested_rule.draw_count,
+                max_score_per_question=requested_rule.max_score_per_question,
             )
             db.add(rule)
             db.flush()
@@ -267,6 +269,7 @@ def put_pool_config(
             )
             candidates_by_rule[rule.rule_id] = candidate_ids
             draw_counts[rule.rule_id] = rule.draw_count
+            max_scores_by_rule[rule.rule_id] = rule.max_score_per_question
 
         selected = select_unique_candidates(
             candidates_by_rule,
@@ -282,7 +285,11 @@ def put_pool_config(
                 for rule in sorted(selected)
                 for question_id in selected[rule]
             ]
-            allocation = distribute_points(exam.total_points or 0, selected_ids)
+            allocation = {
+                question_id: max_scores_by_rule[rule_id]
+                for rule_id in sorted(selected)
+                for question_id in selected[rule_id]
+            }
             db.add_all(
                 ExamQuestion(
                     exam_id=exam_id,
@@ -388,6 +395,7 @@ def get_pool_rule_questions(
             "lo_name": rule.lo.lo_name if rule.lo else None,
             "difficulty": difficulty,
             "draw_count": rule.draw_count,
+            "max_score_per_question": float(rule.max_score_per_question),
             "eligible_count": len(eligible_ids),
             "included_count": len(included_ids & set(eligible_ids)),
             "excluded_count": len(set(eligible_ids) - included_ids),
@@ -740,7 +748,14 @@ def exit_pool_mode(
                 for candidate in rule.candidates
             }
         )
-        allocation = distribute_points(exam.total_points or 0, candidate_ids)
+        allocation = {
+            question_id: max(
+                rule.max_score_per_question
+                for rule in config.rules
+                if any(candidate.question_id == question_id for candidate in rule.candidates)
+            )
+            for question_id in candidate_ids
+        }
         db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam_id).delete(
             synchronize_session=False
         )

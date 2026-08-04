@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import './QuestionsTab.css';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
@@ -22,7 +23,6 @@ import {
   Save,
   X,
   Loader2,
-  Shuffle,
   Eye,
   Users,
   RefreshCw,
@@ -56,7 +56,7 @@ interface Question {
   id: string;
   type: 'mcq' | 'true-false' | 'essay' | 'matching';
   question: string;
-  points: number;
+  maxScore: number;
   difficulty: QuestionDifficulty | null;
   options?: string[];
   correctAnswer?: number | number[] | string;  // Support multiple correct answers for MCQ
@@ -101,7 +101,6 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
-  const [distributeOpen, setDistributeOpen] = useState(false);
   const [exitPoolOpen, setExitPoolOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -124,7 +123,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
         id: String(question.question_id),
         type: question.question_type === 'MCQ' ? 'mcq' : question.question_type,
         question: question.question_text,
-        points: Number(question.question_point),
+        maxScore: Number(question.max_score ?? question.question_point),
         difficulty: question.question_difficulties,
         options: question.options.map((option) => option.options_text),
         optionIds: question.options.map((option) => option.options_id),
@@ -234,7 +233,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       id: `new-${Date.now()}`,
       type,
       question: '',
-      points: 5,
+      maxScore: 1,
       difficulty: 'medium',
       options: type === 'mcq' ? ['', ''] : undefined,
       chapterId: undefined,
@@ -384,21 +383,6 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     }
   };
 
-  const confirmDistribute = async () => {
-    if (!examId) return;
-    try {
-      setBulkBusy(true);
-      await questionService.distributePoints(Number(examId));
-      setDistributeOpen(false);
-      await loadQuestions(selectedQuestion ?? undefined);
-      toast.success('Points distributed evenly and persisted.');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to distribute points.');
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
   const confirmExitPool = async () => {
     if (!examId) return;
     try {
@@ -454,8 +438,8 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       setSaveError('Question text, subject, and difficulty are required.');
       return;
     }
-    if (!Number.isFinite(selectedQ.points) || selectedQ.points <= 0) {
-      setSaveError('Question points must be a positive number.');
+    if (!Number.isFinite(selectedQ.maxScore) || selectedQ.maxScore <= 0) {
+      setSaveError('Max Score must be a positive number.');
       return;
     }
 
@@ -491,7 +475,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           question_status: selectedQ.status ?? 'draft',
           options,
           exam_id: Number(examId),
-          question_point: selectedQ.points,
+          max_score: selectedQ.maxScore,
         });
         await loadQuestions(String(questionId));
       } else {
@@ -503,7 +487,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           chapter_ids: selectedQ.chapterIds ?? [],
           lo_ids: selectedQ.loIds ?? [],
           question_status: selectedQ.status ?? 'draft',
-          question_point: selectedQ.points,
+          max_score: selectedQ.maxScore,
           options,
         };
         if (isPoolMode && activePoolRuleId !== null) {
@@ -779,7 +763,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
       {/* Question List - Left */}
       <div className="lg:col-span-1 border-r border-gray-200 bg-gray-50">
-        <div className="p-4 border-b border-gray-200 space-y-3">
+        <div className="question-sidebar-actions-container min-w-0 space-y-3 border-b border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm text-gray-700">
               {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length})`}
@@ -874,12 +858,9 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               Essay
             </Button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button size="sm" variant="outline" onClick={() => setDistributeOpen(true)} disabled={questions.length === 0 || bulkBusy}>
-              <Shuffle className="mr-1 size-3" /> Distribute Points Evenly
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setBulkRemoveOpen(true)} disabled={selectedIds.size === 0 || bulkBusy} className="text-red-600">
-              <Trash2 className="mr-1 size-3" /> Remove Selected ({selectedIds.size})
+          <div className="question-sidebar-bulk-actions">
+            <Button size="sm" variant="outline" onClick={() => setBulkRemoveOpen(true)} disabled={selectedIds.size === 0 || bulkBusy} className="min-w-0 whitespace-normal text-red-600">
+              <Trash2 className="size-3 shrink-0" /> <span className="min-w-0 break-words">Remove Selected ({selectedIds.size})</span>
             </Button>
           </div>
           </>
@@ -888,12 +869,12 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           <Button
             size="sm"
             variant="outline"
-            className="w-full"
+            className="h-auto min-h-9 w-full min-w-0 whitespace-normal py-2 text-center"
             onClick={() => setShowQuestionPool(true)}
             disabled={!examId || examId.startsWith('new-')}
           >
-            <Database className="size-4 mr-2" />
-            Import from Question Bank
+            <Database className="size-4 shrink-0" />
+            <span className="min-w-0 break-words">Import from Question Bank</span>
           </Button>
         </div>
 
@@ -992,7 +973,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                           Multi
                         </Badge>
                       )}
-                      <span className="text-xs text-gray-500 ml-auto">{question.points} pts</span>
+                      <span className="text-xs text-gray-500 ml-auto">Max {question.maxScore}</span>
                     </div>
                     <p className="text-xs text-gray-600 line-clamp-2">
                       {question.question || 'Untitled question'}
@@ -1129,12 +1110,12 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Points</Label>
+                    <Label>Max Score</Label>
                     <Input
                       type="number"
-                      value={selectedQ.points}
+                      value={selectedQ.maxScore}
                       onChange={(e) =>
-                        updateQuestion(selectedQ.id, { points: Number(e.target.value) })
+                        updateQuestion(selectedQ.id, { maxScore: Number(e.target.value) })
                       }
                       min="1"
                       step="0.01"
@@ -1367,12 +1348,6 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Remove {selectedIds.size} selected question{selectedIds.size === 1 ? '' : 's'}?</AlertDialogTitle><AlertDialogDescription>Only exam associations are removed. Reusable questions, options, chapters, and learning objectives remain intact.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} className="bg-red-600 hover:bg-red-700" onClick={(event) => { event.preventDefault(); void confirmBulkRemove(); }}>{bulkBusy ? 'Removing...' : 'Remove Selected'}</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={distributeOpen} onOpenChange={(open) => { if (!bulkBusy) setDistributeOpen(open); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Distribute points evenly?</AlertDialogTitle><AlertDialogDescription>The persisted exam total will be divided across all fixed questions. The final question receives any two-decimal rounding remainder.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} onClick={(event) => { event.preventDefault(); void confirmDistribute(); }}>{bulkBusy ? 'Distributing...' : 'Distribute Points'}</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={exitPoolOpen} onOpenChange={(open) => { if (!bulkBusy) setExitPoolOpen(open); }}>

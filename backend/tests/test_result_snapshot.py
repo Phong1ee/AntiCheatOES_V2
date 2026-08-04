@@ -103,7 +103,7 @@ class ResultSnapshotTests(unittest.TestCase):
 
     def test_attempt_total_points_prefers_attempt_allocation(self):
         self.assertEqual(resultModel._attempt_total_points(Decimal("50.00"), 100), 50)
-        self.assertEqual(resultModel._attempt_total_points(Decimal("0.00"), 100), 100)
+        self.assertEqual(resultModel._attempt_total_points(Decimal("0.00"), 100), 0)
 
     def test_hidden_and_score_only_visibility_do_not_allow_details(self):
         self.assertEqual(resultModel._result_flags("hidden", 0), ("hidden", False, False))
@@ -136,7 +136,7 @@ class ResultSnapshotTests(unittest.TestCase):
                 self.assertEqual(listed["status"], expected_status)
                 self.assertEqual(listed["scoreVisible"], score_visible)
                 self.assertEqual(listed["score"], 8 if score_visible else None)
-                self.assertEqual(listed["rawScore"], 8 if score_visible else None)
+                self.assertIsNone(listed["rawScore"])
                 self.assertIsNone(listed["correctAnswers"])
                 self.assertIn("a.status IN ('submitted', 'terminated')", list_cursor.last_query)
                 self.assertEqual(list_cursor.last_params, ("S1",))
@@ -146,7 +146,7 @@ class ResultSnapshotTests(unittest.TestCase):
                     detail = resultModel.get_student_result_detail("S1", 10)
                 self.assertEqual(detail["status"], expected_status)
                 self.assertEqual(detail["score"], 8 if score_visible else None)
-                self.assertEqual(detail["rawScore"], 8 if score_visible else None)
+                self.assertIsNone(detail["rawScore"])
                 self.assertEqual(detail["questions"], [])
                 self.assertIsNone(detail["correctAnswers"])
                 self.assertIn("a.status IN ('submitted', 'terminated')", detail_cursor.last_query)
@@ -165,7 +165,11 @@ class ResultSnapshotTests(unittest.TestCase):
         detail_cursor = _ResultCursor(row)
         with (
             patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(detail_cursor)),
-            patch.object(resultModel, "_get_attempt_questions", return_value=[{"isCorrect": True}]),
+            patch.object(
+                resultModel,
+                "_get_attempt_questions",
+                return_value=[{"isCorrect": True, "awardedPoints": 4}],
+            ),
         ):
             detail = resultModel.get_student_result_detail("S1", 10)
         self.assertTrue(detail["allowViewDetails"])

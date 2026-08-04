@@ -11,7 +11,7 @@ export type ResultVisibility = "hidden" | "score-only" | "full";
 export interface TeacherExamApi {
   exam_id: number;
   title: string;
-  examcode: string;
+  examcode: string | null;
   description: string | null;
   max_attempt: number | null;
   duration_minutes: number | null;
@@ -25,13 +25,14 @@ export interface TeacherExamApi {
   subject_id: string | null;
   result_visibility: ResultVisibility | null;
   total_points: number;
+  grading_scale: 10;
   passing_score: number;
   question_selection_mode: "manual" | "fixed_randomization" | "pool";
 }
 
 export interface TeacherExamRequest {
   title: string;
-  examcode: string;
+  examcode: string | null;
   max_attempt: number;
   description: string;
   duration_minutes: number;
@@ -40,7 +41,8 @@ export interface TeacherExamRequest {
   status: ExamStatus;
   result_visibility: ResultVisibility;
   subject_id: string;
-  total_points: number;
+  /** Deprecated compatibility field; the backend fixes this to 10. */
+  total_points?: 10;
   passing_score: number;
 }
 

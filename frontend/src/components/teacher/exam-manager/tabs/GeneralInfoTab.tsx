@@ -18,9 +18,9 @@ interface GeneralInfoTabProps {
   subjectId: string;
   subjects: TeacherSubject[];
   examCode: string;
+  requireExamCode: boolean;
   duration: number;
   maxAttempt: number;
-  totalPoints: number;
   passingScore: number;
   startDate: string;
   startTime: string;
@@ -28,9 +28,9 @@ interface GeneralInfoTabProps {
   endTime: string;
   onSubjectChange: (value: string) => void;
   onExamCodeChange: (value: string) => void;
+  onRequireExamCodeChange: (value: boolean) => void;
   onDurationChange: (value: number) => void;
   onMaxAttemptChange: (value: number) => void;
-  onTotalPointsChange: (value: number) => void;
   onPassingScoreChange: (value: number) => void;
   onStartDateChange: (value: string) => void;
   onStartTimeChange: (value: string) => void;
@@ -49,9 +49,9 @@ export function GeneralInfoTab({
   subjectId,
   subjects,
   examCode,
+  requireExamCode,
   duration,
   maxAttempt,
-  totalPoints,
   passingScore,
   startDate,
   startTime,
@@ -59,9 +59,9 @@ export function GeneralInfoTab({
   endTime,
   onSubjectChange,
   onExamCodeChange,
+  onRequireExamCodeChange,
   onDurationChange,
   onMaxAttemptChange,
-  onTotalPointsChange,
   onPassingScoreChange,
   onStartDateChange,
   onStartTimeChange,
@@ -79,9 +79,10 @@ export function GeneralInfoTab({
   // Validation
   const errors: string[] = [];
   if (!subject) errors.push('Subject is required');
-  if (!Number.isInteger(totalPoints) || totalPoints <= 0) errors.push('Total points must be a positive integer');
-  if (!Number.isInteger(passingScore) || passingScore < 0) errors.push('Passing score must be a non-negative integer');
-  if (passingScore > totalPoints) errors.push('Passing score cannot exceed total points');
+  if (requireExamCode && !examCode.trim()) errors.push('Exam code is required when code protection is enabled');
+  if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 10) {
+    errors.push('Passing score must be between 0 and 10');
+  }
   if (!startDate || !startTime) errors.push('Start date and time are required');
   if (!endDate || !endTime) errors.push('End date and time are required');
   if (startDate && startTime && endDate && endTime && `${endDate}T${endTime}` <= `${startDate}T${startTime}`) {
@@ -129,20 +130,34 @@ export function GeneralInfoTab({
               </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="examCode">Exam Code</Label>
-            <div className="relative">
-              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-              <Input
-                id="examCode"
-                value={examCode}
-                onChange={(e) => onExamCodeChange(e.target.value)}
-                className="pl-10"
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="require-exam-code">Require exam code</Label>
+                <p className="text-xs text-gray-500">Students must enter the code before starting this exam.</p>
+              </div>
+              <Switch
+                id="require-exam-code"
+                checked={requireExamCode}
+                onCheckedChange={onRequireExamCodeChange}
               />
             </div>
-            <p className="text-xs text-gray-500">
-              This code will be used by students to access the exam
-            </p>
+            {requireExamCode && (
+              <div className="space-y-2">
+                <Label htmlFor="examCode">Exam Code *</Label>
+                <div className="relative">
+                  <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+                  <Input
+                    id="examCode"
+                    value={examCode}
+                    onChange={(e) => onExamCodeChange(e.target.value)}
+                    className={`pl-10 ${!examCode.trim() ? 'border-red-300' : ''}`}
+                    maxLength={20}
+                  />
+                </div>
+                {!examCode.trim() && <p className="text-xs text-red-600">Enter an exam code before saving.</p>}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -269,18 +284,13 @@ export function GeneralInfoTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="totalPoints">Total Points</Label>
-              <Input
-                id="totalPoints"
-                type="number"
-                value={totalPoints}
-                onChange={(e) => {
-                  const value = Number(e.target.value);
-                  onTotalPointsChange(Number.isFinite(value) ? value : 0);
-                }}
-                min="1"
-                step="1"
-              />
+              <Label>Grading Scale</Label>
+              <div className="rounded-md border bg-gray-50 px-3 py-2 text-sm text-gray-800">
+                10 points (fixed)
+              </div>
+              <p className="text-xs text-gray-500">
+                Raw question scores are summed and normalized to a final score out of 10.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -294,9 +304,10 @@ export function GeneralInfoTab({
                   onPassingScoreChange(Number.isFinite(value) ? value : 0);
                 }}
                 min="0"
-                max={totalPoints}
-                step="1"
+                max="10"
+                step="0.01"
               />
+              <p className="text-xs text-gray-500">Enter a passing threshold from 0.00 to 10.00.</p>
             </div>
           </div>
         </CardContent>

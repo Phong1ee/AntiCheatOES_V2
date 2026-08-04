@@ -82,7 +82,7 @@ const generateStudentResults = (examId: string, totalStudents: number, examDurat
   ];
 
   return Array.from({ length: Math.min(totalStudents, students.length) }, (_, i) => {
-    const score = Math.floor(Math.random() * 40) + 60; // 60-100
+    const score = Math.floor(Math.random() * 41) / 10 + 6; // 6.0-10.0
     
     // Most students finish within exam duration, some use extra time, few are very late
     const random = Math.random();
@@ -114,8 +114,8 @@ const generateStudentResults = (examId: string, totalStudents: number, examDurat
       name: students[i],
       email: students[i].toLowerCase().replace(' ', '.') + '@university.edu',
       score,
-      grade: score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F',
-      status: score >= 60 ? 'passed' : 'failed',
+      grade: score >= 9 ? 'A' : score >= 8 ? 'B' : score >= 7 ? 'C' : score >= 6 ? 'D' : 'F',
+      status: score >= 6 ? 'passed' : 'failed',
       submittedAt: `2025-11-${10 + Math.floor(i / 5)} ${9 + Math.floor(i / 3)}:${15 + (i % 4) * 10}:00`,
       timeTaken,
       violations,
@@ -148,10 +148,10 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
 
   // Score distribution data
   const scoreDistribution = [
-    { range: '90-100', count: studentResults.filter(s => s.score >= 90).length, fill: '#14b8a6' },
-    { range: '80-89', count: studentResults.filter(s => s.score >= 80 && s.score < 90).length, fill: '#3b82f6' },
-    { range: '70-79', count: studentResults.filter(s => s.score >= 70 && s.score < 80).length, fill: '#f59e0b' },
-    { range: '<70', count: studentResults.filter(s => s.score < 70).length, fill: '#ef4444' },
+    { range: '9-10', count: studentResults.filter(s => s.score >= 9).length, fill: '#14b8a6' },
+    { range: '8-8.99', count: studentResults.filter(s => s.score >= 8 && s.score < 9).length, fill: '#3b82f6' },
+    { range: '7-7.99', count: studentResults.filter(s => s.score >= 7 && s.score < 8).length, fill: '#f59e0b' },
+    { range: '<7', count: studentResults.filter(s => s.score < 7).length, fill: '#ef4444' },
   ];
 
   // Grade distribution for pie chart
@@ -227,7 +227,7 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
                 <Target className="size-4" />
                 <span className="text-xs">Average Score</span>
               </div>
-              <p className="text-2xl text-gray-800">{averageScore.toFixed(1)}%</p>
+              <p className="text-2xl text-gray-800">{averageScore.toFixed(2)} / 10</p>
             </div>
 
             <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200">
@@ -257,7 +257,7 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
                 <Award className="size-4" />
                 <span className="text-xs">Highest Score</span>
               </div>
-              <p className="text-2xl text-gray-800">{highestScore}%</p>
+              <p className="text-2xl text-gray-800">{highestScore.toFixed(2)} / 10</p>
             </div>
 
             <div className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl border border-amber-200">
@@ -265,7 +265,7 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
                 <TrendingDown className="size-4" />
                 <span className="text-xs">Lowest Score</span>
               </div>
-              <p className="text-2xl text-gray-800">{lowestScore}%</p>
+              <p className="text-2xl text-gray-800">{lowestScore.toFixed(2)} / 10</p>
             </div>
           </div>
 
@@ -345,9 +345,9 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
                     <h4 className="font-medium">Excellence Rate</h4>
                   </div>
                   <p className="text-3xl text-gray-800 mb-1">
-                    {((studentResults.filter(s => s.score >= 90).length / exam.completedStudents) * 100).toFixed(0)}%
+                    {((studentResults.filter(s => s.score >= 9).length / exam.completedStudents) * 100).toFixed(0)}%
                   </p>
-                  <p className="text-sm text-gray-600">Students scored 90% or higher</p>
+                  <p className="text-sm text-gray-600">Students scored 9.00 / 10 or higher</p>
                 </div>
 
                 <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200">
@@ -438,7 +438,7 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <span className="text-lg text-gray-800">{student.score}%</span>
+                            <span className="text-lg text-gray-800">{student.score.toFixed(2)} / 10</span>
                           </td>
                           <td className="px-4 py-3">
                             <Badge

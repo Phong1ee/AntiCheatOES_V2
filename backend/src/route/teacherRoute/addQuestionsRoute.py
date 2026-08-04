@@ -31,7 +31,6 @@ from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptio
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
-from src.service.exam_pool_service import distribute_points
 
 router = APIRouter()
 
@@ -568,41 +567,6 @@ def bulk_remove_questions_from_exam(
         raise
 
 
-@router.post("/{exam_id}/questions/distribute-points")
-def distribute_exam_question_points(
-    exam_id: int,
-    current_user: dict = Depends(verify_token),
-    role_check: dict = Depends(TEACHER_ONLY),
-    db: Session = Depends(get_db),
-):
-    del role_check
-    try:
-        exam = _owned_exam(db, exam_id, current_user["school_id"])
-        links = (
-            db.query(ExamQuestion)
-            .filter(ExamQuestion.exam_id == exam_id)
-            .order_by(ExamQuestion.question_id)
-            .all()
-        )
-        allocation = distribute_points(
-            exam.total_points or 0, [link.question_id for link in links]
-        )
-        for link in links:
-            link.question_point = allocation[link.question_id]
-        db.commit()
-        return {
-            "success": True,
-            "total_points": str(sum(allocation.values(), Decimal("0.00"))),
-            "points": [
-                {"question_id": question_id, "question_point": str(points)}
-                for question_id, points in allocation.items()
-            ],
-        }
-    except HTTPException:
-        db.rollback()
-        raise
-
-
 @router.delete("/delete-question/{question_id}")
 def delete_question_from_database(
     question_id: int,
@@ -777,6 +741,12 @@ def add_questions_to_exam_from_question_bank(
         question_ids = [q.question_id for q in request]
         if len(question_ids) != len(set(question_ids)):
             raise HTTPException(status_code=400, detail="The import request contains duplicate question IDs")
+        supplied_point_count = sum(item.question_point is not None for item in request)
+        if supplied_point_count not in {0, len(request)}:
+            raise HTTPException(
+                status_code=422,
+                detail="Provide question_point for every imported question or omit it for every question",
+            )
 
         questions = db.query(Question).filter(Question.question_id.in_(question_ids)).all()
         if len(questions) != len(question_ids):
@@ -811,19 +781,39 @@ def add_questions_to_exam_from_question_bank(
                 status_code=409,
                 detail=f"Questions already in this exam: {sorted(existing_ids)}",
             )
+        default_max_score_applied = supplied_point_count == 0
+        if default_max_score_applied:
+            allocation = {question_id: Decimal("1.00") for question_id in question_ids}
+        else:
+            allocation = {
+                item.question_id: item.question_point
+                for item in request
+                if item.question_point is not None
+            }
         db.add_all(
             ExamQuestion(
                 exam_id=exam_id,
-                question_id=item.question_id,
-                question_point=item.question_point,
+                question_id=question_id,
+                question_point=allocation[question_id],
             )
-            for item in request
+            for question_id in question_ids
         )
         db.commit()
         return {
             "success": True,
             "imported_count": len(question_ids),
             "imported_question_ids": question_ids,
+            "automatically_distributed": False,
+            "default_max_score_applied": default_max_score_applied,
+            "grading_scale": 10,
+            "points": [
+                {
+                    "question_id": question_id,
+                    "question_point": str(points),
+                    "max_score": str(points),
+                }
+                for question_id, points in allocation.items()
+            ],
         }
     except HTTPException:
         db.rollback()

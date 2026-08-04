@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
-from src.a_db_config import Attempt, AttemptStatus, Exam, ExamSetting, ResultStrategy, StudentExam
+from src.a_db_config import Attempt, AttemptStatus, EssayAnswer, Exam, ExamSetting, ResultStrategy, StudentExam
+from src.service.scoring_service import SCORE_QUANTUM
 
 
 def submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[Attempt]]:
@@ -15,12 +16,24 @@ def submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[A
             Attempt.exam_id == exam_id,
             Attempt.submitted_at.isnot(None),
             Attempt.status.in_([AttemptStatus.submitted, AttemptStatus.terminated]),
+            Attempt.score_scale_version == 2,
         )
         .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
         .all()
     )
+    pending_attempt_ids = {
+        attempt_id
+        for attempt_id, answer_text in db.query(EssayAnswer.attempt_id, EssayAnswer.answer_text)
+        .join(Attempt, Attempt.attempt_id == EssayAnswer.attempt_id)
+        .filter(Attempt.exam_id == exam_id)
+        .filter(EssayAnswer.score.is_(None))
+        .all()
+        if answer_text and answer_text.strip()
+    }
     by_student: dict[str, list[Attempt]] = {}
     for attempt in attempts:
+        if attempt.attempt_id in pending_attempt_ids:
+            continue
         if attempt.student_id is not None:
             by_student.setdefault(attempt.student_id, []).append(attempt)
     return by_student
@@ -40,7 +53,7 @@ def best_attempt(attempts: list[Attempt]) -> Attempt | None:
     return max(
         attempts,
         key=lambda attempt: (
-            float(attempt.score) if attempt.score is not None else -1,
+            attempt.score if attempt.score is not None else Decimal("-1"),
             *_attempt_order(attempt),
         ),
     )
@@ -61,7 +74,11 @@ def compute_final_score(strategy: str, attempts: list[Attempt]) -> Decimal | Non
         return None
     if strategy == ResultStrategy.average.value:
         scored = [attempt.score for attempt in attempts if attempt.score is not None]
-        return round(sum(scored, Decimal("0")) / len(scored), 2) if scored else None
+        return (
+            (sum(scored, Decimal("0")) / len(scored)).quantize(SCORE_QUANTUM, rounding=ROUND_HALF_UP)
+            if scored
+            else None
+        )
     if strategy == ResultStrategy.last_attempt.value:
         latest = latest_attempt(attempts)
         return latest.score if latest else None

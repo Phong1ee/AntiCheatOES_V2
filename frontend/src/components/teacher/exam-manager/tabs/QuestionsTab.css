@@ -1,0 +1,28 @@
+.question-sidebar-actions-container {
+  container-name: question-actions;
+  container-type: inline-size;
+  overflow-x: hidden;
+}
+
+.question-sidebar-bulk-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.question-sidebar-bulk-actions > button {
+  height: auto;
+  min-height: 2.25rem;
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+  padding-block: 0.5rem;
+  line-height: 1.2;
+}
+
+@container question-actions (min-width: 23rem) {
+  .question-sidebar-bulk-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

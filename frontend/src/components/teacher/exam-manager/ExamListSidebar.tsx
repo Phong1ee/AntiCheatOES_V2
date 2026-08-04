@@ -53,7 +53,7 @@ interface Exam {
   assignedStudents: number;
   averageScore: number | null;
   duration?: number;
-  examCode?: string;
+  examCode: string | null;
   description?: string;
 }
 
@@ -280,7 +280,7 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                     {exam.averageScore !== null && (
                       <div className="text-xs">
                         <span className="text-gray-600">Avg: </span>
-                        <span className="text-teal-700">{exam.averageScore.toFixed(1)}%</span>
+                        <span className="text-teal-700">{exam.averageScore.toFixed(2)} / 10</span>
                       </div>
                     )}
                   </div>

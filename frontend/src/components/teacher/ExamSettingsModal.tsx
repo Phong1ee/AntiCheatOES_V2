@@ -50,7 +50,7 @@ export function ExamSettingsModal({ exam, onClose }: ExamSettingsModalProps) {
   const [date, setDate] = useState(exam.date);
   const [time, setTime] = useState(exam.time);
   const [duration, setDuration] = useState(exam.duration.toString());
-  const [passingScore, setPassingScore] = useState('60');
+  const [passingScore, setPassingScore] = useState('6');
 
   // Security Settings
   const [webcamMonitoring, setWebcamMonitoring] = useState(true);
@@ -181,11 +181,14 @@ export function ExamSettingsModal({ exam, onClose }: ExamSettingsModalProps) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="passing">Passing Score (%)</Label>
+                  <Label htmlFor="passing">Passing Score (0–10)</Label>
                   <Input
                     id="passing"
                     type="number"
                     value={passingScore}
+                    min="0"
+                    max="10"
+                    step="0.01"
                     onChange={(e) => setPassingScore(e.target.value)}
                     placeholder="60"
                     min="0"

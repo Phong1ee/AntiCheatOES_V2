@@ -7,7 +7,7 @@ from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY
 router = APIRouter()
 
 class VerifyCodeRequest(BaseModel):
-    code: str
+    code: str | None = None
 
 class SubmitAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

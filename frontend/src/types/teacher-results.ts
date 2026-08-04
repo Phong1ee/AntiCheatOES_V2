@@ -1,5 +1,5 @@
 export type ExamResultStatus = "scheduled" | "in-progress" | "completed";
-export type StudentResultStatus = "submitted" | "late" | "not-submitted";
+export type StudentResultStatus = "submitted" | "late" | "pending-grading" | "not-submitted";
 export type QuestionKind = "mcq" | "true-false" | "essay";
 export type ResultStrategy = "highest" | "average" | "last_attempt";
 
@@ -14,6 +14,8 @@ interface ExamResultStatsApi {
   pendingEssayCount: number;
   totalEssayCount: number;
   resultStrategy: ResultStrategy;
+  gradingScale: number;
+  passingScore: number;
 }
 
 export interface ExamResultSummary extends ExamResultStatsApi {
@@ -40,10 +42,12 @@ export interface StudentAttemptSummary {
   attemptId: number;
   attemptNumber: number | null;
   score: number;
+  gradingScale: number;
   correctAnswers: number;
   totalQuestions: number;
   timeSpent: string;
-  status: "submitted" | "late";
+  status: "submitted" | "late" | "pending-grading";
+  provisional: boolean;
   submittedAt: string | null;
 }
 
@@ -53,6 +57,10 @@ export interface StudentResult {
   studentId: string;
   name: string;
   score: number;
+  gradingScale: number;
+  passingScore: number;
+  provisional: boolean;
+  passed: boolean | null;
   correctAnswers: number;
   totalQuestions: number;
   timeSpent: string;
@@ -78,6 +86,9 @@ export interface StudentAttemptDetail {
   studentId: string | null;
   studentName: string;
   score: number;
+  rawEarnedScore: number;
+  rawPossibleScore: number;
+  gradingScale: number;
   correctAnswers: number;
   totalQuestions: number;
   timeSpent: string;
@@ -123,4 +134,6 @@ export interface GradeEssayResult {
   currentScore: number;
   status: "graded";
   attemptScore: number;
+  finalScore: number | null;
+  gradingScale: number;
 }

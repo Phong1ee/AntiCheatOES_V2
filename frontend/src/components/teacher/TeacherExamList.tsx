@@ -26,7 +26,7 @@ import { LoadingState } from './common/LoadingState';
 interface Exam {
   exam_id: number;
   title: string;
-  examcode: string;
+  examcode: string | null;
   description: string;
   max_attempt: number;
   duration_minutes: number;
@@ -141,7 +141,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
       return (
         exam.title.toLowerCase().includes(query) ||
         exam.description.toLowerCase().includes(query) ||
-        exam.examcode.toLowerCase().includes(query)
+        (exam.examcode ?? '').toLowerCase().includes(query)
       );
     })
     // Sort
@@ -215,9 +215,11 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-nowrap">
                           <h3 className="text-lg text-gray-800 truncate">{exam.title}</h3>
-                          <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white border-0 shadow-md flex-shrink-0">
-                            {exam.examcode}
-                          </Badge>
+                          {exam.examcode && (
+                            <Badge className="bg-gradient-to-r from-teal-500 to-blue-600 text-white border-0 shadow-md flex-shrink-0">
+                              {exam.examcode}
+                            </Badge>
+                          )}
                           {exam.subject && (
                             <Badge className="bg-purple-100 text-purple-700 border-purple-200 flex-shrink-0">
                               {exam.subject}

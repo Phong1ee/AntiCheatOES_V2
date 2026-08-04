@@ -29,6 +29,9 @@ export interface StudentExamResult {
   duration: string;
   status: StudentResultStatus;
   score: number | null;
+  gradingScale: number;
+  rawEarnedScore: number | null;
+  rawPossibleScore: number;
   totalPoints: number;
   passingScore: number | null;
   correctAnswers: number | null;
@@ -40,6 +43,7 @@ export interface StudentExamResult {
   maxAttempts: number | null;
   attemptStatus: "submitted" | "terminated" | string | null;
   terminated: boolean;
+  passed: boolean | null;
   rawScore?: number | null;
   questions?: StudentResultQuestion[];
 }

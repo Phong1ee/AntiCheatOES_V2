@@ -15,8 +15,8 @@ interface ExamResultsProps {
 const resultStatuses: StudentResultStatus[] = ["published", "pending", "hidden"];
 
 function scoreRatio(result: StudentExamResult): number | null {
-  if (!result.scoreVisible || result.score === null || result.totalPoints <= 0) return null;
-  return result.score / result.totalPoints;
+  if (!result.scoreVisible || result.score === null || result.gradingScale <= 0) return null;
+  return result.score / result.gradingScale;
 }
 
 function scoreColor(result: StudentExamResult): string {
@@ -116,7 +116,7 @@ export function ExamResults({ onViewDetails }: ExamResultsProps) {
               <div className="p-2 bg-teal-100 rounded-lg mt-1"><FileText className="size-5 text-teal-600" /></div>
               <div className="flex-1 min-w-0"><div className="mb-2"><h3 className="text-xl text-gray-800 mb-1">{result.examTitle}</h3><p className="text-gray-600">{result.subject}</p></div>
                 <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3"><span className="flex items-center gap-1"><Calendar className="size-4" />{formatDate(result.date)}</span><span className="flex items-center gap-1"><Clock className="size-4" />{result.duration}</span>{(result.maxAttempts ?? 0) > 0 && <span className="flex items-center gap-1"><RefreshCw className="size-4" />Attempt: {result.attemptNumber ?? 0}/{result.maxAttempts}</span>}</div>
-                {result.status === "published" && result.scoreVisible && result.score !== null ? <div className="bg-gradient-to-r from-teal-50 to-blue-50 border border-teal-200 rounded-lg p-4"><div className="flex items-center justify-between"><span className="text-sm text-gray-600">Your Score</span><span className={`text-2xl ${scoreColor(result)}`}>{result.score} / {result.totalPoints} points</span></div><div className="flex items-center justify-between text-sm text-gray-600 mt-2"><span>{result.correctAnswers !== null ? `${result.correctAnswers} / ${result.totalQuestions} correct answers` : ""}</span><span>Time: {result.timeTaken}</span></div></div> : null}
+                {result.status === "published" && result.scoreVisible && result.score !== null ? <div className="bg-gradient-to-r from-teal-50 to-blue-50 border border-teal-200 rounded-lg p-4"><div className="flex items-center justify-between"><span className="text-sm text-gray-600">Your Score</span><span className={`text-2xl ${scoreColor(result)}`}>{result.score.toFixed(2)} / 10</span></div><div className="flex items-center justify-between text-sm text-gray-600 mt-2"><span>{result.correctAnswers !== null ? `${result.correctAnswers} / ${result.totalQuestions} correct answers` : ""}</span><span>Time: {result.timeTaken}</span></div></div> : null}
                 {result.status === "pending" && <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">Awaiting essay grading</div>}
                 {result.status === "hidden" && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">Result is hidden by Teacher</div>}
                 {result.status === "published" && !result.scoreVisible && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">Result is hidden by Teacher</div>}

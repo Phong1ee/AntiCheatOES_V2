@@ -7,7 +7,7 @@ import { Label } from "../ui/label";
 import type { VerifyCodeResult } from "../../services/student-exam.service";
 
 interface ExamCodeDialogProps {
-  exam: { id: string; title: string } | null;
+  exam: { id: string; title: string; examCode: string | null } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onVerify: (code: string) => Promise<VerifyCodeResult>;
@@ -21,15 +21,14 @@ export function ExamCodeDialog({ exam, open, onOpenChange, onVerify, onStart }: 
   const [phase, setPhase] = useState<"code" | "fullscreen">("code");
 
   useEffect(() => {
-    if (!open) {
-      setCode("");
-      setError("");
-      setWorking(false);
-      setPhase("code");
-    }
-  }, [open, exam?.id]);
+    setCode("");
+    setError("");
+    setWorking(false);
+    setPhase(exam?.examCode === null ? "fullscreen" : "code");
+  }, [open, exam?.id, exam?.examCode]);
 
   if (!exam) return null;
+  const requiresCode = exam.examCode !== null;
 
   const verify = async () => {
     const trimmed = code.trim();
@@ -74,7 +73,10 @@ export function ExamCodeDialog({ exam, open, onOpenChange, onVerify, onStart }: 
   return <Dialog open={open} onOpenChange={(next) => !next && close()}>
     <DialogContent className="max-w-md">
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><Lock className="size-5 text-teal-600" />Enter Exam Code</DialogTitle>
+        <DialogTitle className="flex items-center gap-2">
+          {requiresCode ? <Lock className="size-5 text-teal-600" /> : <Maximize className="size-5 text-teal-600" />}
+          {requiresCode ? "Enter Exam Code" : "Fullscreen Required"}
+        </DialogTitle>
         <DialogDescription>{phase === "code" ? "Please enter the exam code provided by your instructor to access the exam." : "Confirm fullscreen access before your attempt is created."}</DialogDescription>
       </DialogHeader>
       {phase === "code" ? <div className="mt-4 space-y-4">
@@ -88,7 +90,7 @@ export function ExamCodeDialog({ exam, open, onOpenChange, onVerify, onStart }: 
       </div> : <div className="mt-4 space-y-4">
         <div className="rounded-xl border border-teal-200 bg-teal-50 p-5 text-center"><Maximize className="mx-auto mb-3 size-8 text-teal-700" /><p className="font-medium text-teal-900">This exam requires fullscreen mode.</p><p className="mt-2 text-sm text-teal-800">Leaving fullscreen will be recorded as a violation.</p></div>
         {error && <p className="flex items-center gap-1 text-sm text-red-600"><AlertCircle className="size-4" />{error}</p>}
-        <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={() => setPhase("code")} disabled={working}>Back</Button><Button className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600" onClick={() => void startInFullscreen()} disabled={working}>{working ? "Starting..." : "Enter Fullscreen & Start Exam"}</Button></div>
+        <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={() => requiresCode ? setPhase("code") : close()} disabled={working}>{requiresCode ? "Back" : "Cancel"}</Button><Button className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600" onClick={() => void startInFullscreen()} disabled={working}>{working ? "Starting..." : "Enter Fullscreen & Start Exam"}</Button></div>
       </div>}
     </DialogContent>
   </Dialog>;

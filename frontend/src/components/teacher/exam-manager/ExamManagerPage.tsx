@@ -19,10 +19,9 @@ interface Exam {
   assignedStudents: number;
   averageScore: number | null;
   duration?: number;
-  examCode?: string;
+  examCode: string | null;
   description?: string;
   maxAttempt: number;
-  totalPoints: number;
   passingScore: number;
   resultVisibility: ResultVisibility;
 }
@@ -43,7 +42,6 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   examCode: exam.examcode,
   description: exam.description ?? "",
   maxAttempt: exam.max_attempt ?? 1,
-  totalPoints: exam.total_points,
   passingScore: exam.passing_score,
   resultVisibility: exam.result_visibility ?? "hidden",
 });
@@ -99,9 +97,8 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
     description: string;
     subjectId: string;
     duration: number;
-    examCode: string;
+    examCode: string | null;
     maxAttempt: number;
-    totalPoints: number;
     passingScore: number;
     startTime: string;
     endTime: string;
@@ -110,7 +107,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
   }) => {
     const payload = {
       title: examData.title.trim(),
-      examcode: examData.examCode.trim(),
+      examcode: examData.examCode?.trim() || null,
       max_attempt: examData.maxAttempt,
       description: examData.description.trim(),
       duration_minutes: examData.duration,
@@ -119,7 +116,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
       status: examData.status,
       result_visibility: examData.resultVisibility,
       subject_id: examData.subjectId,
-      total_points: examData.totalPoints,
+      total_points: 10 as const,
       passing_score: examData.passingScore,
     };
 

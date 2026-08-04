@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -216,14 +217,14 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             status="draft",
             result_visibility="score-only",
             subject_id="DB",
-            total_points=120,
-            passing_score=72,
+            total_points=10,
+            passing_score=6,
         )
         update_exam_in_database(exam.exam_id, request, {"school_id": "T1"}, {}, self.db)
         self.db.expire_all()
         updated = self.db.get(Exam, exam.exam_id)
         self.assertEqual((updated.title, updated.max_attempt), ("Updated title", 3))
-        self.assertEqual((updated.total_points, updated.passing_score), (120, 72))
+        self.assertEqual((updated.total_points, updated.passing_score), (10, 6))
         self.assertEqual((updated.start_time, updated.end_time), (datetime(2026, 8, 3, 9, 15), datetime(2026, 8, 3, 17, 45)))
         self.assertEqual(updated.status.value, "draft")
         teacher = self.db.query(User).filter_by(school_id="T1").one()
@@ -237,7 +238,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         )
         self.db.add(publish_question)
         self.db.flush()
-        self.db.add(ExamQuestion(exam_id=exam.exam_id, question_id=publish_question.question_id, question_point=120))
+        self.db.add(ExamQuestion(exam_id=exam.exam_id, question_id=publish_question.question_id, question_point=12))
         self.db.commit()
         for exam_status in ("draft", "published"):
             update_exam_in_database(
@@ -250,9 +251,9 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             self.assertEqual(self.db.get(Exam, exam.exam_id).status.value, exam_status)
         detail = get_exam(exam.exam_id, {"school_id": "T1"}, {}, self.db)
         listed = get_teacher_exams({"school_id": "T1"}, {}, self.db)
-        self.assertEqual((detail["total_points"], detail["passing_score"]), (120, 72))
+        self.assertEqual((detail["total_points"], detail["passing_score"]), (10, 6))
         listed_exam = next(item for item in listed if item["exam_id"] == exam.exam_id)
-        self.assertEqual((listed_exam["total_points"], listed_exam["passing_score"]), (120, 72))
+        self.assertEqual((listed_exam["total_points"], listed_exam["passing_score"]), (10, 6))
         self.assertEqual((detail["status"], listed_exam["status"]), ("published", "published"))
         self.assertEqual(detail["start_time"], "2026-08-03T09:15:00")
         other = self.db.query(Exam).filter_by(examcode="O").one()
@@ -536,12 +537,12 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             end_time=datetime(2026, 9, 12, 18, 30),
             result_visibility="full",
             subject_id="DB",
-            total_points=80,
-            passing_score=48,
+            total_points=10,
+            passing_score=6,
         )
         created = add_exam_to_database(request, {"school_id": "T1"}, {}, self.db)
         reloaded = get_exam(created["exam_id"], {"school_id": "T1"}, {}, self.db)
-        self.assertEqual((reloaded["total_points"], reloaded["passing_score"]), (80, 48))
+        self.assertEqual((reloaded["total_points"], reloaded["passing_score"]), (10, 6))
         self.assertEqual((reloaded["start_time"], reloaded["end_time"]), ("2026-09-10T08:00:00", "2026-09-12T18:30:00"))
         self.assertEqual(reloaded["status"], "draft")
         for exam_status in ("draft",):
@@ -575,9 +576,64 @@ class TeacherExamIntegrationTests(unittest.TestCase):
                 end_time=datetime(2026, 9, 10, 7, 59),
                 result_visibility="full",
                 subject_id="DB",
-                total_points=20,
-                passing_score=21,
+                total_points=10,
+                passing_score=10.01,
             )
+
+    def test_exam_code_can_be_disabled_enabled_and_remains_unique_when_present(self):
+        template = TeacherExamRequest(
+            title="Optional code exam",
+            examcode=None,
+            max_attempt=1,
+            description="No code required",
+            duration_minutes=30,
+            start_time=datetime(2026, 9, 10, 8, 0),
+            end_time=datetime(2026, 9, 10, 9, 0),
+            result_visibility="hidden",
+            subject_id="DB",
+            total_points=10,
+            passing_score=5,
+        )
+        first = add_exam_to_database(template, {"school_id": "T1"}, {}, self.db)
+        second = add_exam_to_database(
+            template.model_copy(update={"title": "Another no-code exam"}),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertIsNone(first["examcode"])
+        self.assertIsNone(second["examcode"])
+
+        coded = self.db.query(Exam).filter_by(examcode="A").one()
+        disabled = update_exam_in_database(
+            coded.exam_id,
+            template.model_copy(update={"title": coded.title}),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertIsNone(disabled["examcode"])
+        enabled = update_exam_in_database(
+            first["exam_id"],
+            template.model_copy(update={"examcode": "  NEW-CODE  "}),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertEqual(enabled["examcode"], "NEW-CODE")
+
+        with self.assertRaises(HTTPException) as duplicate:
+            add_exam_to_database(
+                template.model_copy(update={"title": "Duplicate", "examcode": "NEW-CODE"}),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(duplicate.exception.status_code, 409)
+
+        null_source = self.db.get(Exam, second["exam_id"])
+        duplicated = duplicate_exam(null_source.exam_id, {"school_id": "T1"}, {}, self.db)
+        self.assertIsNone(duplicated["examcode"])
     def test_exam_request_rejects_invalid_schedule_and_status(self):
         common = {
             "title": "Invalid",
@@ -726,6 +782,36 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.assertEqual(unauthorized.exception.status_code, 403)
         self.assertEqual(self.db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).count(), before)
 
+    def test_id_only_import_defaults_new_questions_to_one_without_redistribution(self):
+        exam = self.db.query(Exam).filter_by(examcode="A").one()
+        exam.total_points = 10
+        existing = self._bank_question("T1", QuestionStatus.draft, "Existing")
+        imported_one = self._bank_question("T2", QuestionStatus.approved, "Imported one")
+        imported_two = self._bank_question("T2", QuestionStatus.approved, "Imported two")
+        self.db.add(ExamQuestion(exam_id=exam.exam_id, question_id=existing.question_id, question_point=4))
+        self.db.commit()
+
+        result = add_questions_to_exam_from_question_bank(
+            exam.exam_id,
+            [
+                QuestionsSelectFromBank(question_id=imported_one.question_id),
+                QuestionsSelectFromBank(question_id=imported_two.question_id),
+            ],
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        links = self.db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).all()
+        self.assertFalse(result["automatically_distributed"])
+        self.assertTrue(result["default_max_score_applied"])
+        self.assertEqual(set(result["imported_question_ids"]), {imported_one.question_id, imported_two.question_id})
+        self.assertEqual(len(links), 3)
+        self.assertTrue(all(Decimal(str(link.question_point)) > 0 for link in links))
+        points = {link.question_id: Decimal(str(link.question_point)) for link in links}
+        self.assertEqual(points[existing.question_id], Decimal("4.00"))
+        self.assertEqual(points[imported_one.question_id], Decimal("1.00"))
+        self.assertEqual(points[imported_two.question_id], Decimal("1.00"))
+
     def test_exam_settings_crud_isolation_ownership_and_validation(self):
         exam_a = self.db.query(Exam).filter_by(examcode="A").one()
         exam_b = self.db.query(Exam).filter_by(examcode="B").one()
@@ -789,15 +875,15 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.db.add_all(StudentExam(student_id=student.school_id, exam_id=exam.exam_id) for student in students)
         submitted_at = datetime(2026, 8, 3, 10, 0)
         self.db.add_all([
-            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=1, score=70, submitted_at=submitted_at, status=AttemptStatus.submitted),
-            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=2, score=85, submitted_at=submitted_at, status=AttemptStatus.submitted),
-            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=3, score=80, submitted_at=submitted_at, status=AttemptStatus.submitted),
-            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=4, score=99, status=AttemptStatus.in_progress),
-            Attempt(exam_id=exam.exam_id, student_id="S3", attempt_no=1, score=70, submitted_at=submitted_at, status=AttemptStatus.submitted),
+            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=1, score=7, submitted_at=submitted_at, status=AttemptStatus.submitted),
+            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=2, score=8.5, submitted_at=submitted_at, status=AttemptStatus.submitted),
+            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=3, score=8, submitted_at=submitted_at, status=AttemptStatus.submitted),
+            Attempt(exam_id=exam.exam_id, student_id="S1", attempt_no=4, score=9.9, status=AttemptStatus.in_progress),
+            Attempt(exam_id=exam.exam_id, student_id="S3", attempt_no=1, score=7, submitted_at=submitted_at, status=AttemptStatus.submitted),
         ])
         self.db.commit()
 
-        expected = {"highest": 85, "last_attempt": 80, "average": 78.33}
+        expected = {"highest": 8.5, "last_attempt": 8, "average": 7.83}
         for strategy, score in expected.items():
             payload = ExamSettingsRequest(result_strategy=strategy)
             saved = update_exam_settings(exam.exam_id, payload, {"school_id": "T1"}, {}, self.db) \
@@ -808,7 +894,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             self.assertEqual(saved.result_strategy.value, strategy)
             self.assertEqual(float(self.db.get(StudentExam, ("S1", exam.exam_id)).final_score), score)
             self.assertIsNone(self.db.get(StudentExam, ("S2", exam.exam_id)).final_score)
-            self.assertEqual(float(self.db.get(StudentExam, ("S3", exam.exam_id)).final_score), 70)
+            self.assertEqual(float(self.db.get(StudentExam, ("S3", exam.exam_id)).final_score), 7)
             reloaded = get_exam_settings(exam.exam_id, {"school_id": "T1"}, {}, self.db)
             self.assertEqual(reloaded.result_strategy.value, strategy)
 
@@ -836,8 +922,18 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.db.add(attempt)
         self.db.flush()
         self.db.add_all([
-            AttemptQuestion(attempt_id=attempt.attempt_id, question_id=questions[0].question_id, question_point=5),
-            AttemptQuestion(attempt_id=attempt.attempt_id, question_id=questions[1].question_id, question_point=5),
+            AttemptQuestion(
+                attempt_id=attempt.attempt_id,
+                question_id=questions[0].question_id,
+                question_point=5,
+                question_point_snapshot=5,
+            ),
+            AttemptQuestion(
+                attempt_id=attempt.attempt_id,
+                question_id=questions[1].question_id,
+                question_point=10,
+                question_point_snapshot=5,
+            ),
         ])
         self.db.flush()
         blank = EssayAnswer(attempt_id=attempt.attempt_id, question_id=questions[0].question_id, answer_text="\t\n", score=0)
@@ -847,7 +943,21 @@ class TeacherExamIntegrationTests(unittest.TestCase):
 
         listed = list_essay_answers(exam.exam_id, {"school_id": "T1"}, {}, self.db)
         self.assertEqual([row["essayAnswerId"] for row in listed], [meaningful.essay_answer_id])
+        self.assertEqual(listed[0]["maxPoints"], 5)
         self.assertEqual(_essay_counts(self.db, [attempt.attempt_id]), (2, 1))
+
+        with self.assertRaises(HTTPException) as over_snapshot_maximum:
+            grade_essay_answer(
+                exam.exam_id,
+                meaningful.essay_answer_id,
+                GradeEssayRequest(score=Decimal("5.01")),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(over_snapshot_maximum.exception.status_code, 400)
+        with self.assertRaises(ValidationError):
+            GradeEssayRequest(score=Decimal("-0.01"))
 
         graded = grade_essay_answer(
             exam.exam_id,

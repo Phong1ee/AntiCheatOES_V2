@@ -176,11 +176,11 @@ export function ExamInfoCard({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs text-gray-500">Average Score</p>
-            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{avgScore}</p>
+            <p className="text-2xl font-semibold text-gray-800 leading-none mt-0.5">{avgScore.toFixed(2)} / 10</p>
             <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden w-full">
               <div
                 className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full"
-                style={{ width: `${avgScore}%` }}
+                style={{ width: `${Math.min(avgScore * 10, 100)}%` }}
               />
             </div>
           </div>
@@ -193,7 +193,7 @@ export function ExamInfoCard({
           </div>
           <div>
             <p className="text-xs text-gray-500">Highest Score</p>
-            <p className="text-2xl font-semibold text-blue-700 leading-none mt-0.5">{highestScore}</p>
+            <p className="text-2xl font-semibold text-blue-700 leading-none mt-0.5">{highestScore.toFixed(2)} / 10</p>
           </div>
         </div>
 
@@ -204,7 +204,7 @@ export function ExamInfoCard({
           </div>
           <div>
             <p className="text-xs text-gray-500">Lowest Score</p>
-            <p className="text-2xl font-semibold text-red-600 leading-none mt-0.5">{lowestScore}</p>
+            <p className="text-2xl font-semibold text-red-600 leading-none mt-0.5">{lowestScore.toFixed(2)} / 10</p>
           </div>
         </div>
 

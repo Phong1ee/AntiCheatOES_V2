@@ -39,6 +39,7 @@ import type { ResultsFilterValue } from './ResultsFilter';
 const statusConfig: Record<StudentResult['status'], { label: string; color: string }> = {
   submitted: { label: 'Submitted', color: 'bg-green-100 text-green-700' },
   late: { label: 'Late', color: 'bg-amber-100 text-amber-700' },
+  'pending-grading': { label: 'Pending Grading', color: 'bg-yellow-100 text-yellow-700' },
   'not-submitted': { label: 'Not Submitted', color: 'bg-red-100 text-red-700' },
 };
 
@@ -53,13 +54,13 @@ interface ResultsTableProps {
   onViewDetail: (attemptId: number) => void;
 }
 
-const CSV_HEADERS = ['Student ID', 'Name', 'Final Score', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
+const CSV_HEADERS = ['Student ID', 'Name', 'Final Score (/10)', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
 
 function toCsvRow(result: StudentResult): (string | number)[] {
   return [
     result.studentId,
     result.name,
-    result.score,
+    result.provisional ? '' : result.score,
     result.correctAnswers,
     result.totalQuestions,
     result.timeSpent,
@@ -145,8 +146,8 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
                   <div className="flex items-center gap-4">
                     {/* Stats */}
                     <div className="text-right">
-                      <p className={`text-lg font-medium ${attempt.score >= 90 ? 'text-green-600' : attempt.score >= 75 ? 'text-blue-600' : attempt.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {attempt.score}
+                      <p className={`text-lg font-medium ${attempt.score >= 9 ? 'text-green-600' : attempt.score >= 7.5 ? 'text-blue-600' : attempt.score >= 6 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {attempt.score.toFixed(2)} / 10
                       </p>
                       <div className="flex items-center gap-2 text-xs text-gray-400">
                         <span className="flex items-center gap-1">
@@ -420,18 +421,18 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     <TableCell className="text-center">
                       <span
                         className={`inline-flex items-center justify-center w-12 h-8 rounded-lg ${
-                          result.score >= 90
+                          result.score >= 9
                             ? 'bg-green-100 text-green-700'
-                            : result.score >= 75
+                            : result.score >= 7.5
                             ? 'bg-blue-100 text-blue-700'
-                            : result.score >= 60
+                            : result.score >= 6
                             ? 'bg-amber-100 text-amber-700'
                             : result.score > 0
                             ? 'bg-red-100 text-red-700'
                             : 'bg-gray-100 text-gray-500'
                         }`}
                       >
-                        {result.score}
+                        {result.provisional ? '—' : result.score.toFixed(2)}
                       </span>
                     </TableCell>
                     <TableCell className="text-center text-gray-600">

@@ -120,10 +120,12 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
                 <span className="text-teal-600">+</span>
                 <span className="text-gray-800">Valid Student ID (Must be verified before starting)</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Exam Code (Will be provided 15 minutes before exam)</span>
-              </div>
+              {exam.examCode !== null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-teal-600">+</span>
+                  <span className="text-gray-800">Exam Code (Provided by your instructor)</span>
+                </div>
+              )}
             </div>
           </div>
 

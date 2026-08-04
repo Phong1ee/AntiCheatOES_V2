@@ -63,6 +63,7 @@ export function ExamList({
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [startingExamId, setStartingExamId] = useState<string | null>(null);
   const [fetchedExams, setFetchedExams] = useState<Exam[]>([]);
   const [fetchedLoading, setFetchedLoading] = useState(suppliedExams === undefined);
   const [fetchedLoadError, setFetchedLoadError] = useState<string | null>(null);
@@ -109,10 +110,38 @@ export function ExamList({
     onEnterExam?.(examId);
   };
 
+  const startExam = async (exam: Exam, code?: string) => {
+    setStartingExamId(exam.id);
+    try {
+      const data = await studentExamService.start(exam.id, code);
+      localStorage.setItem(
+        "current_exam_attempt",
+        JSON.stringify({
+          examId: exam.id,
+          attemptId: data.attemptId,
+          attemptNo: data.attemptNo,
+          durationMinutes: data.durationMinutes,
+        })
+      );
+      setCodeOpen(false);
+      handleEnterExam(exam.id);
+    } finally {
+      setStartingExamId(null);
+    }
+  };
+
   const handleRequestCode = (exam: Exam) => {
     setSelectedExam(exam);
     setDetailsOpen(false);
-    setCodeOpen(true);
+    if (exam.examCode === null && !exam.requiresFullscreen) {
+      setFetchedLoadError(null);
+      void startExam(exam).catch((error: unknown) => {
+        console.error(error);
+        setFetchedLoadError(error instanceof Error ? error.message : "Unable to start the exam.");
+      });
+    } else {
+      setCodeOpen(true);
+    }
   };
 
   const handleCodeVerify = async (code: string) => {
@@ -123,20 +152,7 @@ export function ExamList({
   const handleCodeStart = async (code: string) => {
     if (!selectedExam) throw new Error("No exam selected");
     try {
-      const data = await studentExamService.start(selectedExam.id, code);
-
-      localStorage.setItem(
-        "current_exam_attempt",
-        JSON.stringify({
-          examId: selectedExam.id,
-          attemptId: data.attemptId,
-          attemptNo: data.attemptNo,
-          durationMinutes: data.durationMinutes,
-        })
-      );
-
-      setCodeOpen(false);
-      handleEnterExam(selectedExam.id);
+      await startExam(selectedExam, code || undefined);
     } catch (err) {
       console.error(err);
       throw err;
@@ -303,8 +319,9 @@ export function ExamList({
                       <Button
                         className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 shadow-lg"
                         onClick={() => handleRequestCode(exam)}
+                        disabled={startingExamId === exam.id}
                       >
-                        Enter Exam
+                        {startingExamId === exam.id ? "Starting..." : "Enter Exam"}
                       </Button>
                     </div>
                   )

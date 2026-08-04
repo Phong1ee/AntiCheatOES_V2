@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from decimal import Decimal
 from src.a_db_config.config import get_db_connection
+from src.service.scoring_service import GRADING_SCALE
 
 
 def _iso(value):
@@ -41,12 +42,9 @@ def _score_value(value):
     return int(value) if float(value).is_integer() else float(value)
 
 
-def _attempt_total_points(snapshot_points, exam_total_points):
-    """Prefer the immutable attempt allocation, falling back for legacy attempts."""
-    snapshot_total = _score_value(snapshot_points)
-    if snapshot_total is not None and snapshot_total > 0:
-        return snapshot_total
-    return _score_value(exam_total_points) or 0
+def _attempt_total_points(snapshot_points, _legacy_exam_total=None):
+    """Return the immutable raw denominator from the attempt's actual questions."""
+    return _score_value(snapshot_points) or 0
 
 
 def _status(result_visibility, pending_essay_count):
@@ -153,12 +151,9 @@ def get_student_results(user_id: int):
             )
             total_questions = int(row["total_questions"] or 0)
             correct_answers = int(row["correct_answers"] or 0) if allow_view_details else None
-            total_points = _attempt_total_points(
-                row["snapshot_total_points"], row["exam_total_points"]
-            )
+            total_points = _attempt_total_points(row["snapshot_total_points"])
 
             visible_score = _score_value(row["score"]) if score_visible else None
-
             results.append({
                 "id": str(row["attempt_id"]),
                 "attemptId": row["attempt_id"],
@@ -169,9 +164,17 @@ def get_student_results(user_id: int):
                 "duration": _duration_label(row["duration_minutes"]),
                 "status": status,
                 "score": visible_score,
-                "rawScore": visible_score,
+                "rawScore": None,
+                "rawEarnedScore": None,
+                "rawPossibleScore": total_points,
                 "totalPoints": total_points,
+                "gradingScale": _score_value(GRADING_SCALE),
                 "passingScore": _score_value(row["passing_score"]),
+                "passed": (
+                    visible_score >= _score_value(row["passing_score"])
+                    if visible_score is not None and row["passing_score"] is not None
+                    else None
+                ),
                 "correctAnswers": correct_answers if allow_view_details else None,
                 "totalQuestions": total_questions,
                 "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
@@ -265,10 +268,15 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             pending_essay_count,
         )
         total_questions = int(row["total_questions"] or 0)
-        total_points = _attempt_total_points(
-            row["snapshot_total_points"], row["exam_total_points"]
-        )
+        total_points = _attempt_total_points(row["snapshot_total_points"])
 
+        question_details = _get_attempt_questions(cursor, row["attempt_id"]) if allow_view_details else []
+        raw_earned = sum(
+            Decimal(str(question["awardedPoints"] or 0))
+            for question in question_details
+            if question["awardedPoints"] is not None
+        ) if allow_view_details else None
+        visible_score = _score_value(row["score"]) if score_visible else None
         result = {
             "id": str(row["attempt_id"]),
             "attemptId": row["attempt_id"],
@@ -279,10 +287,18 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             "duration": _duration_label(row["duration_minutes"]),
             "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
             "status": status,
-            "score": _score_value(row["score"]) if score_visible else None,
-            "rawScore": _score_value(row["score"]) if score_visible else None,
+            "score": visible_score,
+            "rawScore": _score_value(raw_earned) if raw_earned is not None and score_visible else None,
+            "rawEarnedScore": _score_value(raw_earned) if raw_earned is not None and score_visible else None,
+            "rawPossibleScore": total_points,
             "totalPoints": total_points,
+            "gradingScale": _score_value(GRADING_SCALE),
             "passingScore": _score_value(row["passing_score"]),
+            "passed": (
+                visible_score >= _score_value(row["passing_score"])
+                if visible_score is not None and row["passing_score"] is not None
+                else None
+            ),
             "correctAnswers": None,
             "totalQuestions": total_questions,
             "scoreVisible": score_visible,
@@ -295,7 +311,7 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         }
 
         if allow_view_details:
-            result["questions"] = _get_attempt_questions(cursor, row["attempt_id"])
+            result["questions"] = question_details
             result["correctAnswers"] = sum(1 for question in result["questions"] if question["isCorrect"])
 
         return result

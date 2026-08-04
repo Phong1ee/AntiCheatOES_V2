@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import random
-from decimal import Decimal, ROUND_DOWN
 from typing import Iterable, Mapping, Sequence
 
 from fastapi import HTTPException
@@ -22,26 +21,6 @@ from src.a_db_config import (
     QuestionStatus,
     User,
 )
-
-
-POINT_QUANTUM = Decimal("0.01")
-
-
-def distribute_points(total_points: Decimal | int, question_ids: Sequence[int]) -> dict[int, Decimal]:
-    if not question_ids:
-        raise HTTPException(status_code=422, detail="At least one question is required")
-    total = Decimal(str(total_points)).quantize(POINT_QUANTUM)
-    if total <= 0:
-        raise HTTPException(status_code=422, detail="Exam total points must be positive")
-    base = (total / len(question_ids)).quantize(POINT_QUANTUM, rounding=ROUND_DOWN)
-    if base <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="Exam total points is too small to assign a positive value to every question",
-        )
-    points = {question_id: base for question_id in question_ids}
-    points[question_ids[-1]] += total - (base * len(question_ids))
-    return points
 
 
 def seeded_random(*parts: object) -> random.Random:

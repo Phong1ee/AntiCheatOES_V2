@@ -1,7 +1,10 @@
 import importlib.util
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
+
+from src.service.scoring_service import normalize_score
 
 
 class _ExamMigrationOperations:
@@ -65,6 +68,50 @@ class ExamDataMigrationTests(unittest.TestCase):
         self.assertIn("CHAR(9)", sql)
         self.assertIn("CHAR(10)", sql)
         self.assertIn("CHAR(13)", sql)
+
+    def test_exam_code_blanks_are_cleared_before_column_becomes_nullable(self):
+        migration = self._load("b8d4f2a6c105_make_exam_code_optional.py")
+        statements: list[str] = []
+
+        class Operations:
+            @staticmethod
+            def execute(statement):
+                statements.append(" ".join(str(statement).split()))
+
+        with patch.object(migration, "op", Operations()):
+            migration.upgrade()
+        self.assertEqual(len(statements), 2)
+        self.assertIn("SET examcode = NULL", statements[0])
+        self.assertIn("TRIM(examcode) = ''", statements[0])
+        self.assertIn("VARCHAR(20) NULL", statements[1])
+
+        statements.clear()
+        with patch.object(migration, "op", Operations()):
+            migration.downgrade()
+        self.assertIn("WHERE examcode IS NULL", statements[0])
+        self.assertIn("VARCHAR(20) NOT NULL", statements[1])
+
+    def test_ten_point_migration_is_versioned_and_preserves_attempt_snapshots(self):
+        path = (
+            Path(__file__).parents[1]
+            / "alembic"
+            / "versions"
+            / "e2a7c4d91b30_normalize_exam_scores_to_ten.py"
+        )
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "b8d4f2a6c105"', source)
+        self.assertIn("WHERE a.score_scale_version = 1", source)
+        self.assertIn("target.score_scale_version = 2", source)
+        self.assertIn("JSON_TABLE", source)
+        self.assertIn("COALESCE(aq.question_point_snapshot, aq.question_point, 0)", source)
+        self.assertNotIn("UPDATE attempt_question SET", source)
+        self.assertIn("skipped_zero_denominator_attempts", source)
+        self.assertIn("invalid_or_missing_exam_scores_using_5.00_fallback", source)
+
+    def test_legacy_hundred_and_non_hundred_totals_normalize_consistently(self):
+        self.assertEqual(normalize_score(50, 100), Decimal("5.00"))
+        self.assertEqual(normalize_score(24, 80), Decimal("3.00"))
+        self.assertEqual(normalize_score(72, 120), Decimal("6.00"))
 
 
 if __name__ == "__main__":

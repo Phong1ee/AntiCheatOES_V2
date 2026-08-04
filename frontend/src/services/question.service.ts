@@ -26,7 +26,7 @@ export interface CreateQuestionRequest {
   question_status: "draft" | "pending" | "approved" | "rejected";
   options: QuestionOptionRequest[];
   exam_id: number;
-  question_point: number;
+  max_score: number;
 }
 
 export interface UpdateQuestionRequest extends Omit<CreateQuestionRequest, "exam_id"> {}
@@ -41,6 +41,7 @@ export interface ExamQuestionDetail {
   lo_ids: number[];
   question_status: "draft" | "pending" | "approved" | "rejected";
   question_point: number;
+  max_score: number;
   options: Array<{ options_id: number; options_text: string; is_correct: boolean }>;
 }
 
@@ -87,6 +88,10 @@ export interface ImportQuestionsResponse {
   success: boolean;
   imported_count: number;
   imported_question_ids: number[];
+  automatically_distributed: boolean;
+  default_max_score_applied: boolean;
+  grading_scale: number;
+  points: Array<{ question_id: number; question_point: string; max_score: string }>;
 }
 
 export interface QuestionUpdateResponse {
@@ -111,6 +116,7 @@ export interface PoolRulePayload {
   lo_id: number | null;
   difficulty: QuestionDifficulty;
   draw_count: number;
+  max_score_per_question: number;
 }
 
 export interface PoolRule extends PoolRulePayload {
@@ -180,7 +186,7 @@ export const questionService = {
     return data.question_id;
   },
 
-  async addToExam(examId: number, payload: { question_id: number; question_point: number; options?: QuestionOptionRequest[] }) {
+  async addToExam(examId: number, payload: { question_id: number; max_score: number; options?: QuestionOptionRequest[] }) {
     const { data } = await apiClient.post(`/api/teacher/${examId}/add-question`, { exam_id: examId, ...payload });
     return data;
   },
@@ -205,15 +211,6 @@ export const questionService = {
       removed_count: number;
       removed_question_ids: number[];
     }>(`/api/teacher/${examId}/questions/bulk-remove`, { question_ids: questionIds });
-    return data;
-  },
-
-  async distributePoints(examId: number) {
-    const { data } = await apiClient.post<{
-      success: boolean;
-      total_points: string;
-      points: Array<{ question_id: number; question_point: string }>;
-    }>(`/api/teacher/${examId}/questions/distribute-points`);
     return data;
   },
 
@@ -304,7 +301,7 @@ export const questionService = {
 
   async importFromBank(
     examId: number,
-    questions: Array<{ question_id: number; question_point: number }>,
+    questions: Array<{ question_id: number }>,
   ): Promise<ImportQuestionsResponse> {
     const { data } = await apiClient.post<ImportQuestionsResponse>(
       `/api/teacher/add-questions-to-exam-from-question-bank/${examId}`,

@@ -74,16 +74,16 @@ function getSubjectColor(subject: string, subjects: string[]) {
 }
 
 function scoreColor(avg: number) {
-  if (avg >= 85) return 'text-green-600';
-  if (avg >= 70) return 'text-blue-600';
-  if (avg >= 55) return 'text-amber-600';
+  if (avg >= 8.5) return 'text-green-600';
+  if (avg >= 7) return 'text-blue-600';
+  if (avg >= 5.5) return 'text-amber-600';
   return 'text-red-600';
 }
 
 function scoreBarColor(avg: number) {
-  if (avg >= 85) return 'from-green-400 to-green-600';
-  if (avg >= 70) return 'from-blue-400 to-blue-600';
-  if (avg >= 55) return 'from-amber-400 to-amber-500';
+  if (avg >= 8.5) return 'from-green-400 to-green-600';
+  if (avg >= 7) return 'from-blue-400 to-blue-600';
+  if (avg >= 5.5) return 'from-amber-400 to-amber-500';
   return 'from-red-400 to-red-500';
 }
 
@@ -314,12 +314,12 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
                     {exam.status === 'completed' ? (
                       <div className="flex items-center gap-2 w-full max-w-[100px]">
                         <p className={`text-sm ${scoreColor(exam.avgScore)}`}>
-                          {exam.avgScore.toFixed(1)}%
+                          {exam.avgScore.toFixed(2)} / 10
                         </p>
                         <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                           <div
                             className={`h-full bg-gradient-to-r ${scoreBarColor(exam.avgScore)} rounded-full`}
-                            style={{ width: `${Math.min(exam.avgScore, 100)}%` }}
+                            style={{ width: `${Math.min(exam.avgScore * 10, 100)}%` }}
                           />
                         </div>
                       </div>

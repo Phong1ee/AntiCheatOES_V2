@@ -1,37 +1,22 @@
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { ScrollArea } from '../ui/scroll-area';
 import {
   Calendar,
-  Clock,
   FileText,
-  Camera,
-  Mic,
-  Maximize,
   User,
   BookOpen,
   AlertCircle,
-  CheckCircle2,
 } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
+import type { StudentExamListItem } from '../../services/student-exam.service';
 
 interface ExamDetailsDialogProps {
-  exam: {
-    id: string;
-    title: string;
-    subject: string;
-    date: string;
-    time: string;
-    duration: string;
-    status: 'upcoming' | 'open' | 'completed';
-  } | null;
+  exam: StudentExamListItem | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEnterExam: () => void;
@@ -41,13 +26,22 @@ interface ExamDetailsDialogProps {
 const statusConfig = {
   upcoming: { label: 'Upcoming', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
   open: { label: 'Open Now', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
-  completed: { label: 'Closed', className: 'bg-gray-100 text-gray-700 hover:bg-gray-100' },
+  completed: { label: 'Completed', className: 'bg-gray-100 text-gray-700 hover:bg-gray-100' },
+  closed: { label: 'Closed', className: 'bg-slate-100 text-slate-700 hover:bg-slate-100' },
 };
 
 export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onRequestCode }: ExamDetailsDialogProps) {
   if (!exam) return null;
 
   const canEnterExam = exam.status === 'open';
+  const startDate = exam.startTime ? new Date(exam.startTime) : null;
+  const hasStartDate = startDate && !Number.isNaN(startDate.getTime());
+  const displayDate = hasStartDate ? startDate.toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  }) : 'Date unavailable';
+  const displayTime = hasStartDate ? startDate.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit',
+  }) : 'Time unavailable';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,14 +64,6 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
               <BookOpen className="size-5 text-teal-600" />
               <span className="text-gray-800">Subject: {exam.subject}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <User className="size-5 text-teal-600" />
-              <span className="text-gray-800">Teacher Name: Dr. Sarah Johnson</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <FileText className="size-5 text-teal-600" />
-              <span className="text-gray-800">Subject ID: EX-2025-DB-001</span>
-            </div>
           </div>
 
           <div className="border-t pt-6">
@@ -89,29 +75,16 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
                 <span className="text-gray-800">
-                  Date: {new Date(exam.date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    month: 'long',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
+                  Date: {displayDate}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Time: {exam.time}</span>
+                <span className="text-gray-800">Time: {displayTime}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Duration: {exam.duration}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Format: Multiple Choice</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Total Questions: 30 questions</span>
+                <span className="text-gray-800">Duration: {exam.durationMinutes} min</span>
               </div>
             </div>
           </div>

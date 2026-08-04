@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 from src.models import resultModel
 
@@ -38,7 +39,14 @@ class ResultSnapshotTests(unittest.TestCase):
         self.assertEqual(questions[0]["options"], ["Snapshot A", "Snapshot B"])
         self.assertEqual(questions[0]["studentAnswer"], "Snapshot A")
         self.assertEqual(questions[0]["correctAnswer"], "Snapshot A")
+        self.assertEqual(questions[0]["correctAnswers"], ["Snapshot A"])
         self.assertEqual((questions[0]["points"], questions[0]["score"]), (3, 3))
+        self.assertEqual((questions[0]["maxPoints"], questions[0]["awardedPoints"]), (3, 3))
+        self.assertEqual(questions[0]["gradingStatus"], "graded")
+
+    def test_attempt_total_points_prefers_attempt_allocation(self):
+        self.assertEqual(resultModel._attempt_total_points(Decimal("50.00"), 100), 50)
+        self.assertEqual(resultModel._attempt_total_points(Decimal("0.00"), 100), 100)
 
     def test_hidden_and_score_only_visibility_do_not_allow_details(self):
         self.assertEqual(resultModel._result_flags("hidden", 0), ("hidden", False, False))

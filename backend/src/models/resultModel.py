@@ -40,6 +40,14 @@ def _score_value(value):
     return int(value) if float(value).is_integer() else float(value)
 
 
+def _attempt_total_points(snapshot_points, exam_total_points):
+    """Prefer the immutable attempt allocation, falling back for legacy attempts."""
+    snapshot_total = _score_value(snapshot_points)
+    if snapshot_total is not None and snapshot_total > 0:
+        return snapshot_total
+    return _score_value(exam_total_points) or 0
+
+
 def _status(result_visibility, pending_essay_count):
     visibility = _visibility(result_visibility)
     if visibility == "hidden":
@@ -81,9 +89,16 @@ def get_student_results(user_id: int):
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
+        e.total_points AS exam_total_points,
+        e.passing_score,
         COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
         COUNT(DISTINCT aq.question_id) AS total_questions,
-        COALESCE(SUM(CASE WHEN COALESCE(aq.question_type_snapshot, q.question_type) = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
+        COALESCE(SUM(COALESCE(aq.question_point_snapshot, aq.question_point, 0)), 0) AS snapshot_total_points,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(aq.question_type_snapshot, q.question_type)) = 'essay'
+                               AND NULLIF(TRIM(COALESCE(ea.answer_text, '')), '') IS NOT NULL
+                               AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(aq.question_type_snapshot, q.question_type)) <> 'essay'
+                               AND selected_option.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_answers
     FROM attempt a
     JOIN exam e
         ON e.exam_id = a.exam_id
@@ -96,6 +111,8 @@ def get_student_results(user_id: int):
     LEFT JOIN mcq_answers ma
         ON ma.attempt_id = aq.attempt_id
         AND ma.question_id = aq.question_id
+    LEFT JOIN options selected_option
+        ON selected_option.options_id = ma.selected_option_id
     LEFT JOIN essay_answers ea
         ON ea.attempt_id = aq.attempt_id
         AND ea.question_id = aq.question_id
@@ -115,6 +132,8 @@ def get_student_results(user_id: int):
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
+        e.total_points,
+        e.passing_score,
         s.subject_name,
         e.subject_id
     ORDER BY a.submitted_at DESC, a.attempt_id DESC
@@ -131,10 +150,10 @@ def get_student_results(user_id: int):
                 pending_essay_count,
             )
             total_questions = int(row["total_questions"] or 0)
-            correct_answers = None
-            if allow_view_details:
-                detail_questions = _get_attempt_questions(cursor, row["attempt_id"])
-                correct_answers = sum(1 for question in detail_questions if question["isCorrect"])
+            correct_answers = int(row["correct_answers"] or 0) if allow_view_details else None
+            total_points = _attempt_total_points(
+                row["snapshot_total_points"], row["exam_total_points"]
+            )
 
             visible_score = _score_value(row["score"]) if score_visible else None
 
@@ -149,6 +168,8 @@ def get_student_results(user_id: int):
                 "status": status,
                 "score": visible_score,
                 "rawScore": visible_score,
+                "totalPoints": total_points,
+                "passingScore": _score_value(row["passing_score"]),
                 "correctAnswers": correct_answers if allow_view_details else None,
                 "totalQuestions": total_questions,
                 "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
@@ -182,10 +203,16 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         e.title,
         e.description,
         e.duration_minutes,
+        e.max_attempt,
         e.result_visibility,
+        e.total_points AS exam_total_points,
+        e.passing_score,
         COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
         COUNT(DISTINCT aq.question_id) AS total_questions,
-        COALESCE(SUM(CASE WHEN COALESCE(aq.question_type_snapshot, q.question_type) = 'essay' AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
+        COALESCE(SUM(COALESCE(aq.question_point_snapshot, aq.question_point, 0)), 0) AS snapshot_total_points,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(aq.question_type_snapshot, q.question_type)) = 'essay'
+                               AND NULLIF(TRIM(COALESCE(ea.answer_text, '')), '') IS NOT NULL
+                               AND ea.score IS NULL THEN 1 ELSE 0 END), 0) AS pending_essay_count
     FROM attempt a
     JOIN exam e
         ON e.exam_id = a.exam_id
@@ -216,7 +243,10 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         e.title,
         e.description,
         e.duration_minutes,
+        e.max_attempt,
         e.result_visibility,
+        e.total_points,
+        e.passing_score,
         s.subject_name,
         e.subject_id
     """
@@ -232,6 +262,9 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             pending_essay_count,
         )
         total_questions = int(row["total_questions"] or 0)
+        total_points = _attempt_total_points(
+            row["snapshot_total_points"], row["exam_total_points"]
+        )
 
         result = {
             "id": str(row["attempt_id"]),
@@ -245,10 +278,14 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             "status": status,
             "score": _score_value(row["score"]) if score_visible else None,
             "rawScore": _score_value(row["score"]) if score_visible else None,
+            "totalPoints": total_points,
+            "passingScore": _score_value(row["passing_score"]),
             "correctAnswers": None,
             "totalQuestions": total_questions,
             "scoreVisible": score_visible,
             "allowViewDetails": allow_view_details,
+            "attemptNumber": row["attempt_no"],
+            "maxAttempts": row["max_attempt"],
             "attemptStatus": row["attempt_status"],
             "terminated": row["attempt_status"] == "terminated",
             "questions": [],
@@ -294,15 +331,26 @@ def _get_attempt_questions(cursor, attempt_id: int):
     WHERE aq.attempt_id = %s
     ORDER BY aq.display_order ASC, aq.question_id ASC
     """
-    options_query = """
-    SELECT options_id, options_text, is_correct
-    FROM options
-    WHERE question_id = %s
-    ORDER BY options_id ASC
-    """
-
     cursor.execute(question_query, (attempt_id,))
     rows = cursor.fetchall()
+    live_options_by_question = {}
+    live_option_question_ids = [
+        row["question_id"] for row in rows if row["options_snapshot"] is None
+    ]
+    if live_option_question_ids:
+        placeholders = ", ".join(["%s"] * len(live_option_question_ids))
+        cursor.execute(
+            f"""
+            SELECT question_id, options_id, options_text, is_correct
+            FROM options
+            WHERE question_id IN ({placeholders})
+            ORDER BY question_id ASC, options_id ASC
+            """,
+            tuple(live_option_question_ids),
+        )
+        for option in cursor.fetchall():
+            live_options_by_question.setdefault(option["question_id"], []).append(option)
+
     questions = []
 
     for row in rows:
@@ -311,17 +359,33 @@ def _get_attempt_questions(cursor, attempt_id: int):
         points = row["question_point_snapshot"]
         if points is None:
             points = row["question_point"]
-        if question_type == "essay":
+        max_points = _score_value(points) or 0
+        if str(question_type).lower() == "essay":
+            essay_answer = row["essay_answer"]
+            essay_is_blank = not str(essay_answer or "").strip()
+            if essay_is_blank:
+                awarded_points = 0
+                grading_status = "blank"
+            elif row["essay_score"] is None:
+                awarded_points = None
+                grading_status = "pending"
+            else:
+                awarded_points = _score_value(row["essay_score"])
+                grading_status = "graded"
+            # Keep legacy points/score aligned with maxPoints/awardedPoints.
             questions.append({
                 "id": row["question_id"],
                 "type": "essay",
                 "topic": row["subject_id"],
                 "isCorrect": row["essay_score"] is not None and int(row["essay_score"] or 0) > 0,
                 "question": question_text,
-                "studentAnswer": row["essay_answer"],
+                "studentAnswer": essay_answer,
                 "correctAnswer": None,
-                "points": points,
-                "score": row["essay_score"],
+                "maxPoints": max_points,
+                "awardedPoints": awarded_points,
+                "gradingStatus": grading_status,
+                "points": max_points,
+                "score": awarded_points,
             })
             continue
 
@@ -333,15 +397,15 @@ def _get_attempt_questions(cursor, attempt_id: int):
                 (option for option in option_rows if int(option["id"]) == int(row["selected_option_id"])),
                 None,
             ) if row["selected_option_id"] is not None else None
-            correct = next((option for option in option_rows if option.get("isCorrect")), None)
+            correct_answers = [option["text"] for option in option_rows if option.get("isCorrect")]
             student_answer = selected["text"] if selected else None
-            correct_answer = correct["text"] if correct else None
+            correct_answer = correct_answers[0] if correct_answers else None
             selected_is_correct = bool(selected and selected.get("isCorrect"))
         else:
-            cursor.execute(options_query, (row["question_id"],))
-            option_rows = cursor.fetchall()
+            option_rows = live_options_by_question.get(row["question_id"], [])
             options = [option["options_text"] for option in option_rows]
-            correct_answer = next((option["options_text"] for option in option_rows if option["is_correct"]), None)
+            correct_answers = [option["options_text"] for option in option_rows if option["is_correct"]]
+            correct_answer = correct_answers[0] if correct_answers else None
             selected = next(
                 (option for option in option_rows if row["selected_option_id"] is not None and int(option["options_id"]) == int(row["selected_option_id"])),
                 None,
@@ -349,6 +413,8 @@ def _get_attempt_questions(cursor, attempt_id: int):
             student_answer = selected["options_text"] if selected else None
             selected_is_correct = bool(selected and selected["is_correct"])
 
+        awarded_points = max_points if selected_is_correct else 0
+        # Keep legacy points/score aligned with maxPoints/awardedPoints.
         questions.append({
             "id": row["question_id"],
             "type": "mcq",
@@ -358,8 +424,12 @@ def _get_attempt_questions(cursor, attempt_id: int):
             "options": options,
             "studentAnswer": student_answer,
             "correctAnswer": correct_answer,
-            "points": points,
-            "score": points if selected_is_correct else 0,
+            "correctAnswers": correct_answers,
+            "maxPoints": max_points,
+            "awardedPoints": awarded_points,
+            "gradingStatus": "graded",
+            "points": max_points,
+            "score": awarded_points,
         })
 
     return questions

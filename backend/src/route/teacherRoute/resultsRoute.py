@@ -236,7 +236,8 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
     stats = []
     for index, link in enumerate(links, start=1):
         question = link.question
-        max_points = float(link.question_point) if link.question_point else 0
+        points = link.question_point_snapshot
+        max_points = float(points if points is not None else link.question_point or 0)
 
         if question.question_type == QuestionType.essay:
             essays = (
@@ -312,7 +313,10 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
 
 def _recompute_attempt_score(db: Session, attempt_id: int) -> Attempt:
     mcq_rows = (
-        db.query(AttemptQuestion.question_point, Option.is_correct)
+        db.query(
+            func.coalesce(AttemptQuestion.question_point_snapshot, AttemptQuestion.question_point),
+            Option.is_correct,
+        )
         .join(
             MCQAnswer,
             (MCQAnswer.attempt_id == AttemptQuestion.attempt_id) & (MCQAnswer.question_id == AttemptQuestion.question_id),
@@ -446,7 +450,8 @@ def get_student_attempt_detail(
     correct_count = 0
     for index, link in enumerate(links, start=1):
         question = link.question
-        max_points = float(link.question_point) if link.question_point else 0
+        points = link.question_point_snapshot
+        max_points = float(points if points is not None else link.question_point or 0)
 
         if question.question_type == QuestionType.essay:
             essay = (
@@ -555,7 +560,11 @@ def list_essay_answers(
             "questionId": question.question_id,
             "question": question.question_text,
             "answer": essay.answer_text,
-            "maxPoints": float(attempt_question.question_point) if attempt_question.question_point else 0,
+            "maxPoints": float(
+                attempt_question.question_point_snapshot
+                if attempt_question.question_point_snapshot is not None
+                else attempt_question.question_point or 0
+            ),
             "currentScore": essay.score,
             "status": "graded" if essay.score is not None else "pending",
         }
@@ -592,7 +601,8 @@ def grade_essay_answer(
         .filter(AttemptQuestion.attempt_id == essay.attempt_id, AttemptQuestion.question_id == essay.question_id)
         .first()
     )
-    max_points = float(attempt_question.question_point) if attempt_question and attempt_question.question_point else 0
+    points = attempt_question.question_point_snapshot if attempt_question else None
+    max_points = float(points if points is not None else attempt_question.question_point or 0) if attempt_question else 0
     if payload.score < 0 or payload.score > max_points:
         raise HTTPException(status_code=400, detail=f"Score must be between 0 and {max_points}")
 

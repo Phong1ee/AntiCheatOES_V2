@@ -1,467 +1,100 @@
-import { useEffect, useState } from "react";
-import { Card, CardContent } from "../ui/card";
-import { Button } from "../ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Calendar, CheckCircle2, Clock, EyeOff, XCircle } from "lucide-react";
 import { Badge } from "../ui/badge";
-import { Progress } from "../ui/progress";
-import {
-  CheckCircle2,
-  XCircle,
-  Calendar,
-  Clock,
-  Target,
-  TrendingUp,
-  ArrowLeft,
-  EyeOff,
-  FileText,
-} from "lucide-react";
-import { apiClient } from "../../services/api-client";
-
-interface QuestionResult {
-  id: number;
-  type: "mcq" | "essay";
-  topic?: string | null;
-  isCorrect?: boolean;
-  question: string;
-  options?: string[];
-  studentAnswer?: string | null;
-  correctAnswer?: string | null;
-  points?: number;
-  score?: number | null;
-}
-
-interface ExamResultDetail {
-  id: string; // id của submission
-  examTitle: string;
-  subject: string;
-  date: string;
-  duration: string;
-  timeTaken: string;
-  scoreVisible: boolean;
-  allowViewDetails: boolean;
-  score?: number; // raw: số câu đúng (fallback)
-  correctAnswers?: number; // số câu đúng
-  totalQuestions?: number; // tổng số câu
-  questions?: QuestionResult[];
-  attemptStatus?: "submitted" | "terminated";
-  terminated?: boolean;
-}
+import { Button } from "../ui/button";
+import { Card, CardContent } from "../ui/card";
+import { studentResultService } from "../../services/student-result.service";
+import type { StudentExamResult, StudentResultQuestion } from "../../types/student-result";
 
 interface ExamResultDetailsPageProps {
-  examId: string; // thực chất là submissionId
+  examId: string;
   onBack: () => void;
 }
 
-export function ExamResultDetailsPage({
-  examId,
-  onBack,
-}: ExamResultDetailsPageProps) {
-  const [exam, setExam] = useState<ExamResultDetail | null>(null);
+function isAnswered(question: StudentResultQuestion): boolean {
+  return Boolean(question.studentAnswer?.trim());
+}
+
+function questionPoints(question: StudentResultQuestion): string {
+  if (question.gradingStatus === "pending") return `Maximum: ${question.maxPoints} points`;
+  return `Awarded: ${question.awardedPoints ?? 0} / ${question.maxPoints} points`;
+}
+
+export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageProps) {
+  const [exam, setExam] = useState<StudentExamResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchDetail = async () => {
-      try {
-        setLoading(true);
-        setLoadError(null);
-
-        const { data } = await apiClient.get<{ result: ExamResultDetail }>(`/api/results/${examId}`);
-        const result = data.result;
-
-        const mapped: ExamResultDetail = {
-          id: result.id,
-          examTitle: result.examTitle,
-          subject: result.subject,
-          date: result.date,
-          duration: result.duration,
-          timeTaken: result.timeTaken,
-          scoreVisible: result.scoreVisible,
-          allowViewDetails: result.allowViewDetails,
-          score: result.score,
-          correctAnswers: result.correctAnswers,
-          totalQuestions: result.totalQuestions,
-          questions: result.questions || [],
-          attemptStatus: result.attemptStatus,
-          terminated: result.terminated,
-        };
-
-        setExam(mapped);
-      } catch (err) {
-        console.error(err);
-        setLoadError(err instanceof Error ? err.message : "Error loading exam result");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDetail();
-  }, [examId]);
-
-  const getScoreColor = (percent: number) => {
-    if (percent >= 90) return "text-green-600";
-    if (percent >= 80) return "text-blue-600";
-    if (percent >= 70) return "text-teal-600";
-    if (percent >= 60) return "text-yellow-600";
-    return "text-red-600";
+  const loadDetail = async () => {
+    try {
+      setLoading(true);
+      setLoadError(null);
+      setExam(await studentResultService.getDetail(Number(examId)));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load exam result.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const getScoreGrade = (percent: number) => {
-    if (percent >= 90) return { grade: "A", color: "bg-green-500" };
-    if (percent >= 80) return { grade: "B", color: "bg-blue-500" };
-    if (percent >= 70) return { grade: "C", color: "bg-teal-500" };
-    if (percent >= 60) return { grade: "D", color: "bg-yellow-500" };
-    return { grade: "F", color: "bg-red-500" };
-  };
+  useEffect(() => { void loadDetail(); }, [examId]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-gray-600">Loading exam result...</p>
-      </div>
-    );
-  }
+  const answeredCount = useMemo(
+    () => exam?.questions?.filter(isAnswered).length ?? null,
+    [exam],
+  );
 
-  if (loadError || !exam) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="p-8 text-center">
-            <p className="text-gray-600">{loadError || "Exam not found"}</p>
-            <Button onClick={onBack} className="mt-4">
-              <ArrowLeft className="size-4 mr-2" />
-              Back to Results
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><p className="text-gray-600">Loading exam result...</p></div>;
+  if (loadError || !exam) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Card className="max-w-md"><CardContent className="p-8 text-center space-y-4"><p className="text-red-600">{loadError || "Exam not found"}</p><div className="flex justify-center gap-2"><Button variant="outline" onClick={onBack}>Back to Results</Button><Button onClick={() => void loadDetail()}>Retry</Button></div></CardContent></Card></div>;
 
-  // Tính % giống ExamResults: correct / total * 100
-  const rawCorrect = exam.correctAnswers ?? exam.score ?? 0;
-  const total =
-    exam.totalQuestions && exam.totalQuestions > 0
-      ? exam.totalQuestions
-      : undefined;
-  const computedPercent =
-    total !== undefined ? Math.round((rawCorrect / total) * 100) : undefined;
-
-  const scorePercent =
-    computedPercent !== undefined
-      ? Math.min(100, Math.max(0, computedPercent))
-      : undefined;
-
-  const scoreGrade =
-    scorePercent !== undefined && exam.scoreVisible
-      ? getScoreGrade(scorePercent)
-      : null;
-
-  const topicPerformance =
-    exam.questions && exam.questions.length > 0
-      ? exam.questions.reduce((acc, q) => {
-          const topic = q.topic || "General";
-          if (!acc[topic]) {
-            acc[topic] = { correct: 0, total: 0 };
-          }
-          acc[topic].total++;
-          if (q.isCorrect) acc[topic].correct++;
-          return acc;
-        }, {} as Record<string, { correct: number; total: number }>)
-      : {};
+  const date = exam.date ? new Date(exam.date) : null;
+  const displayDate = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Date unavailable";
+  const isPending = exam.status === "pending";
+  const canShowScore = exam.scoreVisible && exam.score !== null;
+  const resultLabel = canShowScore && !isPending && exam.passingScore !== null
+    ? exam.score >= exam.passingScore ? "Passed" : "Failed"
+    : null;
+  const hasAttemptNumber = typeof exam.attemptNumber === "number" && exam.attemptNumber > 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50">
-      <div className="container mx-auto px-4 py-6 max-w-5xl">
-        {/* Back Button */}
-        <Button onClick={onBack} variant="outline" className="mb-6">
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Results
-        </Button>
-
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl text-gray-800 mb-2">{exam.examTitle}</h1>
-          <p className="text-gray-600">{exam.subject}</p>
-        </div>
-
-        <div className="space-y-6">
-          {/* Score summary */}
-          <Card className="bg-gradient-to-r from-teal-50 to-blue-50 border-teal-200">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Your Score</p>
-                  <div className="flex items-center gap-3">
-                    {exam.scoreVisible && scorePercent !== undefined ? (
-                      <>
-                        <span
-                          className={`text-4xl ${getScoreColor(scorePercent)}`}
-                        >
-                          {scorePercent}%
-                        </span>
-                        {scoreGrade && (
-                          <div
-                            className={`${scoreGrade.color} text-white rounded-lg px-4 py-2`}
-                          >
-                            <span className="text-2xl">
-                              Grade {scoreGrade.grade}
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-gray-700">
-                        Score is hidden by instructor.
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {exam.scoreVisible && scorePercent !== undefined && (
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Performance</p>
-                    <Progress value={scorePercent} className="w-32 h-3 mt-2" />
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-teal-200">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Correct Answers</p>
-                  <p className="text-xl text-green-600 flex items-center gap-2">
-                    <CheckCircle2 className="size-5" />
-                    {exam.scoreVisible &&
-                    exam.correctAnswers !== undefined &&
-                    exam.totalQuestions !== undefined
-                      ? `${exam.correctAnswers}/${exam.totalQuestions}`
-                      : "Hidden"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Time Taken</p>
-                  <p className="text-xl text-gray-800 flex items-center gap-2">
-                    <Clock className="size-5" />
-                    {exam.timeTaken}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Exam Date</p>
-                  <p className="text-xl text-gray-800 flex items-center gap-2">
-                    <Calendar className="size-5" />
-                    {new Date(exam.date).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Topic performance */}
-          {exam.scoreVisible && Object.keys(topicPerformance).length > 0 && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <TrendingUp className="size-5 text-purple-600" />
-                  </div>
-                  <h3 className="text-lg text-gray-800">
-                    Performance by Topic
-                  </h3>
-                </div>
-
-                <div className="space-y-3">
-                  {Object.entries(topicPerformance).map(([topic, stats]) => {
-                    const percentage = Math.round(
-                      (stats.correct / stats.total) * 100
-                    );
-                    return (
-                      <div key={topic}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm text-gray-700">{topic}</span>
-                          <span className="text-sm text-gray-600">
-                            {stats.correct}/{stats.total} ({percentage}%)
-                          </span>
-                        </div>
-                        <Progress value={percentage} className="h-2" />
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Questions review */}
-          {exam.allowViewDetails &&
-          exam.questions &&
-          exam.questions.length > 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="p-2 bg-teal-100 rounded-lg">
-                    <Target className="size-5 text-teal-600" />
-                  </div>
-                  <h3 className="text-lg text-gray-800">Questions Review</h3>
-                </div>
-
-                <div className="space-y-4">
-                  {exam.questions.map((question, index) => (
-                    <div key={question.id}>
-                      {question.type === "mcq" ? (
-                        <div
-                          className={`p-4 rounded-lg border ${
-                            question.isCorrect
-                              ? "bg-green-50 border-green-200"
-                              : "bg-red-50 border-red-200"
-                          }`}
-                        >
-                          <div className="flex justify-between items-start gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-gray-700">
-                                Q{index + 1}.
-                              </span>
-                              <p className="text-gray-800">
-                                {question.question}
-                              </p>
-                            </div>
-                            {question.topic && (
-                              <Badge
-                                variant="outline"
-                                className="text-xs bg-white"
-                              >
-                                {question.topic}
-                              </Badge>
-                            )}
-                          </div>
-
-                          <div className="mt-3 space-y-2">
-                            {question.options?.map((option, optIndex) => {
-                              const isStudentChoice =
-                                option === question.studentAnswer;
-                              const isCorrectChoice =
-                                option === question.correctAnswer;
-
-                              let optionClasses =
-                                "w-full text-left px-3 py-2 rounded-md border text-sm flex items-center justify-between";
-                              if (isCorrectChoice) {
-                                optionClasses +=
-                                  " border-green-300 bg-green-50 text-green-800";
-                              } else if (isStudentChoice && !isCorrectChoice) {
-                                optionClasses +=
-                                  " border-red-300 bg-red-50 text-red-800";
-                              } else {
-                                optionClasses +=
-                                  " border-gray-200 bg-white text-gray-700";
-                              }
-
-                              return (
-                                <button
-                                  key={optIndex}
-                                  type="button"
-                                  className={optionClasses}
-                                  disabled
-                                >
-                                  <span>{option}</span>
-                                  <span className="flex items-center gap-2 text-xs">
-                                    {/* 1. User chọn đúng → CHỈ hiện "Your Choice" màu xanh */}
-                                    {isStudentChoice && isCorrectChoice && (
-                                      <span className="flex items-center gap-1 text-green-700">
-                                        <CheckCircle2 className="size-3" />
-                                        Your Choice
-                                      </span>
-                                    )}
-
-                                    {/* 2. Đáp án đúng nhưng user KHÔNG chọn → hiện "Correct" */}
-                                    {!isStudentChoice && isCorrectChoice && (
-                                      <span className="flex items-center gap-1 text-green-700">
-                                        <CheckCircle2 className="size-3" />
-                                        Correct
-                                      </span>
-                                    )}
-
-                                    {/* 3. User chọn sai → hiện "Your Choice" màu đỏ */}
-                                    {isStudentChoice && !isCorrectChoice && (
-                                      <span className="flex items-center gap-1 text-red-700">
-                                        <XCircle className="size-3" />
-                                        Your Choice
-                                      </span>
-                                    )}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className={`p-4 rounded-lg border ${
-                            question.isCorrect
-                              ? "bg-green-50 border-green-200"
-                              : "bg-yellow-50 border-yellow-200"
-                          }`}
-                        >
-                          <div className="flex justify-between items-start gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-gray-700">
-                                Q{index + 1}.
-                              </span>
-                              <p className="text-gray-800">
-                                {question.question}
-                              </p>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className="text-xs bg-white flex items-center gap-1"
-                            >
-                              <FileText className="size-3" />
-                              Essay
-                            </Badge>
-                          </div>
-
-                          <div className="mt-3 space-y-3">
-                            <div>
-                              <p className="text-xs font-medium text-gray-600 mb-1">
-                                Your Answer
-                              </p>
-                              <div className="p-3 rounded-md bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap">
-                                {question.studentAnswer ||
-                                  "No answer provided."}
-                              </div>
-                            </div>
-                            {question.correctAnswer && (
-                              <div>
-                                <p className="text-xs font-medium text-gray-600 mb-1">
-                                  Model Answer
-                                </p>
-                                <div className="p-3 rounded-md bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap">
-                                  {question.correctAnswer}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="bg-yellow-50 border-yellow-200">
-              <CardContent className="py-8">
-                <div className="flex items-center justify-center gap-3 text-yellow-800">
-                  <EyeOff className="size-6" />
-                  <p>
-                    Review details are not available based on instructor
-                    settings.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50"><div className="container mx-auto px-4 py-6 max-w-5xl">
+      <Button onClick={onBack} variant="outline" className="mb-6"><ArrowLeft className="size-4 mr-2" />Back to Results</Button>
+      <div className="mb-6"><h1 className="text-3xl text-gray-800 mb-2">{exam.examTitle}</h1><p className="text-gray-600">{exam.subject}</p></div>
+      <div className="space-y-6">
+        <Card className="bg-gradient-to-r from-teal-50 to-blue-50 border-teal-200"><CardContent className="pt-6">
+          {isPending ? <p className="text-xl text-yellow-800">Awaiting essay grading</p> : canShowScore ? <div><p className="text-sm text-gray-600 mb-1">Score</p><p className="text-4xl text-teal-700">{exam.score} / {exam.totalPoints} points</p></div> : <p className="text-xl text-gray-700">Result is hidden by Teacher</p>}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 mt-4 border-t border-teal-200">
+            {canShowScore && <><div><p className="text-sm text-gray-600">Passing Score</p><p className="text-lg text-gray-800">{exam.passingScore !== null ? `${exam.passingScore} points` : "Not available"}</p></div><div><p className="text-sm text-gray-600">Result</p><p className={`text-lg ${resultLabel === "Passed" ? "text-green-700" : resultLabel === "Failed" ? "text-red-700" : "text-gray-700"}`}>{resultLabel ?? (isPending ? "Awaiting grading" : "Not available")}</p></div><div><p className="text-sm text-gray-600">Answered</p><p className="text-lg text-gray-800">{exam.allowViewDetails && answeredCount !== null ? `${answeredCount} / ${exam.totalQuestions} questions` : "Not available"}</p></div></>}
+            <div><p className="text-sm text-gray-600">Time Taken</p><p className="text-lg text-gray-800 flex items-center gap-2"><Clock className="size-4" />{exam.timeTaken}</p></div>
+            {hasAttemptNumber && <div><p className="text-sm text-gray-600">Attempt</p><p className="text-lg text-gray-800">{exam.maxAttempts ? `${exam.attemptNumber} / ${exam.maxAttempts}` : `#${exam.attemptNumber}`}</p></div>}
+            <div><p className="text-sm text-gray-600">Exam Date</p><p className="text-lg text-gray-800 flex items-center gap-2"><Calendar className="size-4" />{displayDate}</p></div>
+          </div>
+        </CardContent></Card>
+        {exam.terminated && <Card className="border-orange-200 bg-orange-50"><CardContent className="py-4 text-orange-800">This attempt was terminated. Result visibility rules still apply.</CardContent></Card>}
+        {exam.allowViewDetails && exam.questions?.length ? <Card><CardContent className="pt-6"><h2 className="text-lg text-gray-800 mb-4">Questions Review</h2><div className="space-y-4">
+          {exam.questions.map((question, index) => {
+            const correctAnswers = question.correctAnswers ?? (question.correctAnswer ? [question.correctAnswer] : []);
+            const isIncorrectMcq = question.type === "mcq" && question.gradingStatus === "graded" && !question.isCorrect;
+            const essayClass = question.gradingStatus === "pending"
+              ? "bg-amber-50 border-amber-200"
+              : question.gradingStatus === "blank"
+                ? "bg-slate-50 border-slate-200"
+                : "bg-sky-50 border-sky-200";
+            return <div key={question.id} className={`p-4 rounded-lg border ${question.type === "essay" ? essayClass : question.isCorrect ? "bg-green-50 border-green-200" : isIncorrectMcq ? "bg-red-50 border-red-200" : "bg-white border-gray-200"}`}>
+              <div className="flex justify-between gap-2"><p className="text-gray-800"><span className="font-medium">Q{index + 1}.</span> {question.question}</p><Badge variant="outline">{question.type === "essay" ? "Essay" : "MCQ"}</Badge></div>
+              {question.type === "mcq" && <div className="mt-3 space-y-2">{question.options?.map((option) => {
+                const isCorrect = correctAnswers.includes(option);
+                const isStudentChoice = option === question.studentAnswer;
+                const optionClass = isCorrect ? "bg-green-100 border-green-300 text-green-900" : isStudentChoice ? "bg-red-100 border-red-300 text-red-900" : isIncorrectMcq ? "bg-red-50 border-red-100" : "bg-white border-gray-200";
+                return <div key={option} className={`p-2 border rounded text-sm flex justify-between ${optionClass}`}><span>{option}</span><span className="flex gap-3">{isStudentChoice && <span className="flex items-center gap-1 text-blue-700"><XCircle className="size-3" />Your Choice</span>}{isCorrect && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-3" />Correct</span>}</span></div>;
+              })}</div>}
+              {question.type === "mcq" && !isAnswered(question) && <p className="mt-3 text-sm text-gray-600">No answer submitted</p>}
+              {question.type === "essay" && <div className="mt-3"><p className="text-xs text-gray-600 mb-1">Your Answer</p><div className="p-3 border rounded text-sm whitespace-pre-wrap bg-white/70">{isAnswered(question) ? question.studentAnswer : "No answer submitted"}</div>{question.gradingStatus === "pending" && <p className="mt-2 text-sm text-amber-800">Awaiting grading</p>}</div>}
+              <p className="mt-3 text-sm text-gray-700">{questionPoints(question)}</p>
+            </div>;
+          })}
+        </div></CardContent></Card> : <Card className="bg-yellow-50 border-yellow-200"><CardContent className="py-8 flex justify-center gap-3 text-yellow-800"><EyeOff className="size-6" /><p>Review details are not available based on instructor settings.</p></CardContent></Card>}
       </div>
-    </div>
+    </div></div>
   );
 }

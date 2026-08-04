@@ -13,6 +13,7 @@ interface RawQuestion {
 
 interface RawExam {
   exam_id: number;
+  examcode?: string | null;
   title: string;
   duration_minutes: number;
   status: "upcoming" | "open" | "completed" | "closed";
@@ -58,6 +59,12 @@ export interface StudentExamListItem {
   openAttemptId: number | null;
   canResume: boolean;
   requiresFullscreen: boolean;
+  examCode: string | null;
+}
+
+export interface StudentExamListResponse {
+  exams: StudentExamListItem[];
+  serverTime: string;
 }
 
 export interface VerifyCodeResult {
@@ -101,16 +108,26 @@ const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSetti
   fullscreenExitThreshold: Number(settings?.force_fullscreen_thresh ?? settings?.fullscreenExitThreshold ?? 0),
 });
 
+const normalizeExam = (exam: RawExam): StudentExamListItem => ({
+  id: String(exam.exam_id), title: exam.title, subject: exam.description ?? "General",
+  startTime: exam.start_time, endTime: exam.end_time, durationMinutes: exam.duration_minutes,
+  status: exam.status, maxAttempts: exam.max_attempt, attemptsUsed: exam.attempts_used,
+  hasOpenAttempt: Boolean(exam.has_open_attempt), openAttemptId: exam.open_attempt_id ?? null,
+  canResume: Boolean(exam.can_resume), requiresFullscreen: Boolean(exam.requires_fullscreen),
+  examCode: exam.examcode ?? null,
+});
+
 export const studentExamService = {
   async list(): Promise<StudentExamListItem[]> {
-    const { data } = await apiClient.get<{ exams?: RawExam[] }>("/api/exams");
-    return (data.exams ?? []).map((exam) => ({
-      id: String(exam.exam_id), title: exam.title, subject: exam.description ?? "General",
-      startTime: exam.start_time, endTime: exam.end_time, durationMinutes: exam.duration_minutes,
-      status: exam.status, maxAttempts: exam.max_attempt, attemptsUsed: exam.attempts_used,
-      hasOpenAttempt: Boolean(exam.has_open_attempt), openAttemptId: exam.open_attempt_id ?? null,
-      canResume: Boolean(exam.can_resume), requiresFullscreen: Boolean(exam.requires_fullscreen),
-    }));
+    return (await this.listWithMeta()).exams;
+  },
+
+  async listWithMeta(): Promise<StudentExamListResponse> {
+    const { data } = await apiClient.get<{ exams?: RawExam[]; serverTime?: string }>("/api/exams");
+    return {
+      exams: (data.exams ?? []).map(normalizeExam),
+      serverTime: data.serverTime ?? new Date().toISOString(),
+    };
   },
 
   async verifyCode(examId: string | number, code: string): Promise<VerifyCodeResult> {

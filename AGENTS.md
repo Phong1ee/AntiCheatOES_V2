@@ -130,13 +130,13 @@ Important schema notes:
 * `user.id` is the internal numeric primary key.
 * `user.school_id` is the external student, teacher, or admin identifier.
 * `student_exam.student_id` references `user.school_id`.
-* `attempt.student_id` references `user.id`.
+* `attempt.student_id` references `user.school_id`.
 * `exam.examcode` stores the code students must enter before taking an exam.
 * `exam.result_visibility` controls whether students can view results.
 * `exam_event` is used for anti-cheat logging.
-* `teacher_subject.teacher_id` references `user.id`.
+* `teacher_subject.teacher_id` references `user.school_id`.
 * `teacher_subject.subject_id` references `subject.subject_id`.
-* `question.created_by` references the internal authenticated `user.id`.
+* `question.created_by` references the authenticated user's `user.school_id`.
 * `question.subject_id` identifies the Subject of a reusable question.
 * `chapter_question` stores the many-to-many relationship between Question and
   Chapter.
@@ -145,6 +145,32 @@ Important schema notes:
 * `chapter_lo` stores the relationship between Chapter and Learning Objective.
 * `question_revision` stores snapshots of approved questions before a Teacher
   edits them.
+
+### User Reference Convention
+
+`user.id` remains the internal `INT AUTO_INCREMENT` primary key. Do not
+change its type or use it for these cross-table user references. The following
+columns are `VARCHAR(30)` foreign keys to `user.school_id`:
+
+* `attempt.student_id`
+* `student_class.student_id`
+* `class.teacher_id`
+* `teacher_subject.teacher_id`
+* `teacher_subject.assigned_by`
+* `question.created_by`
+* `question_revision.edited_by`
+* `question_revision.approved_by`
+* `user.locked_by`
+* `user.deleted_by`
+
+`student_exam.student_id` and `exam.manage_by` also reference
+`user.school_id`.
+
+When joining any of these columns, compare against `User.school_id`, not
+`User.id`. Student attempt, result, and ownership flows must pass the
+authenticated user's `school_id` to queries that filter these columns. Keep
+internal `user.id` only for user-management endpoints or logic that explicitly
+uses the User table primary key.
 
 Question Bank relationship rules:
 

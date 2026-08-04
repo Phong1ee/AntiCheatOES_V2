@@ -769,13 +769,21 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
 def _finalize_essay_answers(cursor, attempt_id: int, questions: dict[int, dict]) -> None:
     """Ensure every Essay snapshot has a final row and only meaningful answers remain pending."""
     for question in questions.values():
-        if _question_type(question) != "essay":
+        if str(_question_type(question)).lower() != "essay":
             continue
         cursor.execute(
-            "SELECT answer_text FROM essay_answers WHERE attempt_id = %s AND question_id = %s FOR UPDATE",
+            "SELECT answer_text, score FROM essay_answers WHERE attempt_id = %s AND question_id = %s FOR UPDATE",
             (attempt_id, question["question_id"]),
         )
         existing = cursor.fetchone()
+        # A finalized attempt may be revisited after Teacher grading. Never erase that grade.
+        if existing and existing.get("score") is not None:
+            if not str(existing.get("answer_text") or "").strip() and existing.get("answer_text") != "":
+                cursor.execute(
+                    "UPDATE essay_answers SET answer_text = %s WHERE attempt_id = %s AND question_id = %s",
+                    ("", attempt_id, question["question_id"]),
+                )
+            continue
         normalized_answer = (
             ""
             if not existing or existing.get("answer_text") is None or not str(existing["answer_text"]).strip()

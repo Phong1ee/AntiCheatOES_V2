@@ -115,9 +115,11 @@ class ExamController:
     def getStudentExams(school_id: str, role: str):
         """Get all exams assigned to a student."""
         exams = examModel.getStudentExams(school_id)
+        server_time = examModel.get_database_now()
         return {
             "success": True,
-            "exams": exams
+            "serverTime": f"{server_time.replace(microsecond=0).isoformat()}Z",
+            "exams": exams,
         }
 
 

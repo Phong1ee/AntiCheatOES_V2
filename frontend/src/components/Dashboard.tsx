@@ -8,7 +8,7 @@ import { ExamResults } from './ExamResults';
 import { ExamResultDetailsPage } from './exam-results/ExamResultDetailsPage';
 import { ProfileSettings } from './ProfileSettings';
 import { Preferences } from './Preferences';
-import { mockExams } from '../data/mockExams';
+import { useStudentDashboardData } from '../hooks/useStudentDashboardData';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -18,6 +18,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
   const [viewingResultId, setViewingResultId] = useState<string | null>(null);
+  const dashboardData = useStudentDashboardData();
 
   const handleEnterExam = (examId: string) => {
     setCurrentExamId(examId);
@@ -44,12 +45,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   if (currentExamId) {
-    const exam = mockExams.find(e => e.id === currentExamId);
     return (
       <ExamInterface
         examId={currentExamId}
         onExit={handleExitExam}
-        settings={exam?.settings}
       />
     );
   }
@@ -75,10 +74,21 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 onEnterExam={handleEnterExam}
                 // 🔁 View Results ở phần dashboard -> sang tab Exam Results
                 onViewResults={handleViewResultsFromMyExams}
+                exams={dashboardData.exams}
+                loading={dashboardData.examsLoading}
+                loadError={dashboardData.examsError}
+                onRetry={dashboardData.retry}
               />
             </div>
             <div className="lg:col-span-1">
-              <InfoSidebar />
+              <InfoSidebar
+                results={dashboardData.results}
+                loading={dashboardData.resultsLoading}
+                loadError={dashboardData.resultsError}
+                onRetry={dashboardData.retry}
+                exams={dashboardData.exams}
+                serverTime={dashboardData.serverTime}
+              />
             </div>
           </div>
         )}
@@ -89,6 +99,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
               onEnterExam={handleEnterExam}
               // 🔁 View Results ở tab My Exams cũng giống vậy
               onViewResults={handleViewResultsFromMyExams}
+              exams={dashboardData.exams}
+              loading={dashboardData.examsLoading}
+              loadError={dashboardData.examsError}
+              onRetry={dashboardData.retry}
             />
           </div>
         )}

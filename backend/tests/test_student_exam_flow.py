@@ -154,6 +154,20 @@ class _SelectionConnection:
 
 
 class StudentExamFlowTests(unittest.TestCase):
+    def test_student_exam_list_includes_database_server_time(self):
+        database_now = datetime(2026, 8, 4, 10, 0, 1, 987654)
+        with (
+            patch.object(examModel, "getStudentExams", return_value=[]),
+            patch.object(examModel, "get_database_now", return_value=database_now),
+        ):
+            result = ExamController.getStudentExams("S1", "student")
+
+        self.assertEqual(result, {
+            "success": True,
+            "serverTime": "2026-08-04T10:00:01Z",
+            "exams": [],
+        })
+
     def test_verify_code_returns_only_fullscreen_related_settings(self):
         with (
             patch.object(ExamController, "_validateStudentExamAccess", return_value={}) as validate,

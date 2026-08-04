@@ -1,13 +1,54 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Progress } from '../ui/progress';
-import { Bell, Camera, Mic, Award, TrendingUp, Clock } from 'lucide-react';
+import { Button } from '../ui/button';
+import { Camera, Mic, Award, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
+import type { StudentExamResult } from '../../types/student-result';
+import type { StudentExamListItem } from '../../services/student-exam.service';
+import { selectActiveAndUpcomingExams } from '../../utils/student-exam-dashboard';
+import { NextExamWidget } from './NextExamWidget';
 import { ExamCodesWidget } from './ExamCodesWidget';
 
-export function InfoSidebar() {
+interface InfoSidebarProps {
+  results: StudentExamResult[];
+  loading: boolean;
+  loadError: string | null;
+  onRetry: () => void;
+  exams: StudentExamListItem[];
+  serverTime: string | null;
+}
+
+const formatDate = (date: string | null) => {
+  if (!date) return 'Date unavailable';
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime()) ? 'Date unavailable' : parsed.toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+};
+
+const recentResults = (results: StudentExamResult[]) => [...results]
+  .sort((first, second) => (second.date ? new Date(second.date).getTime() : 0) - (first.date ? new Date(first.date).getTime() : 0))
+  .slice(0, 3);
+
+export function InfoSidebar({ results, loading, loadError, onRetry, exams, serverTime }: InfoSidebarProps) {
+  const completedExamIds = new Set(results
+    .filter((result) => result.attemptStatus === 'submitted' || result.attemptStatus === 'terminated')
+    .map((result) => result.examId));
+  const scoredResults = results.filter((result) => (
+    result.status === 'published'
+    && result.scoreVisible
+    && result.score !== null
+    && result.totalPoints > 0
+  ));
+  const averageScore = scoredResults.length
+    ? scoredResults.reduce((sum, result) => sum + (result.score! / result.totalPoints) * 100, 0) / scoredResults.length
+    : null;
+  const passableResults = scoredResults.filter((result) => result.passingScore !== null);
+  const passedCount = passableResults.filter((result) => result.score! >= result.passingScore!).length;
+  const serverNow = serverTime ? new Date(serverTime) : new Date();
+  const activeAndUpcomingExams = selectActiveAndUpcomingExams(exams, serverNow);
+
   return (
     <div className="space-y-6">
-      {/* Quick Stats */}
       <Card className="shadow-lg rounded-2xl border-0">
         <CardHeader>
           <CardTitle className="text-lg text-gray-800">Quick Stats</CardTitle>
@@ -20,7 +61,7 @@ export function InfoSidebar() {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Exams Taken</p>
-                <p className="text-xl text-gray-800">24</p>
+                <p className="text-xl text-gray-800">{completedExamIds.size}</p>
               </div>
             </div>
           </div>
@@ -32,80 +73,29 @@ export function InfoSidebar() {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Average Score</p>
-                <p className="text-xl text-gray-800">85.5%</p>
+                <p className="text-xl text-gray-800">
+                  {averageScore === null ? 'No scores available yet' : `${averageScore.toFixed(1)} / 100`}
+                </p>
               </div>
             </div>
           </div>
 
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-600">Overall Progress</span>
-              <span className="text-teal-600">86%</span>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-100 rounded-lg">
+              <CheckCircle2 className="size-5 text-green-600" />
             </div>
-            <Progress value={86} className="h-2" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Upcoming Exam Countdown */}
-      <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-teal-500 to-blue-600 text-white">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Clock className="size-5" />
-            Next Exam
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-sm opacity-90">Database Systems Midterm</p>
-          <div className="grid grid-cols-3 gap-2 mt-4">
-            <div className="bg-white/20 backdrop-blur rounded-lg p-3 text-center">
-              <p className="text-2xl">02</p>
-              <p className="text-xs opacity-75">Days</p>
-            </div>
-            <div className="bg-white/20 backdrop-blur rounded-lg p-3 text-center">
-              <p className="text-2xl">14</p>
-              <p className="text-xs opacity-75">Hours</p>
-            </div>
-            <div className="bg-white/20 backdrop-blur rounded-lg p-3 text-center">
-              <p className="text-2xl">32</p>
-              <p className="text-xs opacity-75">Mins</p>
+            <div>
+              <p className="text-sm text-gray-600">Passed Exams</p>
+              <p className="text-xl text-gray-800">{passedCount} / {passableResults.length}</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* System Notifications */}
-      <Card className="shadow-lg rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2 text-gray-800">
-            <Bell className="size-5 text-teal-600" />
-            Notifications
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <div className="flex items-start gap-2">
-              <Badge className="bg-blue-600 hover:bg-blue-600 mt-0.5">New</Badge>
-              <div className="flex-1">
-                <p className="text-sm text-gray-800">Web Development exam schedule updated</p>
-                <p className="text-xs text-gray-500 mt-1">2 hours ago</p>
-              </div>
-            </div>
-          </div>
+      <NextExamWidget exams={activeAndUpcomingExams} serverTime={serverTime} onCountdownElapsed={onRetry} />
 
-          <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-            <div className="flex items-start gap-2">
-              <Badge variant="outline" className="border-yellow-600 text-yellow-700 mt-0.5">Reminder</Badge>
-              <div className="flex-1">
-                <p className="text-sm text-gray-800">Data Structures exam in 3 days</p>
-                <p className="text-xs text-gray-500 mt-1">1 day ago</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <ExamCodesWidget exams={activeAndUpcomingExams} />
 
-      {/* Pre-Exam Checklist */}
       <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
         <CardHeader>
           <CardTitle className="text-lg text-gray-800">Pre-Exam Checklist</CardTitle>
@@ -128,38 +118,40 @@ export function InfoSidebar() {
         </CardContent>
       </Card>
 
-      {/* Recent Exam History */}
       <Card className="shadow-lg rounded-2xl border-0">
         <CardHeader>
           <CardTitle className="text-lg text-gray-800">Recent Results</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div>
-              <p className="text-sm text-gray-800">Operating Systems Quiz</p>
-              <p className="text-xs text-gray-500">Nov 10, 2025</p>
+          {loading && <p className="text-sm text-gray-600">Loading recent results...</p>}
+          {loadError && (
+            <div className="space-y-2">
+              <p className="text-sm text-red-600">{loadError}</p>
+              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
             </div>
-            <Badge className="bg-green-100 text-green-700 hover:bg-green-100">92%</Badge>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div>
-              <p className="text-sm text-gray-800">Computer Networks Final</p>
-              <p className="text-xs text-gray-500">Nov 5, 2025</p>
+          )}
+          {!loading && !loadError && results.length === 0 && (
+            <p className="text-sm text-gray-600">No results available yet.</p>
+          )}
+          {!loading && !loadError && recentResults(results).map((result) => (
+            <div key={result.attemptId} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-lg">
+              <div className="min-w-0">
+                <p className="text-sm text-gray-800 truncate">{result.examTitle}</p>
+                <p className="text-xs text-gray-500">{formatDate(result.date)}</p>
+              </div>
+              {result.scoreVisible && result.score !== null ? (
+                <Badge className="bg-teal-100 text-teal-700 hover:bg-teal-100 whitespace-nowrap">
+                  {result.score} / {result.totalPoints}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-gray-600 whitespace-nowrap">
+                  {!result.scoreVisible ? 'Result hidden' : 'Awaiting grading'}
+                </Badge>
+              )}
             </div>
-            <Badge className="bg-green-100 text-green-700 hover:bg-green-100">88%</Badge>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div>
-              <p className="text-sm text-gray-800">Algorithms Midterm</p>
-              <p className="text-xs text-gray-500">Nov 1, 2025</p>
-            </div>
-            <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">78%</Badge>
-          </div>
+          ))}
         </CardContent>
       </Card>
-
-      {/* Exam Codes Widget */}
-      <ExamCodesWidget />
     </div>
   );
 }

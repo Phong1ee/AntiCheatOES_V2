@@ -40,11 +40,14 @@ class _EssayCursor:
             self.fetchone_value = dict(self.attempt)
         elif "FROM attempt_question aq" in normalized:
             self.fetchall_value = list(self.questions)
-        elif normalized.startswith("SELECT answer_text FROM essay_answers"):
+        elif normalized.startswith("SELECT answer_text, score FROM essay_answers"):
             self.fetchone_value = self.essays.get(int(params[1]))
         elif normalized.startswith("INSERT INTO essay_answers"):
             _, question_id, answer_text, score = params
             self.essays[int(question_id)] = {"answer_text": answer_text, "score": score}
+        elif normalized.startswith("UPDATE essay_answers SET answer_text"):
+            _answer_text, _attempt_id, question_id = params
+            self.essays[int(question_id)]["answer_text"] = _answer_text
         elif normalized.startswith("SELECT question_id, selected_option_id"):
             self.fetchall_value = []
         elif normalized.startswith("SELECT COUNT(*) AS pending"):
@@ -165,6 +168,13 @@ class EssayFinalizationTests(unittest.TestCase):
         self.assertTrue(second["idempotent"])
         self.assertEqual(len(cursor.essays), 1)
         self.assertFalse(second["essayPending"])
+
+    def test_finalize_preserves_a_teacher_graded_essay(self):
+        existing = {11: {"answer_text": "Teacher-reviewed answer", "score": 4}}
+        result, cursor, _ = self._finalize([essay_question(11)], [], existing=existing)
+        self.assertEqual(cursor.essays[11], existing[11])
+        self.assertEqual(result["score"], Decimal("0.00"))
+        self.assertFalse(result["essayPending"])
 
 
 if __name__ == "__main__":

@@ -44,39 +44,60 @@ const statusConfig = {
 interface ExamListProps {
   onEnterExam?: (examId: string) => void;
   onViewResults?: (examId: string) => void;
+  exams?: StudentExamListItem[];
+  loading?: boolean;
+  loadError?: string | null;
+  onRetry?: () => void;
 }
 
-export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
+export function ExamList({
+  onEnterExam,
+  onViewResults,
+  exams: suppliedExams,
+  loading: suppliedLoading,
+  loadError: suppliedLoadError,
+  onRetry,
+}: ExamListProps) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("date");
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
-  const [exams, setExams] = useState<Exam[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fetchedExams, setFetchedExams] = useState<Exam[]>([]);
+  const [fetchedLoading, setFetchedLoading] = useState(suppliedExams === undefined);
+  const [fetchedLoadError, setFetchedLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchExams = async () => {
+  const fetchExams = async () => {
       try {
-        setLoading(true);
-        setLoadError(null);
+        setFetchedLoading(true);
+        setFetchedLoadError(null);
 
-        setExams(await studentExamService.list());
+        setFetchedExams(await studentExamService.list());
       } catch (err) {
         console.error(err);
-        setLoadError(err instanceof Error ? err.message : "Error loading exams");
+        setFetchedLoadError(err instanceof Error ? err.message : "Error loading exams");
       } finally {
-        setLoading(false);
+        setFetchedLoading(false);
       }
     };
 
-    fetchExams();
-  }, []);
+  useEffect(() => {
+    if (suppliedExams === undefined) void fetchExams();
+  }, [suppliedExams]);
 
-  const filteredExams = exams.filter(
-    (exam) => filterStatus === "all" || exam.status === filterStatus
-  );
+  const exams = suppliedExams ?? fetchedExams;
+  const loading = suppliedLoading ?? fetchedLoading;
+  const loadError = suppliedLoadError ?? fetchedLoadError;
+
+  const filteredExams = exams
+    .filter((exam) => filterStatus === "all" || exam.status === filterStatus)
+    .sort((first, second) => {
+      if (sortBy === "subject") return first.subject.localeCompare(second.subject);
+      if (sortBy === "status") return first.status.localeCompare(second.status);
+      const firstDate = first.startTime ? new Date(first.startTime).getTime() : Number.POSITIVE_INFINITY;
+      const secondDate = second.startTime ? new Date(second.startTime).getTime() : Number.POSITIVE_INFINITY;
+      return firstDate - secondDate;
+    });
 
   const handleViewDetails = (exam: Exam) => {
     setSelectedExam(exam);
@@ -124,14 +145,14 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
 
   const handleResume = async (exam: Exam) => {
     if (!exam.openAttemptId) return;
-    setLoadError(null);
+    setFetchedLoadError(null);
     try {
       if (exam.requiresFullscreen && !document.fullscreenElement) {
         // This runs directly from the Resume Exam button click.
         await document.documentElement.requestFullscreen();
       }
     } catch {
-      setLoadError("Fullscreen permission is required to resume this exam.");
+      setFetchedLoadError("Fullscreen permission is required to resume this exam.");
       return;
     }
     localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
@@ -143,7 +164,12 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
   }
 
   if (loadError) {
-    return <p className="text-red-600">{loadError}</p>;
+    return (
+      <div className="space-y-3">
+        <p className="text-red-600">{loadError}</p>
+        <Button variant="outline" onClick={onRetry ?? fetchExams}>Retry</Button>
+      </div>
+    );
   }
 
   return (

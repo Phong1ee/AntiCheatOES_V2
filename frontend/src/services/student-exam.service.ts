@@ -103,6 +103,7 @@ const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
 
 const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSettings => ({
   autoSubmitOnExpire: Boolean(settings?.auto_submit_on_expire ?? settings?.autoSubmitOnExpire ?? true),
+  sequentialNavigation: Boolean(settings?.sequential_navigation ?? settings?.sequentialNavigation ?? false),
   tabSwitchThreshold: Number(settings?.tab_switch_thresh ?? settings?.tabSwitchThreshold ?? 0),
   copyPasteThreshold: Number(settings?.copy_paste_thresh ?? settings?.copyPasteThreshold ?? 0),
   fullscreenExitThreshold: Number(settings?.force_fullscreen_thresh ?? settings?.fullscreenExitThreshold ?? 0),

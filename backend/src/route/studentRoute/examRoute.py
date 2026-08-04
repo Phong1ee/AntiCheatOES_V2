@@ -133,6 +133,8 @@ async def submit_exam(
         )
     except Exception as e:
         detail = str(e)
+        if detail == "Complete the current question before moving to the next question":
+            raise HTTPException(status_code=409, detail=detail)
         if detail in {"Only students can submit exams", "Attempt does not belong to student"}:
             raise HTTPException(status_code=403, detail=detail)
         if detail in {"User not found", "Attempt not found"}:
@@ -156,6 +158,8 @@ async def save_answer(
         )
     except Exception as e:
         detail = str(e)
+        if detail == "Complete the current question before moving to the next question":
+            raise HTTPException(status_code=409, detail=detail)
         if detail in {"Only students can manage exam attempts", "Attempt does not belong to student"}:
             raise HTTPException(status_code=403, detail=detail)
         if detail in {"User not found", "Exam not found or not assigned to student"}:

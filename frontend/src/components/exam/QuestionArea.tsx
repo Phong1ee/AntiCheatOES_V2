@@ -12,6 +12,9 @@ interface QuestionAreaProps {
   onAnswerChange: (questionId: number, answer: StudentAnswer) => void;
   onPrevious: () => void;
   onNext: () => void;
+  sequentialNavigation: boolean;
+  currentAnswerIsValid: boolean;
+  isSavingNext: boolean;
 }
 
 export function QuestionArea({
@@ -22,6 +25,9 @@ export function QuestionArea({
   onAnswerChange,
   onPrevious,
   onNext,
+  sequentialNavigation,
+  currentAnswerIsValid,
+  isSavingNext,
 }: QuestionAreaProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -91,7 +97,7 @@ export function QuestionArea({
         <Button
           variant="outline"
           onClick={onPrevious}
-          disabled={currentQuestion === 0}
+          disabled={sequentialNavigation || currentQuestion === 0}
           className="px-6"
         >
           <ChevronLeft className="size-4 mr-2" />
@@ -105,10 +111,10 @@ export function QuestionArea({
         <Button
           variant="outline"
           onClick={onNext}
-          disabled={currentQuestion === totalQuestions - 1}
+          disabled={currentQuestion === totalQuestions - 1 || (sequentialNavigation && (!currentAnswerIsValid || isSavingNext))}
           className="px-6"
         >
-          Next
+          {sequentialNavigation ? (isSavingNext ? 'Saving...' : 'Continue') : 'Next'}
           <ChevronRight className="size-4 ml-2" />
         </Button>
       </div>

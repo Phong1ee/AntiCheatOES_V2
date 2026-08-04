@@ -43,9 +43,11 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
   const [violationCount, setViolationCount] = useState(0);
   const [showViolationWarning, setShowViolationWarning] = useState(false);
   const [fullscreenLocked, setFullscreenLocked] = useState(false);
-  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, tabSwitchThreshold: 0, copyPasteThreshold: 0, fullscreenExitThreshold: 0 });
+  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, tabSwitchThreshold: 0, copyPasteThreshold: 0, fullscreenExitThreshold: 0 });
+  const [isSavingNext, setIsSavingNext] = useState(false);
 
   const answersRef = useRef<StudentAnswers>({});
+  const persistedAnsweredRef = useRef(new Set<number>());
   const dirtyRef = useRef(new Set<number>());
   const sequenceRef = useRef(new Map<number, number>());
   const essayTimersRef = useRef(new Map<number, number>());
@@ -58,6 +60,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
   const lastTabViolationRef = useRef(0);
   const fullscreenArmedRef = useRef(false);
   const intentionalFullscreenExitRef = useRef(false);
+  const nextInFlightRef = useRef(false);
 
   const exitFullscreenIntentionally = useCallback(async () => {
     if (!document.fullscreenElement) return;
@@ -85,10 +88,11 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
     if (message) setSubmitError(message);
   }, []);
 
-  const saveQuestion = useCallback(async (questionId: number) => {
-    if (!attemptId || attemptStatus !== "in_progress" || !dirtyRef.current.has(questionId) || !navigator.onLine) return;
+  const saveQuestion = useCallback(async (questionId: number, force = false): Promise<boolean> => {
+    if (!attemptId || attemptStatus !== "in_progress" || !navigator.onLine) return false;
+    if (!dirtyRef.current.has(questionId) && !force) return true;
     const answer = answersRef.current[questionId];
-    if (!answer) return;
+    if (!answer) return false;
     const sequence = (sequenceRef.current.get(questionId) ?? 0) + 1;
     sequenceRef.current.set(questionId, sequence);
     setSaveStatus("Saving");
@@ -96,8 +100,12 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
       const result = await studentExamService.saveAnswer(examId, attemptId, questionId, answer);
       if (sequenceRef.current.get(questionId) === sequence) {
         dirtyRef.current.delete(questionId);
+        if (isAnswered(answer)) persistedAnsweredRef.current.add(questionId);
+        else persistedAnsweredRef.current.delete(questionId);
         setSaveStatus(dirtyRef.current.size ? "Saving" : "Saved");
+        return true;
       }
+      return false;
     } catch (error) {
       if (sequenceRef.current.get(questionId) === sequence) {
         setSaveStatus("Save failed");
@@ -109,6 +117,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
           setSubmitError(message);
         }
       }
+      return false;
     }
   }, [attemptId, attemptStatus, examId, stopAutoSave]);
 
@@ -170,10 +179,17 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
         const restored = await studentExamService.restore(examId, hint.attemptId!);
         setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
+        persistedAnsweredRef.current = new Set(
+          restored.questions.filter((question) => isAnswered(saved[question.id])).map((question) => question.id),
+        );
         const local = localStorage.getItem(draftKey(restored.attempt.attemptId));
         const draft = local ? JSON.parse(local) as StudentAnswers : {};
         answersRef.current = { ...saved, ...draft }; setAnswers(answersRef.current);
         setSettings(restored.settings);
+        if (restored.settings.sequentialNavigation) {
+          const firstUnanswered = restored.questions.findIndex((question) => !isAnswered(saved[question.id]));
+          setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
+        }
         fullscreenArmedRef.current = Boolean(document.fullscreenElement);
         setFullscreenLocked(restored.settings.fullscreenExitThreshold > 0 && !document.fullscreenElement);
         const serverTime = Date.parse(restored.serverTime);
@@ -224,6 +240,39 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
       essayTimersRef.current.set(questionId, window.setTimeout(() => void saveQuestion(questionId), 800));
     } else { void saveQuestion(questionId); }
   };
+
+  const handleNextQuestion = useCallback(async () => {
+    if (!settings.sequentialNavigation) {
+      setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1));
+      return;
+    }
+    if (nextInFlightRef.current || currentQuestion >= questions.length - 1) return;
+    const question = questions[currentQuestion];
+    if (!question || !isAnswered(answersRef.current[question.id])) return;
+    const essayTimer = essayTimersRef.current.get(question.id);
+    if (essayTimer) {
+      window.clearTimeout(essayTimer);
+      essayTimersRef.current.delete(question.id);
+    }
+    if (!navigator.onLine) {
+      setSaveStatus("Offline - changes pending");
+      setSubmitError("You must be online to save and continue.");
+      return;
+    }
+    nextInFlightRef.current = true;
+    const needsSave = dirtyRef.current.has(question.id) || !persistedAnsweredRef.current.has(question.id);
+    if (needsSave) {
+      setIsSavingNext(true);
+      const saved = await saveQuestion(question.id, !dirtyRef.current.has(question.id));
+      setIsSavingNext(false);
+      if (!saved) {
+        nextInFlightRef.current = false;
+        return;
+      }
+    }
+    setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1));
+    nextInFlightRef.current = false;
+  }, [currentQuestion, questions, saveQuestion, settings.sequentialNavigation]);
 
   const handleViolation = useCallback((type: "copy-paste" | "tab-switch" | "fullscreen-exit") => {
     const threshold = type === "copy-paste" ? settings.copyPasteThreshold : type === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold;
@@ -286,10 +335,11 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
+  const currentAnswerIsValid = isAnswered(answers[current.id]);
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} warnings={warnings} />
-    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1))} /></div>
-      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} /></div>
+    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} /></div>
+      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}{terminationFailed && <button className="ml-3 underline" onClick={() => void terminate(violationType)}>Retry termination</button>}</div>}
     <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={violationType === "copy-paste" ? settings.copyPasteThreshold : violationType === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} />

@@ -164,7 +164,7 @@ class ExamController:
                 raise Exception("Only students can verify exam codes")
 
             validated = ExamController._validateStudentExamAccess(school_id, "student", exam_id, code)
-            settings = examModel.getExamSettings(exam_id)
+            settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
 
             return {
                 "success": True,
@@ -176,6 +176,7 @@ class ExamController:
                     "force_fullscreen_thresh": int(settings.get("force_fullscreen_thresh") or 0),
                     "tab_switch_thresh": int(settings.get("tab_switch_thresh") or 0),
                     "copy_paste_thresh": int(settings.get("copy_paste_thresh") or 0),
+                    "sequential_navigation": bool(settings["sequential_navigation"]),
                 },
             }
         except Exception as e:
@@ -232,6 +233,7 @@ class ExamController:
                 "exam": exam,
                 "attempt": {"attempt_id": attempt_id, "attempt_no": attempt["attempt_no"], "status": attempt["status"], "start_time": attempt["start_time"], "lastSavedAt": attempt.get("last_saved_at")},
                 **{**timer, "remainingSeconds": 0},
+                "settings": {"sequential_navigation": False, **examModel.getExamSettings(exam_id)},
                 "questions": [],
             }
 
@@ -246,7 +248,7 @@ class ExamController:
                 "lastSavedAt": attempt.get("last_saved_at"),
             },
             **timer,
-            "settings": examModel.getExamSettings(exam_id),
+            "settings": {"sequential_navigation": False, **examModel.getExamSettings(exam_id)},
             "questions": examModel.getExamQuestions(exam_id, attempt_id),
         }
 

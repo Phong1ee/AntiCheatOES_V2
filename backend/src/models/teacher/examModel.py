@@ -674,7 +674,7 @@ def getExamSettings(exam_id: int):
         cursor.execute(
             """
             SELECT auto_submit_on_expire, tab_switch_thresh, copy_paste_thresh,
-                   force_fullscreen_thresh
+                   force_fullscreen_thresh, sequential_navigation
             FROM exam_setting WHERE exam_id = %s
             """,
             (exam_id,),
@@ -684,6 +684,7 @@ def getExamSettings(exam_id: int):
             "tab_switch_thresh": 0,
             "copy_paste_thresh": 0,
             "force_fullscreen_thresh": 0,
+            "sequential_navigation": False,
         }
     finally:
         cursor.close()
@@ -699,7 +700,7 @@ def _decode_snapshot_options(value):
 def _load_attempt_questions(cursor, attempt_id: int, exam_id: int):
     cursor.execute(
         """
-        SELECT aq.question_id, aq.question_point, aq.question_type_snapshot,
+        SELECT aq.question_id, aq.display_order, aq.question_point, aq.question_type_snapshot,
                aq.question_point_snapshot, aq.options_snapshot, q.question_type
         FROM attempt_question aq
         JOIN attempt a ON a.attempt_id = aq.attempt_id
@@ -764,6 +765,59 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
         """,
         (attempt_id, question["question_id"], int(selected_option_id)),
     )
+
+
+def _answered_question_ids(cursor, attempt_id: int) -> set[int]:
+    cursor.execute(
+        "SELECT question_id FROM mcq_answers WHERE attempt_id = %s AND selected_option_id IS NOT NULL",
+        (attempt_id,),
+    )
+    answered = {int(row["question_id"]) for row in cursor.fetchall()}
+    cursor.execute(
+        """
+        SELECT question_id FROM essay_answers
+        WHERE attempt_id = %s
+          AND TRIM(REPLACE(REPLACE(REPLACE(COALESCE(answer_text, ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '')) <> ''
+        """,
+        (attempt_id,),
+    )
+    answered.update(int(row["question_id"]) for row in cursor.fetchall())
+    return answered
+
+
+def _payload_answers_question(question: dict, answer: dict) -> bool:
+    if str(_question_type(question)).lower() == "essay":
+        return bool(str(answer.get("answerText") or "").strip())
+    return answer.get("selectedOptionId") is not None
+
+
+def _ordered_attempt_questions(questions: dict[int, dict]) -> list[dict]:
+    return sorted(questions.values(), key=lambda question: int(question.get("display_order") or 0))
+
+
+def _validate_sequential_save(questions: dict[int, dict], answered_ids: set[int], question_id: int) -> None:
+    ordered = _ordered_attempt_questions(questions)
+    current = next((question for question in ordered if question["question_id"] not in answered_ids), None)
+    target = questions[question_id]
+    if current and target["display_order"] > current["display_order"] and question_id not in answered_ids:
+        raise Exception("Complete the current question before moving to the next question")
+
+
+def _validate_sequential_submit(questions: dict[int, dict], persisted_answered_ids: set[int], answers: list) -> None:
+    answered_ids = set(persisted_answered_ids)
+    for answer in answers:
+        question_id = int(answer["questionId"])
+        question = questions.get(question_id)
+        if not question:
+            raise Exception("Question does not belong to this attempt")
+        if _payload_answers_question(question, answer):
+            answered_ids.add(question_id)
+        else:
+            answered_ids.discard(question_id)
+    ordered = _ordered_attempt_questions(questions)
+    current = next((question for question in ordered if question["question_id"] not in answered_ids), None)
+    if current and any(question["question_id"] in answered_ids for question in ordered if question["display_order"] > current["display_order"]):
+        raise Exception("Complete the current question before moving to the next question")
 
 
 def _finalize_essay_answers(cursor, attempt_id: int, questions: dict[int, dict]) -> None:
@@ -881,6 +935,10 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         question = questions.get(question_id)
         if not question:
             raise Exception("Question does not belong to this attempt")
+        cursor.execute("SELECT sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
+        settings = cursor.fetchone()
+        if settings and settings["sequential_navigation"]:
+            _validate_sequential_save(questions, _answered_question_ids(cursor, attempt_id), question_id)
         _upsert_answer(cursor, attempt_id, question, answer)
         cursor.execute("UPDATE attempt SET last_saved_at = NOW() WHERE attempt_id = %s", (attempt_id,))
         cursor.execute("SELECT last_saved_at FROM attempt WHERE attempt_id = %s", (attempt_id,))
@@ -915,6 +973,10 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         questions = _load_attempt_questions(cursor, attempt_id, exam_id)
+        cursor.execute("SELECT sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
+        settings = cursor.fetchone()
+        if status == "submitted" and settings and settings["sequential_navigation"]:
+            _validate_sequential_submit(questions, _answered_question_ids(cursor, attempt_id), answers)
         for answer in answers:
             question_id = int(answer["questionId"])
             question = questions.get(question_id)

@@ -136,6 +136,7 @@ def _copy_exam_settings(db: Session, source_exam_id: int, target_exam_id: int) -
             exam_id=target_exam_id,
             shuffle_question=source.shuffle_question,
             shuffle_answer_options=source.shuffle_answer_options,
+            sequential_navigation=source.sequential_navigation,
             auto_submit_on_expire=source.auto_submit_on_expire,
             grace_period=source.grace_period,
             force_fullscreen_thresh=source.force_fullscreen_thresh,

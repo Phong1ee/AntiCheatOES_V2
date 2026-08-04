@@ -20,6 +20,7 @@ export type StudentAnswers = Record<number, StudentAnswer>;
 
 export interface StudentExamSettings {
   autoSubmitOnExpire: boolean;
+  sequentialNavigation: boolean;
   tabSwitchThreshold: number;
   copyPasteThreshold: number;
   fullscreenExitThreshold: number;

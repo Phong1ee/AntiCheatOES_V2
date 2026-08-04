@@ -30,6 +30,7 @@ def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
         exam_id=setting.exam_id,
         shuffle_question=setting.shuffle_question,
         shuffle_answer_options=setting.shuffle_answer_options,
+        sequential_navigation=setting.sequential_navigation,
         auto_submit_on_expire=setting.auto_submit_on_expire,
         grace_period=setting.grace_period,
         force_fullscreen_thresh=setting.force_fullscreen_thresh,

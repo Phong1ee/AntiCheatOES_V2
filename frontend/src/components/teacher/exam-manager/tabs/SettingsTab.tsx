@@ -82,6 +82,7 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
         const mapped: TeacherExamSettingsPayload = {
           shuffle_question: data.shuffle_question,
           shuffle_answer_options: data.shuffle_answer_options,
+          sequential_navigation: data.sequential_navigation,
           auto_submit_on_expire: data.auto_submit_on_expire,
           grace_period: data.grace_period,
           force_fullscreen_thresh: data.force_fullscreen_thresh,
@@ -192,6 +193,7 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
       setSettings({
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
+        sequential_navigation: saved.sequential_navigation,
         auto_submit_on_expire: saved.auto_submit_on_expire,
         grace_period: saved.grace_period,
         force_fullscreen_thresh: saved.force_fullscreen_thresh,
@@ -283,6 +285,31 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between"><Label htmlFor="shuffle-question">Shuffle Questions</Label><Switch id="shuffle-question" checked={settings.shuffle_question} onCheckedChange={(value) => setBoolean('shuffle_question', value)} /></div>
           <div className="flex items-center justify-between"><Label htmlFor="shuffle-options">Shuffle Answer Options</Label><Switch id="shuffle-options" checked={settings.shuffle_answer_options} onCheckedChange={(value) => setBoolean('shuffle_answer_options', value)} /></div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-0 shadow-md">
+        <CardHeader>
+          <CardTitle>Question Navigation</CardTitle>
+          <CardDescription>Control how students move through questions during an attempt.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="sequential-navigation">Require Sequential Completion</Label>
+            <Switch
+              id="sequential-navigation"
+              checked={settings.sequential_navigation}
+              onCheckedChange={(value) => setBoolean('sequential_navigation', value)}
+            />
+          </div>
+          <p className="text-sm text-gray-600">
+            {settings.sequential_navigation
+              ? 'Students must answer the current question before continuing to the next one. Previous and direct question navigation will be disabled.'
+              : 'Students may move freely between questions.'}
+          </p>
+          <p className="text-xs text-gray-500">
+            When question shuffling is enabled, students follow the randomized order created for their attempt.
+          </p>
         </CardContent>
       </Card>
 

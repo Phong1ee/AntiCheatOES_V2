@@ -13,6 +13,7 @@ class ExamSettingsRequest(BaseModel):
 
     shuffle_question: bool = False
     shuffle_answer_options: bool = False
+    sequential_navigation: bool = False
     auto_submit_on_expire: bool = True
     grace_period: NonNegativeInt = 0
     force_fullscreen_thresh: NonNegativeInt = 0

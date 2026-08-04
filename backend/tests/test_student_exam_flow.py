@@ -1,9 +1,12 @@
+import asyncio
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from src.controller.teacherController.examController import ExamController
 from src.models.teacher import examModel
+from src.route.studentRoute.examRoute import AutoSaveAnswerRequest, save_answer
 
 
 class _Cursor:
@@ -15,6 +18,9 @@ class _Cursor:
 
     def fetchall(self):
         return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
     def close(self):
         pass
@@ -168,7 +174,13 @@ class StudentExamFlowTests(unittest.TestCase):
             "exams": [],
         })
 
-    def test_verify_code_returns_only_fullscreen_related_settings(self):
+    def test_get_exam_settings_defaults_sequential_navigation_to_false(self):
+        with patch.object(examModel, "get_db_connection", return_value=_Connection([])):
+            settings = examModel.getExamSettings(5)
+
+        self.assertFalse(settings["sequential_navigation"])
+
+    def test_verify_code_returns_student_safe_settings(self):
         with (
             patch.object(ExamController, "_validateStudentExamAccess", return_value={}) as validate,
             patch.object(examModel, "getExamSettings", return_value={
@@ -176,6 +188,7 @@ class StudentExamFlowTests(unittest.TestCase):
                 "tab_switch_thresh": 2,
                 "copy_paste_thresh": 1,
                 "auto_submit_on_expire": True,
+                "sequential_navigation": True,
             }),
         ):
             result = ExamController.verifyExamCode("S1", "student", 5, "CODE")
@@ -187,6 +200,7 @@ class StudentExamFlowTests(unittest.TestCase):
             "force_fullscreen_thresh": 3,
             "tab_switch_thresh": 2,
             "copy_paste_thresh": 1,
+            "sequential_navigation": True,
         })
 
     def test_open_attempt_resumes_when_max_attempt_is_reached(self):
@@ -367,7 +381,7 @@ class StudentExamFlowTests(unittest.TestCase):
             patch.object(examModel, "getAssignedExamById", return_value={"exam_id": 5, "duration_minutes": 60, "end_time": None}),
             patch.object(examModel, "getAttemptById", return_value=attempt),
             patch.object(examModel, "getExamQuestions", return_value=[]),
-            patch.object(examModel, "getExamSettings", return_value={}),
+            patch.object(examModel, "getExamSettings", return_value={"sequential_navigation": True}),
             patch.object(examModel, "get_database_now", return_value=attempt["start_time"]),
         ):
             result = ExamController.restoreAttempt("S1", "student", 5, 10)
@@ -375,6 +389,70 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(result["attempt"]["attempt_id"], 10)
         self.assertEqual(result["attempt"]["status"], "in_progress")
         self.assertIn("remainingSeconds", result)
+        self.assertTrue(result["settings"]["sequential_navigation"])
+
+    @staticmethod
+    def _sequential_questions():
+        # Deliberately use IDs that do not match their display order.
+        return {
+            30: {"question_id": 30, "display_order": 3, "question_type": "MCQ"},
+            10: {"question_id": 10, "display_order": 1, "question_type": "essay"},
+            20: {"question_id": 20, "display_order": 2, "question_type": "MCQ"},
+        }
+
+    def test_sequential_save_uses_display_order_and_allows_current_question(self):
+        questions = self._sequential_questions()
+        examModel._validate_sequential_save(questions, {10}, 20)
+        with self.assertRaisesRegex(Exception, "Complete the current question"):
+            examModel._validate_sequential_save(questions, {10}, 30)
+
+        # With sequential navigation disabled this validator is not invoked, so free navigation remains unchanged.
+        self.assertEqual(questions[30]["display_order"], 3)
+
+    def test_sequential_save_allows_editing_an_existing_later_answer(self):
+        examModel._validate_sequential_save(self._sequential_questions(), {10, 30}, 30)
+
+    def test_essay_whitespace_does_not_unlock_the_next_question(self):
+        essay = {"question_id": 10, "display_order": 1, "question_type": "essay"}
+        self.assertFalse(examModel._payload_answers_question(essay, {"answerText": " \t\n"}))
+        self.assertTrue(examModel._payload_answers_question(essay, {"answerText": "Answer"}))
+        with self.assertRaisesRegex(Exception, "Complete the current question"):
+            examModel._validate_sequential_submit(
+                self._sequential_questions(), set(),
+                [{"questionId": 10, "answerText": " \n"}, {"questionId": 20, "selectedOptionId": 101}],
+            )
+
+    def test_sequential_submit_rejects_gaps_and_allows_answered_prefix(self):
+        questions = self._sequential_questions()
+        with self.assertRaisesRegex(Exception, "Complete the current question"):
+            examModel._validate_sequential_submit(
+                questions, {10}, [{"questionId": 30, "selectedOptionId": 101}],
+            )
+        examModel._validate_sequential_submit(
+            questions, set(),
+            [
+                {"questionId": 10, "answerText": "Essay answer"},
+                {"questionId": 20, "selectedOptionId": 101},
+            ],
+        )
+
+    def test_sequential_navigation_error_maps_to_conflict(self):
+        with patch.object(
+            ExamController,
+            "saveAnswer",
+            side_effect=Exception("Complete the current question before moving to the next question"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(
+                    save_answer(
+                        5,
+                        10,
+                        30,
+                        AutoSaveAnswerRequest(selectedOptionId=101),
+                        {"school_id": "S1", "role": "student"},
+                    )
+                )
+        self.assertEqual(raised.exception.status_code, 409)
 
     def test_submit_allows_unanswered_questions_and_finalizes_once(self):
         exam = {"exam_id": 5, "duration_minutes": 60, "end_time": None}

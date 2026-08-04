@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle } from 'lucide-react';
+import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle, Lock } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { StudentAnswers, StudentQuestion } from '../../types/student-exam';
 
@@ -13,6 +13,7 @@ interface QuestionPanelProps {
   onQuestionSelect: (index: number) => void;
   answeredCount: number;
   unansweredQuestions: number[];
+  sequentialNavigation: boolean;
 }
 
 export function QuestionPanel({
@@ -24,11 +25,13 @@ export function QuestionPanel({
   onQuestionSelect,
   answeredCount,
   unansweredQuestions,
+  sequentialNavigation,
 }: QuestionPanelProps) {
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
       <div className="sticky top-0 bg-white border-b border-gray-200 p-4 z-10">
         <h2 className="text-lg text-gray-800 mb-4">Question Navigator</h2>
+        {sequentialNavigation && <p className="mb-4 text-sm text-teal-700">Questions must be completed in order.</p>}
 
         {/* Progress Stats */}
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -77,22 +80,29 @@ export function QuestionPanel({
       <div className="p-4">
         <div className="grid grid-cols-5 gap-2 mb-4">
           {questions.map((question, index) => {
-            const isAnswered = !!answers[question.id];
+            const answer = answers[question.id];
+            const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
             const isCurrent = index === currentQuestion;
+            const isLocked = sequentialNavigation && !isCurrent && !isAnswered;
 
             return (
               <button
                 key={question.id}
-                onClick={() => onQuestionSelect(index)}
+                onClick={() => {
+                  if (!sequentialNavigation) onQuestionSelect(index);
+                }}
+                disabled={sequentialNavigation}
                 className={`aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${
                   isCurrent
                     ? 'bg-teal-600 text-white ring-2 ring-teal-300'
                     : isAnswered
                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                    : isLocked
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {index + 1}
+                {isLocked ? <Lock className="size-3.5" /> : index + 1}
               </button>
             );
           })}
@@ -126,14 +136,14 @@ export function QuestionPanel({
                   </p>
                 </div>
               </div>
-              <Button
+              {!sequentialNavigation && <Button
                 variant="outline"
                 size="sm"
                 className="w-full mt-2 border-yellow-300 hover:bg-yellow-100"
                 onClick={() => onQuestionSelect(questions.findIndex((q) => q.id === unansweredQuestions[0]))}
               >
                 Go to First Unanswered
-              </Button>
+              </Button>}
             </CardContent>
           </Card>
         )}

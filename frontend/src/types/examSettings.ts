@@ -46,6 +46,7 @@ export const defaultExamSettings: ExamSettings = {
 export interface TeacherExamSettingsPayload {
   shuffle_question: boolean;
   shuffle_answer_options: boolean;
+  sequential_navigation: boolean;
   auto_submit_on_expire: boolean;
   grace_period: number;
   force_fullscreen_thresh: number;
@@ -62,6 +63,7 @@ export interface TeacherExamSettingsApi extends TeacherExamSettingsPayload {
 export const defaultTeacherExamSettings: TeacherExamSettingsPayload = {
   shuffle_question: false,
   shuffle_answer_options: false,
+  sequential_navigation: false,
   auto_submit_on_expire: true,
   grace_period: 0,
   force_fullscreen_thresh: 0,

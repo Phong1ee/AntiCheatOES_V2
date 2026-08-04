@@ -357,6 +357,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
                     exam_id=source.exam_id,
                     shuffle_question=True,
                     shuffle_answer_options=True,
+                    sequential_navigation=True,
                     auto_submit_on_expire=False,
                     grace_period=4,
                     force_fullscreen_thresh=2,
@@ -408,8 +409,13 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.query(Question).count(), original_question_count)
         copied_settings = self.db.get(ExamSetting, duplicate.exam_id)
         self.assertEqual(
-            (copied_settings.shuffle_question, copied_settings.grace_period, copied_settings.auto_grade),
-            (True, 4, False),
+            (
+                copied_settings.shuffle_question,
+                copied_settings.sequential_navigation,
+                copied_settings.grace_period,
+                copied_settings.auto_grade,
+            ),
+            (True, True, 4, False),
         )
         self.assertEqual(self.db.query(StudentExam).filter_by(exam_id=duplicate.exam_id).count(), 0)
         self.assertEqual(self.db.query(Attempt).filter_by(exam_id=duplicate.exam_id).count(), 0)
@@ -726,6 +732,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         other = self.db.query(Exam).filter_by(examcode="O").one()
         defaults = get_exam_settings(exam_a.exam_id, {"school_id": "T1"}, {}, self.db)
         self.assertEqual(defaults.grace_period, 0)
+        self.assertFalse(defaults.sequential_navigation)
         self.assertTrue(defaults.auto_submit_on_expire)
         self.assertEqual(defaults.result_strategy, ResultStrategy.highest)
         with self.assertRaises(HTTPException) as conflict:
@@ -735,6 +742,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         payload = ExamSettingsRequest(
             shuffle_question=True,
             shuffle_answer_options=True,
+            sequential_navigation=True,
             auto_submit_on_expire=False,
             grace_period=5,
             force_fullscreen_thresh=2,
@@ -745,9 +753,13 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         )
         updated = update_exam_settings(exam_a.exam_id, payload, {"school_id": "T1"}, {}, self.db)
         self.assertEqual((updated.grace_period, updated.force_fullscreen_thresh, updated.tab_switch_thresh, updated.copy_paste_thresh), (5, 2, 0, 4))
+        self.assertTrue(updated.sequential_navigation)
         self.assertEqual(updated.result_strategy, ResultStrategy.average)
+        saved = get_exam_settings(exam_a.exam_id, {"school_id": "T1"}, {}, self.db)
+        self.assertTrue(saved.sequential_navigation)
         other_defaults = get_exam_settings(exam_b.exam_id, {"school_id": "T1"}, {}, self.db)
         self.assertEqual((other_defaults.grace_period, other_defaults.tab_switch_thresh), (0, 0))
+        self.assertFalse(other_defaults.sequential_navigation)
 
         with self.assertRaises(HTTPException) as forbidden:
             get_exam_settings(other.exam_id, {"school_id": "T1"}, {}, self.db)

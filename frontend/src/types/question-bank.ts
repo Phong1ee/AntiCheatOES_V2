@@ -42,6 +42,8 @@ export interface QuestionBankItem {
   chapters: ChapterSummary[];
   learning_objectives: LearningObjectiveSummary[];
   option_count?: number;
+  created_by?: string | null;
+  created_by_name?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   usage_count?: number;

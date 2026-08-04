@@ -32,18 +32,6 @@ interface BankQuestionListProps {
   onEdit: (questionId: number) => void;
 }
 
-type QuestionWithCreator = QuestionBankItem & {
-  created_by_name?: string | null;
-  creator_name?: string | null;
-  created_by?:
-    | string
-    | {
-        full_name?: string | null;
-        name?: string | null;
-      }
-    | null;
-};
-
 const typeConfig: Record<
   QuestionType,
   {
@@ -121,29 +109,7 @@ function formatDate(value?: string | null): string {
 }
 
 function getCreatorName(question: QuestionBankItem): string {
-  const value = question as QuestionWithCreator;
-
-  if (value.created_by_name) {
-    return value.created_by_name;
-  }
-
-  if (value.creator_name) {
-    return value.creator_name;
-  }
-
-  if (typeof value.created_by === 'string') {
-    return value.created_by;
-  }
-
-  if (value.created_by?.full_name) {
-    return value.created_by.full_name;
-  }
-
-  if (value.created_by?.name) {
-    return value.created_by.name;
-  }
-
-  return 'Unknown';
+  return question.created_by_name || 'Unknown';
 }
 
 function getChapterText(question: QuestionBankItem): string {

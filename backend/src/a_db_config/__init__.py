@@ -302,6 +302,15 @@ class Question(Base):
         ForeignKey("question.question_id", ondelete="SET NULL"),
         nullable=True,
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )
 
     subject: Mapped[Optional["Subject"]] = relationship(
         back_populates="questions"

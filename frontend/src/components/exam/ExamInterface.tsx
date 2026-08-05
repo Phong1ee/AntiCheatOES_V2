@@ -33,6 +33,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [showEssayGradingNote, setShowEssayGradingNote] = useState(false);
   const [isTerminating, setIsTerminating] = useState(false);
   const [terminationFailed, setTerminationFailed] = useState(false);
   const [attemptStatus, setAttemptStatus] = useState("initializing");
@@ -130,11 +131,12 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
     setSubmitError(null);
     await flushDirty();
     try {
-      await studentExamService.submit(examId, attemptId, answersRef.current);
+      const result = await studentExamService.submit(examId, attemptId, answersRef.current);
       localStorage.removeItem(attemptKey);
       localStorage.removeItem(draftKey(attemptId));
       setAttemptStatus("submitted");
       stopAutoSave();
+      setShowEssayGradingNote(result.resultVisibility !== "hidden" && result.essayPending);
       setIsSubmitted(true);
       void exitFullscreenIntentionally();
     } catch (error) {
@@ -328,7 +330,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
-  if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} />;
+  if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
 
   if (fullscreenLocked && fullscreenRequired) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Fullscreen required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen to continue answering. Leaving fullscreen is recorded as an exam violation.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} /></div>;
 

@@ -84,6 +84,15 @@ export interface StartExamResult extends StudentExamAttempt {
   remainingSeconds: number;
 }
 
+export interface SubmitExamResult {
+  success: boolean;
+  attemptId: number;
+  score: number | null;
+  essayPending: boolean;
+  resultVisibility: "hidden" | "score-only" | "full";
+  status: string;
+}
+
 export interface RestoreAttemptResult {
   exam: { examId: number; title: string; durationMinutes: number };
   attempt: StudentExamAttempt;
@@ -168,11 +177,11 @@ export const studentExamService = {
     return data;
   },
 
-  async submit(examId: string | number, attemptId: number, answers: StudentAnswers) {
+  async submit(examId: string | number, attemptId: number, answers: StudentAnswers): Promise<SubmitExamResult> {
     const payload = Object.entries(answers)
       .filter(([, answer]) => !("answerText" in answer) || Boolean(answer.answerText.trim()))
       .map(([questionId, answer]) => ({ questionId: Number(questionId), ...answer }));
-    const { data } = await apiClient.post(`/api/exams/${examId}/submit`, { attemptId, answers: payload });
+    const { data } = await apiClient.post<SubmitExamResult>(`/api/exams/${examId}/submit`, { attemptId, answers: payload });
     return data;
   },
 

@@ -9,6 +9,7 @@ import { ExamResultDetailsPage } from './exam-results/ExamResultDetailsPage';
 import { ProfileSettings } from './ProfileSettings';
 import { Preferences } from './Preferences';
 import { useStudentDashboardData } from '../hooks/useStudentDashboardData';
+import type { StudentExamListItem } from '../services/student-exam.service';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -19,6 +20,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
   const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
   const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
+  const [accessExamId, setAccessExamId] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
 
   const handleEnterExam = (examId: string) => {
@@ -46,6 +48,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setSelectedResultExamId(examId);
     setActiveTab('results');
   };
+  const handleRequestExamAccess = (exam: StudentExamListItem) => { if (exam.status === 'open') { setAccessExamId(exam.id); setActiveTab('my-exams'); } };
 
   if (currentExamId) {
     return (
@@ -82,6 +85,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 onRetry={dashboardData.retry}
                 exams={dashboardData.exams}
                 serverTime={dashboardData.serverTime}
+                onRequestExamAccess={handleRequestExamAccess}
               />
             </div>
           </div>
@@ -97,6 +101,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               loading={dashboardData.examsLoading}
               loadError={dashboardData.examsError}
               onRetry={dashboardData.retry}
+              autoOpenCodeExamId={accessExamId}
             />
           </div>
         )}

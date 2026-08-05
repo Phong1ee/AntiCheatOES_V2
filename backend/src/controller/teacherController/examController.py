@@ -67,8 +67,10 @@ class ExamController:
         expires_at = min(duration_expiry, exam_end) if exam_end else duration_expiry
         remaining_seconds = max(0, int((expires_at - server_time).total_seconds()))
         return {
-            "serverTime": f"{server_time.replace(microsecond=0).isoformat()}Z",
-            "expiresAt": f"{expires_at.replace(microsecond=0).isoformat()}Z",
+            # MySQL NOW() and exam schedule fields are local naive DATETIME values.
+            # Do not label them UTC or browser date parsing shifts the comparison.
+            "serverTime": server_time.replace(microsecond=0).isoformat(),
+            "expiresAt": expires_at.replace(microsecond=0).isoformat(),
             "remainingSeconds": remaining_seconds,
         }
 
@@ -269,6 +271,7 @@ class ExamController:
                 "attemptId": attempt_id,
                 "score": result["score"],
                 "essayPending": result["essayPending"],
+                "resultVisibility": str(exam.get("result_visibility") or "hidden"),
                 "status": result["status"],
             }
         except Exception as e:

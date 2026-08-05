@@ -48,6 +48,7 @@ interface ExamListProps {
   loading?: boolean;
   loadError?: string | null;
   onRetry?: () => void;
+  autoOpenCodeExamId?: string | null;
 }
 
 export function ExamList({
@@ -57,6 +58,7 @@ export function ExamList({
   loading: suppliedLoading,
   loadError: suppliedLoadError,
   onRetry,
+  autoOpenCodeExamId,
 }: ExamListProps) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("date");
@@ -143,6 +145,10 @@ export function ExamList({
       setCodeOpen(true);
     }
   };
+  useEffect(() => {
+    const exam = exams.find((item) => item.id === autoOpenCodeExamId && item.status === "open");
+    if (exam) handleRequestCode(exam);
+  }, [autoOpenCodeExamId, exams]);
 
   const handleCodeVerify = async (code: string) => {
     if (!selectedExam) throw new Error("No exam selected");

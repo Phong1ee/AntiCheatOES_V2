@@ -15,6 +15,7 @@ interface InfoSidebarProps {
   onRetry: () => void;
   exams: StudentExamListItem[];
   serverTime: string | null;
+  onRequestExamAccess: (exam: StudentExamListItem) => void;
 }
 
 const formatDate = (date: string | null) => {
@@ -29,7 +30,7 @@ const recentResults = (results: StudentExamResult[]) => [...results]
   .sort((first, second) => (second.date ? new Date(second.date).getTime() : 0) - (first.date ? new Date(first.date).getTime() : 0))
   .slice(0, 3);
 
-export function InfoSidebar({ results, loading, loadError, onRetry, exams, serverTime }: InfoSidebarProps) {
+export function InfoSidebar({ results, loading, loadError, onRetry, exams, serverTime, onRequestExamAccess }: InfoSidebarProps) {
   const completedExamIds = new Set(results
     .filter((result) => result.attemptStatus === 'submitted' || result.attemptStatus === 'terminated')
     .map((result) => result.examId));
@@ -91,7 +92,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
         </CardContent>
       </Card>
 
-      <NextExamWidget exams={activeAndUpcomingExams} serverTime={serverTime} onCountdownElapsed={onRetry} />
+      <NextExamWidget exams={activeAndUpcomingExams} serverTime={serverTime} onCountdownElapsed={onRetry} onRequestExamAccess={onRequestExamAccess} />
 
       <ExamCodesWidget exams={activeAndUpcomingExams.filter((exam) => exam.status === 'open')} />
 

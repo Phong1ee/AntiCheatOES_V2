@@ -30,7 +30,6 @@ export function QuestionPanel({
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
       <div className="sticky top-0 bg-white border-b border-gray-200 p-4 z-10">
-        <h2 className="text-lg text-gray-800 mb-4">Question Navigator</h2>
         {sequentialNavigation && <p className="mb-4 text-sm text-teal-700">Questions must be completed in order.</p>}
 
         {/* Progress Stats */}

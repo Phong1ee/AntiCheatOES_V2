@@ -4,9 +4,10 @@ import { Card, CardContent } from '../ui/card';
 
 interface ExamSubmittedProps {
   onExit: () => void;
+  showEssayGradingNote: boolean;
 }
 
-export function ExamSubmitted({ onExit }: ExamSubmittedProps) {
+export function ExamSubmitted({ onExit, showEssayGradingNote }: ExamSubmittedProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex items-center justify-center p-4">
       <Card className="max-w-2xl w-full shadow-2xl rounded-2xl border-0">
@@ -49,12 +50,11 @@ export function ExamSubmitted({ onExit }: ExamSubmittedProps) {
             </div>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8">
-            <p className="text-sm text-gray-700">
-              <strong>Note:</strong> Your exam is being processed. Results will be available 
-              within 24-48 hours and you will be notified via email.
+          {showEssayGradingNote && <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8">
+            <p className="text-sm leading-6 text-gray-700">
+              <strong>Note:</strong> Your result will be available after your teacher finishes grading the essay question(s).
             </p>
-          </div>
+          </div>}
 
           <div className="space-y-3">
             <Button

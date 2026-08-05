@@ -5,6 +5,7 @@ import { TeacherInfoSidebar } from './TeacherInfoSidebar';
 import { ExamManagerPage } from './exam-manager/ExamManagerPage';
 import { QuestionBankPage } from './question-bank/QuestionBankPage';
 import { ExamResultsPage } from './results/ExamResultsPage';
+import { AntiCheatMonitor } from './anti-cheat/AntiCheatMonitor';
 import { Footer } from '../dashboard/Footer';
 import { useUserRole } from '../../contexts/UserRoleContext';
 import { ProfileSettings } from '../ProfileSettings';
@@ -55,14 +56,23 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
-      <TeacherHeader activeTab={activeTab} onTabChange={setActiveTab} onLogout={onLogout} />
+      <TeacherHeader
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onLogout={onLogout}
+      />
 
       {activeTab === 'exams' ? (
-        <ExamManagerPage initialExamId={selectedExamId} initialTab={examManagerTab} />
+        <ExamManagerPage
+          initialExamId={selectedExamId}
+          initialTab={examManagerTab}
+        />
       ) : activeTab === 'questions' ? (
         <QuestionBankPage />
       ) : activeTab === 'results' ? (
         <ExamResultsPage initialExamId={resultsExamId} />
+      ) : activeTab === 'anticheat' ? (
+        <AntiCheatMonitor />
       ) : activeTab === 'profile' ? (
         <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
           <ProfileSettings />
@@ -90,21 +100,13 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
               </div>
             </div>
           )}
-
-          {activeTab === 'support' && (
-            <div className="max-w-5xl mx-auto">
-              <div className="text-center py-12">
-                <h2 className="text-2xl text-gray-800 mb-2">Technical Support</h2>
-                <p className="text-gray-600">This section is under development</p>
-              </div>
-            </div>
-          )}
         </main>
       )}
 
-      {activeTab !== 'exams' && activeTab !== 'questions' && activeTab !== 'results' && (
-        <Footer />
-      )}
+      {activeTab !== 'exams' &&
+        activeTab !== 'questions' &&
+        activeTab !== 'results' &&
+        activeTab !== 'anticheat' && <Footer />}
     </div>
   );
 }

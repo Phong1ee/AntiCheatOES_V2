@@ -7,7 +7,7 @@ import {
   ClipboardList,
   BookOpen,
   BarChart2,
-  HeadphonesIcon,
+  Shield,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import {
@@ -30,7 +30,7 @@ const navigation = [
   { id: 'exams', label: 'Exams', icon: ClipboardList },
   { id: 'questions', label: 'Question Bank', icon: BookOpen },
   { id: 'results', label: 'Results', icon: BarChart2 },
-  { id: 'support', label: 'Support', icon: HeadphonesIcon },
+  { id: 'anticheat', label: 'Anti-Cheat', icon: Shield },
 ];
 
 function getStoredTeacherName(): string {

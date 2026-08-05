@@ -13,7 +13,8 @@ interface RawQuestion {
 
 interface RawExam {
   exam_id: number;
-  examcode?: string | null;
+  requires_exam_code?: boolean;
+  released_examcode?: string | null;
   title: string;
   duration_minutes: number;
   status: "upcoming" | "open" | "completed" | "closed";
@@ -59,7 +60,8 @@ export interface StudentExamListItem {
   openAttemptId: number | null;
   canResume: boolean;
   requiresFullscreen: boolean;
-  examCode: string | null;
+  requiresExamCode: boolean;
+  releasedExamCode: string | null;
 }
 
 export interface StudentExamListResponse {
@@ -115,7 +117,8 @@ const normalizeExam = (exam: RawExam): StudentExamListItem => ({
   status: exam.status, maxAttempts: exam.max_attempt, attemptsUsed: exam.attempts_used,
   hasOpenAttempt: Boolean(exam.has_open_attempt), openAttemptId: exam.open_attempt_id ?? null,
   canResume: Boolean(exam.can_resume), requiresFullscreen: Boolean(exam.requires_fullscreen),
-  examCode: exam.examcode ?? null,
+  requiresExamCode: Boolean(exam.requires_exam_code),
+  releasedExamCode: exam.released_examcode?.trim() || null,
 });
 
 export const studentExamService = {

@@ -7,7 +7,7 @@ import { studentResultService } from "../../services/student-result.service";
 import type { StudentExamResult, StudentResultQuestion } from "../../types/student-result";
 
 interface ExamResultDetailsPageProps {
-  examId: string;
+  attemptId: number;
   onBack: () => void;
 }
 
@@ -20,7 +20,7 @@ function questionPoints(question: StudentResultQuestion): string {
   return `Awarded: ${question.awardedPoints ?? 0} / ${question.maxPoints} points`;
 }
 
-export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageProps) {
+export function ExamResultDetailsPage({ attemptId, onBack }: ExamResultDetailsPageProps) {
   const [exam, setExam] = useState<StudentExamResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageP
     try {
       setLoading(true);
       setLoadError(null);
-      setExam(await studentResultService.getDetail(Number(examId)));
+      setExam(await studentResultService.getDetail(attemptId));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load exam result.");
     } finally {
@@ -37,15 +37,15 @@ export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageP
     }
   };
 
-  useEffect(() => { void loadDetail(); }, [examId]);
+  useEffect(() => { void loadDetail(); }, [attemptId]);
 
   const answeredCount = useMemo(
     () => exam?.questions?.filter(isAnswered).length ?? null,
     [exam],
   );
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><p className="text-gray-600">Loading exam result...</p></div>;
-  if (loadError || !exam) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Card className="max-w-md"><CardContent className="p-8 text-center space-y-4"><p className="text-red-600">{loadError || "Exam not found"}</p><div className="flex justify-center gap-2"><Button variant="outline" onClick={onBack}>Back to Results</Button><Button onClick={() => void loadDetail()}>Retry</Button></div></CardContent></Card></div>;
+  if (loading) return <div className="py-16 text-center"><p className="text-gray-600">Loading exam result...</p></div>;
+  if (loadError || !exam) return <Card className="mx-auto max-w-md"><CardContent className="p-8 text-center space-y-4"><p className="text-red-600">{loadError || "Exam not found"}</p><div className="flex justify-center gap-2"><Button variant="outline" onClick={onBack}>Back to Results</Button><Button onClick={() => void loadDetail()}>Retry</Button></div></CardContent></Card>;
 
   const date = exam.date ? new Date(exam.date) : null;
   const displayDate = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Date unavailable";
@@ -57,8 +57,8 @@ export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageP
   const hasAttemptNumber = typeof exam.attemptNumber === "number" && exam.attemptNumber > 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50"><div className="container mx-auto px-4 py-6 max-w-5xl">
-      <Button onClick={onBack} variant="outline" className="mb-6"><ArrowLeft className="size-4 mr-2" />Back to Results</Button>
+    <div className="mx-auto max-w-5xl">
+      <Button onClick={onBack} variant="outline" className="mb-6"><ArrowLeft className="size-4 mr-2" />Back to Attempts</Button>
       <div className="mb-6"><h1 className="text-3xl text-gray-800 mb-2">{exam.examTitle}</h1><p className="text-gray-600">{exam.subject}</p></div>
       <div className="space-y-6">
         <Card className="bg-gradient-to-r from-teal-50 to-blue-50 border-teal-200"><CardContent className="pt-6">
@@ -95,6 +95,6 @@ export function ExamResultDetailsPage({ examId, onBack }: ExamResultDetailsPageP
           })}
         </div></CardContent></Card> : <Card className="bg-yellow-50 border-yellow-200"><CardContent className="py-8 flex justify-center gap-3 text-yellow-800"><EyeOff className="size-6" /><p>Review details are not available based on instructor settings.</p></CardContent></Card>}
       </div>
-    </div></div>
+    </div>
   );
 }

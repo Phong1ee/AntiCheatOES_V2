@@ -7,7 +7,7 @@ import { Label } from "../ui/label";
 import type { VerifyCodeResult } from "../../services/student-exam.service";
 
 interface ExamCodeDialogProps {
-  exam: { id: string; title: string; examCode: string | null } | null;
+  exam: { id: string; title: string; requiresExamCode: boolean } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onVerify: (code: string) => Promise<VerifyCodeResult>;
@@ -24,11 +24,11 @@ export function ExamCodeDialog({ exam, open, onOpenChange, onVerify, onStart }: 
     setCode("");
     setError("");
     setWorking(false);
-    setPhase(exam?.examCode === null ? "fullscreen" : "code");
-  }, [open, exam?.id, exam?.examCode]);
+    setPhase(exam?.requiresExamCode ? "code" : "fullscreen");
+  }, [open, exam?.id, exam?.requiresExamCode]);
 
   if (!exam) return null;
-  const requiresCode = exam.examCode !== null;
+  const requiresCode = exam.requiresExamCode;
 
   const verify = async () => {
     const trimmed = code.trim();

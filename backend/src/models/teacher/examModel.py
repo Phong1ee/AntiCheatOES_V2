@@ -47,7 +47,16 @@ def getStudentExams(school_id: str):
         e.exam_id,
         e.exam_id AS id,
         e.title,
-        e.examcode,
+        CASE WHEN e.examcode IS NOT NULL AND TRIM(e.examcode) <> '' THEN TRUE ELSE FALSE END AS requires_exam_code,
+        CASE
+            WHEN e.examcode IS NOT NULL
+             AND TRIM(e.examcode) <> ''
+             AND e.start_time IS NOT NULL
+             AND NOW() >= DATE_SUB(e.start_time, INTERVAL 5 MINUTE)
+             AND (e.end_time IS NULL OR NOW() <= e.end_time)
+            THEN e.examcode
+            ELSE NULL
+        END AS released_examcode,
         e.description,
         e.duration_minutes,
         e.max_attempt,
@@ -81,10 +90,10 @@ def getStudentExams(school_id: str):
         ON a.exam_id = e.exam_id
         AND a.student_id = u.school_id
     WHERE se.student_id = %s
+      AND e.status = 'published'
     GROUP BY
         e.exam_id,
         e.title,
-        e.examcode,
         e.description,
         e.duration_minutes,
         e.max_attempt,

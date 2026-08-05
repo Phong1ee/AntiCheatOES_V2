@@ -127,6 +127,7 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "exam_id": exam.exam_id,
         "title": exam.title,
         "examcode": exam.examcode,
+        "requires_exam_code": bool(exam.examcode and exam.examcode.strip()),
         "description": exam.description,
         "max_attempt": exam.max_attempt,
         "duration_minutes": exam.duration_minutes,

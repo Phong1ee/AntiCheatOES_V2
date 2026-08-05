@@ -10,6 +10,7 @@ interface ExamCodesWidgetProps {
 
 export function ExamCodesWidget({ exams }: ExamCodesWidgetProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const releasedExams = exams.filter((exam) => exam.requiresExamCode && Boolean(exam.releasedExamCode?.trim()));
 
   const handleCopy = (examId: string, code: string) => {
     const copyKey = `${examId}:${code}`;
@@ -63,7 +64,9 @@ export function ExamCodesWidget({ exams }: ExamCodesWidgetProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="w-full min-w-0 box-border max-h-[360px] space-y-3 overflow-x-hidden overflow-y-auto px-4 sm:px-6">
-        {exams.map((exam) => (
+        {releasedExams.map((exam) => {
+          const releasedCode = exam.releasedExamCode!.trim();
+          return (
           <div
             key={exam.id}
             className="w-full min-w-0 box-border space-y-2 rounded-lg border border-gray-200 bg-gradient-to-r from-teal-50 to-blue-50 p-3"
@@ -77,20 +80,21 @@ export function ExamCodesWidget({ exams }: ExamCodesWidgetProps) {
               </div>
             </div>
             
-            {exam.examCode ? (
+            {releasedCode ? (
               <div className="flex w-full min-w-0 items-center gap-2">
                 <div className="min-w-0 flex-1 overflow-hidden rounded border border-teal-200 bg-white px-3 py-2">
-                  <code className="block truncate text-lg tracking-wider text-teal-700">{exam.examCode}</code>
+                  <code className="block truncate text-lg tracking-wider text-teal-700">{releasedCode}</code>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => handleCopy(exam.id, exam.examCode!)} className="shrink-0">
-                  {copiedCode === `${exam.id}:${exam.examCode}` ? <CheckCircle2 className="size-4 text-green-600" /> : <Copy className="size-4" />}
+                <Button size="sm" variant="outline" onClick={() => handleCopy(exam.id, releasedCode)} className="shrink-0">
+                  {copiedCode === `${exam.id}:${releasedCode}` ? <CheckCircle2 className="size-4 text-green-600" /> : <Copy className="size-4" />}
                 </Button>
               </div>
             ) : <p className="text-sm text-gray-600">No code available</p>}
           </div>
-        ))}
+          );
+        })}
 
-        {exams.length === 0 && (
+        {releasedExams.length === 0 && (
           <div className="text-center py-6 text-gray-500">
             <Key className="size-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">No exam codes available</p>

@@ -75,11 +75,15 @@ class ResultSnapshotTests(unittest.TestCase):
             "end_time": None,
             "submitted_at": None,
             "attempt_status": "submitted",
+            "termination_reason": None,
             "title": "Exam",
-            "description": "Description",
             "duration_minutes": 60,
             "max_attempt": 1,
             "result_visibility": visibility,
+            "subject_id": "DB",
+            "subject_name": "Database",
+            "final_score": Decimal("9.00"),
+            "result_strategy": "average",
             "exam_total_points": Decimal("10.00"),
             "passing_score": Decimal("5.00"),
             "subject": "Database",
@@ -174,6 +178,36 @@ class ResultSnapshotTests(unittest.TestCase):
             detail = resultModel.get_student_result_detail("S1", 10)
         self.assertTrue(detail["allowViewDetails"])
         self.assertEqual((detail["score"], detail["correctAnswers"], len(detail["questions"])), (8, 1, 1))
+
+    def test_list_exposes_attempt_and_persisted_final_score_separately(self):
+        cursor = _ResultCursor(self._result_row("full"))
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(cursor)):
+            result = resultModel.get_student_results("S1")[0]
+
+        self.assertEqual(result["attemptScore"], 8)
+        self.assertEqual(result["finalScore"], 9)
+        self.assertEqual(result["resultStrategy"], "average")
+        self.assertEqual((result["subjectId"], result["subjectName"]), ("DB", "Database"))
+        self.assertFalse(result["gradingPending"])
+        self.assertIn("student_exam se", cursor.last_query)
+        self.assertIn("exam_setting es", cursor.last_query)
+
+    def test_hidden_result_never_exposes_attempt_or_final_score(self):
+        cursor = _ResultCursor(self._result_row("hidden"))
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(cursor)):
+            result = resultModel.get_student_results("S1")[0]
+
+        self.assertIsNone(result["attemptScore"])
+        self.assertIsNone(result["finalScore"])
+        self.assertFalse(result["scoreVisible"])
+
+    def test_non_empty_ungraded_essay_is_pending_but_blank_essay_is_not(self):
+        pending = _ResultCursor(self._result_row("full", pending_essays=1))
+        blank = _ResultCursor(self._result_row("full", pending_essays=0))
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(pending)):
+            self.assertTrue(resultModel.get_student_results("S1")[0]["gradingPending"])
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(blank)):
+            self.assertFalse(resultModel.get_student_results("S1")[0]["gradingPending"])
 
 
 if __name__ == "__main__":

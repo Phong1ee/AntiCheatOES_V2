@@ -93,7 +93,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
 
       <NextExamWidget exams={activeAndUpcomingExams} serverTime={serverTime} onCountdownElapsed={onRetry} />
 
-      <ExamCodesWidget exams={activeAndUpcomingExams} />
+      <ExamCodesWidget exams={activeAndUpcomingExams.filter((exam) => exam.status === 'open')} />
 
       <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
         <CardHeader>

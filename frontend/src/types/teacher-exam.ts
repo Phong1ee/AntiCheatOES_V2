@@ -12,6 +12,7 @@ export interface TeacherExamApi {
   exam_id: number;
   title: string;
   examcode: string | null;
+  requires_exam_code: boolean;
   description: string | null;
   max_attempt: number | null;
   duration_minutes: number | null;

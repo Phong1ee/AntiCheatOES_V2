@@ -17,7 +17,8 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
-  const [viewingResultId, setViewingResultId] = useState<string | null>(null);
+  const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
+  const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
 
   const handleEnterExam = (examId: string) => {
@@ -29,18 +30,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   // ✅ dùng cho nút "View" trong trang Exam Results
-  const handleViewResultDetails = (submissionId: string) => {
-    setViewingResultId(submissionId);
+  const handleViewResultDetails = (attemptId: number, examId: number) => {
+    setSelectedResultExamId(String(examId));
+    setViewingAttemptId(attemptId);
   };
 
   const handleBackToResults = () => {
-    setViewingResultId(null);
+    setViewingAttemptId(null);
   };
 
   // ✅ dùng cho nút "View Results" ở My Exams / Dashboard
   // chỉ cần chuyển tab sang "results"
   const handleViewResultsFromMyExams = (examId: string) => {
     // nếu sau này cần filter theo examId thì có thể lưu lại ở đây
+    setSelectedResultExamId(examId);
     setActiveTab('results');
   };
 
@@ -49,15 +52,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
       <ExamInterface
         examId={currentExamId}
         onExit={handleExitExam}
-      />
-    );
-  }
-
-  if (viewingResultId) {
-    return (
-      <ExamResultDetailsPage
-        examId={viewingResultId}
-        onBack={handleBackToResults}
       />
     );
   }
@@ -109,7 +103,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
         {activeTab === 'results' && (
           // Ở trang Exam Results, nút View sẽ mở trang chi tiết 1 attempt
-          <ExamResults onViewDetails={handleViewResultDetails} />
+          viewingAttemptId !== null
+            ? <ExamResultDetailsPage attemptId={viewingAttemptId} onBack={handleBackToResults} />
+            : <ExamResults onViewDetails={handleViewResultDetails} initialExamId={selectedResultExamId} />
         )}
 
         {activeTab === 'support' && (

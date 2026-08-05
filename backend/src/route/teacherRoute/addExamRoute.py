@@ -66,6 +66,7 @@ def _serialize(exam: Exam) -> dict:
         "exam_id": exam.exam_id,
         "title": exam.title,
         "examcode": exam.examcode,
+        "requires_exam_code": bool(exam.examcode and exam.examcode.strip()),
         "max_attempt": exam.max_attempt,
         "description": exam.description,
         "duration_minutes": exam.duration_minutes,
@@ -248,7 +249,8 @@ def update_exam_in_database(
         exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
         _validate_subject(db, request.subject_id)
         exam.title = request.title.strip()
-        exam.examcode = _normalize_exam_code(request.examcode)
+        incoming_examcode = _normalize_exam_code(request.examcode)
+        exam.examcode = incoming_examcode
         exam.duration_minutes = request.duration_minutes
         exam.max_attempt = request.max_attempt
         exam.description = request.description

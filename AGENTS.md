@@ -94,6 +94,23 @@ Before making a database change:
    changes.
 8. Do not manually renumber existing primary keys or foreign keys.
 
+### Required Alembic Workflow
+
+For every database schema change, including adding, changing, or removing a
+column, index, constraint, enum, or table, complete and report this workflow:
+
+1. Run `uv run alembic current`, `uv run alembic heads`, and `uv run alembic history` from `backend` before creating a migration.
+2. Create one focused migration whose `down_revision` is the actual current Alembic head; never hard-code a revision supplied by a database dump when the repository head differs.
+3. Read the generated migration and verify its upgrade and downgrade operations before applying it.
+4. Run `uv run alembic heads` and confirm that the repository has exactly one head.
+5. Run `uv run alembic upgrade head` against the configured project database.
+6. Run `uv run alembic current` and verify the intended schema change in the database.
+7. If any command cannot run, do not claim the schema changed; report the exact blocking error and do not treat source-model changes as a database migration.
+
+Do not remove a migration file after it may have been applied to any shared or
+configured database. Create a new focused migration to reverse the schema
+change instead.
+
 Use only the following project tables unless the current task explicitly
 introduces an approved new table:
 

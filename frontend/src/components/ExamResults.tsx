@@ -1,133 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { Calendar, Clock, Eye, FileText, RefreshCw } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Eye, FileText, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { ExamResultsStats } from "./exam-results/ExamResultsStats";
 import { studentResultService } from "../services/student-result.service";
-import type { StudentExamResult, StudentResultStatus } from "../types/student-result";
+import type { StudentExamResult, StudentExamResultGroup } from "../types/student-result";
 
-interface ExamResultsProps {
-  onViewDetails: (attemptId: string) => void;
-}
+interface ExamResultsProps { onViewDetails: (attemptId: number, examId: number) => void; initialExamId?: string | number | null; }
+const strategyLabel = { highest: "Highest attempt", average: "Average attempts", last_attempt: "Last attempt" };
+const attemptTime = (attempt: StudentExamResult) => new Date(attempt.submittedAt ?? attempt.startedAt ?? attempt.date ?? 0).getTime() || 0;
+const formatDate = (date?: string | null) => { const value = date && new Date(date); return value && !Number.isNaN(value.getTime()) ? value.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "Date unavailable"; };
+const sortAttempts = (attempts: StudentExamResult[]) => [...attempts].sort((a, b) => (b.attemptNumber ?? -1) - (a.attemptNumber ?? -1) || attemptTime(b) - attemptTime(a));
 
-const resultStatuses: StudentResultStatus[] = ["published", "pending", "hidden"];
-
-function scoreRatio(result: StudentExamResult): number | null {
-  if (!result.scoreVisible || result.score === null || result.gradingScale <= 0) return null;
-  return result.score / result.gradingScale;
-}
-
-function scoreColor(result: StudentExamResult): string {
-  const ratio = scoreRatio(result);
-  if (ratio === null) return "text-gray-700";
-  if (result.passingScore !== null && result.score !== null && result.score >= result.passingScore) {
-    return "text-green-600";
-  }
-  return ratio >= 0.8 ? "text-blue-600" : "text-red-600";
-}
-
-function formatDate(date: string | null): string {
-  if (!date) return "Date unavailable";
-  const parsed = new Date(date);
-  return Number.isNaN(parsed.getTime()) ? "Date unavailable" : parsed.toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-  });
-}
-
-export function ExamResults({ onViewDetails }: ExamResultsProps) {
-  const [results, setResults] = useState<StudentExamResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | StudentResultStatus>("all");
-  const [subjectFilter, setSubjectFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("date-desc");
-
-  const loadResults = async () => {
-    try {
-      setLoading(true);
-      setLoadError(null);
-      setResults(await studentResultService.list());
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load exam results.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { void loadResults(); }, []);
-
-  const subjects = useMemo(
-    () => Array.from(new Set(results.map((result) => result.subject).filter(Boolean))).sort(),
-    [results],
-  );
-
-  const filteredResults = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    const filtered = results.filter((result) => (
-      (!query || result.examTitle.toLowerCase().includes(query) || result.subject.toLowerCase().includes(query))
-      && (statusFilter === "all" || result.status === statusFilter)
-      && (subjectFilter === "all" || result.subject === subjectFilter)
-    ));
-
-    return filtered.sort((first, second) => {
-      if (sortBy === "subject") return first.subject.localeCompare(second.subject);
-      if (sortBy === "date-desc" || sortBy === "date-asc") {
-        const firstDate = first.date ? new Date(first.date).getTime() : 0;
-        const secondDate = second.date ? new Date(second.date).getTime() : 0;
-        return sortBy === "date-desc" ? secondDate - firstDate : firstDate - secondDate;
-      }
-      const firstRatio = scoreRatio(first);
-      const secondRatio = scoreRatio(second);
-      if (firstRatio === null && secondRatio === null) return 0;
-      if (firstRatio === null) return 1;
-      if (secondRatio === null) return -1;
-      return sortBy === "score-desc" ? secondRatio - firstRatio : firstRatio - secondRatio;
-    });
-  }, [results, searchQuery, statusFilter, subjectFilter, sortBy]);
-
-  if (loading) return <p className="text-gray-600">Loading exam results...</p>;
-  if (loadError) {
-    return (
-      <Card><CardContent className="py-12 text-center space-y-4">
-        <p className="text-red-600">{loadError}</p>
-        <Button onClick={() => void loadResults()} variant="outline"><RefreshCw className="size-4 mr-2" />Retry</Button>
-      </CardContent></Card>
-    );
-  }
-
-  return (
-    <div className="flex gap-6">
-      <div className="flex-1 space-y-6">
-        <div><h1 className="text-3xl text-gray-800 mb-2">Exam Results</h1><p className="text-gray-600">View your exam scores and performance</p></div>
-        <Card><CardContent className="pt-6 space-y-4">
-          <div className="relative"><FileText className="absolute left-3 top-3 size-4 text-gray-400" /><Input placeholder="Search exams by title or subject..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="pl-10" /></div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as "all" | StudentResultStatus)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem>{resultStatuses.map((status) => <SelectItem key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</SelectItem>)}</SelectContent></Select>
-            <Select value={subjectFilter} onValueChange={setSubjectFilter}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Subjects</SelectItem>{subjects.map((subject) => <SelectItem key={subject} value={subject}>{subject}</SelectItem>)}</SelectContent></Select>
-            <Select value={sortBy} onValueChange={setSortBy}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="date-desc">Date (Newest)</SelectItem><SelectItem value="date-asc">Date (Oldest)</SelectItem><SelectItem value="score-desc">Score (Highest)</SelectItem><SelectItem value="score-asc">Score (Lowest)</SelectItem><SelectItem value="subject">Subject (A-Z)</SelectItem></SelectContent></Select>
-          </div>
-        </CardContent></Card>
-        <div className="space-y-4">
-          {filteredResults.map((result) => (
-            <Card key={result.id} className="hover:shadow-lg transition-shadow"><CardContent className="p-6"><div className="flex items-start gap-4">
-              <div className="p-2 bg-teal-100 rounded-lg mt-1"><FileText className="size-5 text-teal-600" /></div>
-              <div className="flex-1 min-w-0"><div className="mb-2"><h3 className="text-xl text-gray-800 mb-1">{result.examTitle}</h3><p className="text-gray-600">{result.subject}</p></div>
-                <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3"><span className="flex items-center gap-1"><Calendar className="size-4" />{formatDate(result.date)}</span><span className="flex items-center gap-1"><Clock className="size-4" />{result.duration}</span>{(result.maxAttempts ?? 0) > 0 && <span className="flex items-center gap-1"><RefreshCw className="size-4" />Attempt: {result.attemptNumber ?? 0}/{result.maxAttempts}</span>}</div>
-                {result.status === "published" && result.scoreVisible && result.score !== null ? <div className="bg-gradient-to-r from-teal-50 to-blue-50 border border-teal-200 rounded-lg p-4"><div className="flex items-center justify-between"><span className="text-sm text-gray-600">Your Score</span><span className={`text-2xl ${scoreColor(result)}`}>{result.score.toFixed(2)} / 10</span></div><div className="flex items-center justify-between text-sm text-gray-600 mt-2"><span>{result.correctAnswers !== null ? `${result.correctAnswers} / ${result.totalQuestions} correct answers` : ""}</span><span>Time: {result.timeTaken}</span></div></div> : null}
-                {result.status === "pending" && <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">Awaiting essay grading</div>}
-                {result.status === "hidden" && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">Result is hidden by Teacher</div>}
-                {result.status === "published" && !result.scoreVisible && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">Result is hidden by Teacher</div>}
-              </div>
-              <div className="flex flex-col gap-2 shrink-0 w-32"><div className={`w-full h-9 flex items-center justify-center rounded-md border ${result.terminated ? "bg-orange-100 text-orange-700 border-orange-200" : result.status === "published" ? "bg-green-100 text-green-700 border-green-200" : result.status === "pending" ? "bg-yellow-100 text-yellow-700 border-yellow-200" : "bg-red-100 text-red-700 border-red-200"}`}>{result.terminated ? "Terminated" : result.status[0].toUpperCase() + result.status.slice(1)}</div>{result.allowViewDetails && <Button onClick={() => onViewDetails(String(result.attemptId))} className="w-full bg-gradient-to-r from-teal-500 to-blue-600" size="sm"><Eye className="size-4 mr-1" />View</Button>}</div>
-            </div></CardContent></Card>
-          ))}
-          {filteredResults.length === 0 && <Card><CardContent className="py-12 text-center text-gray-600">{results.length === 0 ? "You do not have any exam results yet." : "No exam results found matching your criteria."}</CardContent></Card>}
-        </div>
-      </div>
-      <ExamResultsStats results={results} />
-    </div>
-  );
+export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) {
+  const [results, setResults] = useState<StudentExamResult[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId === null || initialExamId === undefined ? null : String(initialExamId));
+  const load = async () => { try { setLoading(true); setError(null); setResults(await studentResultService.list()); } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load exam results."); } finally { setLoading(false); } };
+  useEffect(() => { void load(); }, []); useEffect(() => { setSelectedExamId(initialExamId === null || initialExamId === undefined ? null : String(initialExamId)); }, [initialExamId]);
+  const groups = useMemo<StudentExamResultGroup[]>(() => { const grouped = new Map<number, StudentExamResult[]>(); results.forEach((attempt) => grouped.set(attempt.examId, [...(grouped.get(attempt.examId) ?? []), attempt])); return [...grouped.entries()].map(([examId, attempts]) => { const ordered = sortAttempts(attempts); const latest = ordered[0]; return { examId, examTitle: latest.examTitle, subjectId: latest.subjectId ?? null, subjectName: latest.subjectName ?? latest.subject, maxAttempts: latest.maxAttempts, finalScore: latest.finalScore ?? null, resultStrategy: latest.resultStrategy ?? "highest", passingScore: latest.passingScore, resultVisibility: latest.resultVisibility ?? "hidden", gradingPending: ordered.some((attempt) => attempt.gradingPending), latestAttempt: latest, attempts: ordered }; }).sort((a, b) => attemptTime(b.latestAttempt) - attemptTime(a.latestAttempt)); }, [results]);
+  const selectedGroup = groups.find((group) => String(group.examId) === selectedExamId);
+  if (loading) return <p className="text-gray-600">Loading exam results...</p>; if (error) return <Card><CardContent className="space-y-4 py-12 text-center"><p className="text-red-600">{error}</p><Button variant="outline" onClick={() => void load()}><RefreshCw className="mr-2 size-4" />Retry</Button></CardContent></Card>;
+  return <div className="flex gap-6"><div className="flex-1 space-y-6"><div><h1 className="text-3xl text-slate-800">Exam Results</h1><p className="text-slate-600">Review each exam and its submitted attempts.</p></div>{selectedGroup ? <div className="space-y-4"><Button variant="outline" onClick={() => setSelectedExamId(null)}><ArrowLeft className="mr-2 size-4" />Back to Exams</Button><h2 className="text-2xl text-slate-800">{selectedGroup.examTitle}</h2>{selectedGroup.attempts.map((attempt) => <Card key={attempt.attemptId}><CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center"><div className="flex-1"><p className="font-medium text-slate-800">Attempt {attempt.attemptNumber ?? "-"}{attempt.terminated ? " - Terminated" : ""}</p><p className="mt-1 flex flex-wrap gap-3 text-sm text-slate-600"><span className="flex items-center gap-1"><Calendar className="size-4" />{formatDate(attempt.submittedAt ?? attempt.startedAt)}</span><span className="flex items-center gap-1"><Clock className="size-4" />{attempt.timeTaken}</span>{attempt.gradingPending ? <span className="text-amber-700">Grading in progress</span> : null}{attempt.terminationReason ? <span className="text-orange-700">{attempt.terminationReason}</span> : null}</p></div>{attempt.scoreVisible && attempt.attemptScore !== null ? <span className="font-medium text-teal-700">{attempt.attemptScore.toFixed(2)} / {attempt.gradingScale}</span> : <span className="text-sm text-slate-500">Score unavailable</span>}{attempt.allowViewDetails ? <Button size="sm" onClick={() => onViewDetails(attempt.attemptId, attempt.examId)}><Eye className="mr-1 size-4" />View Result</Button> : null}</CardContent></Card>)}</div> : <div className="space-y-4">{groups.map((group) => <Card key={group.examId} className="border-teal-100 hover:shadow-md"><CardContent className="p-6"><div className="flex items-start gap-4"><div className="flex size-12 flex-shrink-0 self-start items-center justify-center rounded-xl bg-teal-100"><FileText className="size-5 text-teal-700" /></div><div className="flex-1"><h2 className="text-xl text-slate-800">{group.examTitle}</h2><p className="text-sm text-slate-600">{group.subjectName}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600"><span>Attempts: {group.attempts.length} / {group.maxAttempts && group.maxAttempts > 0 ? group.maxAttempts : "Unlimited"}</span><span>Latest: #{group.latestAttempt.attemptNumber ?? "-"}, {formatDate(group.latestAttempt.submittedAt ?? group.latestAttempt.startedAt)}</span><span>{strategyLabel[group.resultStrategy]}</span></div><div className="mt-4 flex items-center justify-between rounded-lg border border-teal-100 bg-teal-50 p-3">{group.gradingPending ? <span className="text-amber-800">Grading in progress</span> : group.latestAttempt.scoreVisible && group.finalScore !== null ? <span className="text-lg text-teal-700">Final score: {group.finalScore.toFixed(2)} / {group.latestAttempt.gradingScale}</span> : <span className="text-slate-600">Final score not available</span>}<Button variant="outline" onClick={() => setSelectedExamId(String(group.examId))}>View Attempts</Button></div></div></div></CardContent></Card>)}{groups.length === 0 ? <Card><CardContent className="py-12 text-center text-slate-600">You do not have any exam results yet.</CardContent></Card> : null}</div>}</div><ExamResultsStats groups={groups} /></div>;
 }

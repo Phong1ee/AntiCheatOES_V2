@@ -133,7 +133,7 @@ export function ExamList({
   const handleRequestCode = (exam: Exam) => {
     setSelectedExam(exam);
     setDetailsOpen(false);
-    if (exam.examCode === null && !exam.requiresFullscreen) {
+    if (!exam.requiresExamCode && !exam.requiresFullscreen) {
       setFetchedLoadError(null);
       void startExam(exam).catch((error: unknown) => {
         console.error(error);
@@ -374,7 +374,7 @@ export function ExamList({
         exam={selectedExam}
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        onEnterExam={() => selectedExam && handleEnterExam(selectedExam.id)}
+        onEnterExam={() => selectedExam && handleRequestCode(selectedExam)}
         onRequestCode={() => selectedExam && handleRequestCode(selectedExam)}
       />
 

@@ -60,6 +60,7 @@ export const teacherExamService = {
     return data;
   },
 
+
   async delete(examId: number): Promise<void> {
     await apiClient.delete(`/api/teacher/delete_exam/${examId}`);
   },

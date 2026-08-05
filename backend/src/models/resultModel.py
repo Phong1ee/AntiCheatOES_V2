@@ -64,6 +64,28 @@ def _result_flags(result_visibility, pending_essay_count):
     return status, score_visible, allow_view_details
 
 
+def _result_metadata(row, pending_essay_count):
+    """Build list/detail fields without substituting an attempt score for final_score."""
+    status, score_visible, allow_view_details = _result_flags(
+        row["result_visibility"], pending_essay_count,
+    )
+    visibility = _visibility(row["result_visibility"])
+    final_score = _score_value(row.get("final_score")) if score_visible else None
+    attempt_score = _score_value(row["score"]) if score_visible else None
+    return {
+        "status": status,
+        "resultStatus": status,
+        "resultVisibility": visibility,
+        "scoreVisible": score_visible,
+        "allowViewDetails": allow_view_details,
+        "attemptScore": attempt_score,
+        "finalScore": final_score,
+        "resultStrategy": row.get("result_strategy") or "highest",
+        "gradingPending": pending_essay_count > 0,
+        "essayPending": pending_essay_count > 0,
+    }
+
+
 def _snapshot_options(value):
     if isinstance(value, str):
         return json.loads(value)
@@ -83,14 +105,17 @@ def get_student_results(user_id: int):
         a.end_time,
         a.submitted_at,
         a.status AS attempt_status,
+        a.termination_reason,
         e.title,
-        e.description,
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
         e.total_points AS exam_total_points,
         e.passing_score,
-        COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
+        e.subject_id,
+        COALESCE(s.subject_name, e.subject_id, 'General') AS subject_name,
+        se.final_score,
+        COALESCE(es.result_strategy, 'highest') AS result_strategy,
         COUNT(DISTINCT aq.question_id) AS total_questions,
         COALESCE(SUM(COALESCE(aq.question_point_snapshot, aq.question_point, 0)), 0) AS snapshot_total_points,
         COALESCE(SUM(CASE WHEN LOWER(COALESCE(aq.question_type_snapshot, q.question_type)) = 'essay'
@@ -103,6 +128,11 @@ def get_student_results(user_id: int):
         ON e.exam_id = a.exam_id
     LEFT JOIN subject s
         ON s.subject_id = e.subject_id
+    LEFT JOIN student_exam se
+        ON se.exam_id = a.exam_id
+        AND se.student_id = a.student_id
+    LEFT JOIN exam_setting es
+        ON es.exam_id = e.exam_id
     LEFT JOIN attempt_question aq
         ON aq.attempt_id = a.attempt_id
     LEFT JOIN question q
@@ -127,15 +157,17 @@ def get_student_results(user_id: int):
         a.end_time,
         a.submitted_at,
         a.status,
+        a.termination_reason,
         e.title,
-        e.description,
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
         e.total_points,
         e.passing_score,
+        e.subject_id,
         s.subject_name,
-        e.subject_id
+        se.final_score,
+        es.result_strategy
     ORDER BY a.submitted_at DESC, a.attempt_id DESC
     """
     try:
@@ -145,25 +177,24 @@ def get_student_results(user_id: int):
 
         for row in rows:
             pending_essay_count = int(row["pending_essay_count"] or 0)
-            status, score_visible, allow_view_details = _result_flags(
-                row["result_visibility"],
-                pending_essay_count,
-            )
+            metadata = _result_metadata(row, pending_essay_count)
             total_questions = int(row["total_questions"] or 0)
-            correct_answers = int(row["correct_answers"] or 0) if allow_view_details else None
+            correct_answers = int(row["correct_answers"] or 0) if metadata["allowViewDetails"] else None
             total_points = _attempt_total_points(row["snapshot_total_points"])
-
-            visible_score = _score_value(row["score"]) if score_visible else None
             results.append({
                 "id": str(row["attempt_id"]),
                 "attemptId": row["attempt_id"],
                 "examId": row["exam_id"],
                 "examTitle": row["title"],
-                "subject": row["subject"] or "General",
+                "subject": row["subject_name"] or "General",
+                "subjectId": row["subject_id"],
+                "subjectName": row["subject_name"] or "General",
                 "date": _iso(row["submitted_at"] or row["end_time"] or row["start_time"]),
+                "submittedAt": _iso(row["submitted_at"]),
+                "startedAt": _iso(row["start_time"]),
+                "endedAt": _iso(row["end_time"]),
                 "duration": _duration_label(row["duration_minutes"]),
-                "status": status,
-                "score": visible_score,
+                "score": metadata["attemptScore"],
                 "rawScore": None,
                 "rawEarnedScore": None,
                 "rawPossibleScore": total_points,
@@ -171,19 +202,19 @@ def get_student_results(user_id: int):
                 "gradingScale": _score_value(GRADING_SCALE),
                 "passingScore": _score_value(row["passing_score"]),
                 "passed": (
-                    visible_score >= _score_value(row["passing_score"])
-                    if visible_score is not None and row["passing_score"] is not None
+                    metadata["finalScore"] >= _score_value(row["passing_score"])
+                    if metadata["finalScore"] is not None and row["passing_score"] is not None
                     else None
                 ),
-                "correctAnswers": correct_answers if allow_view_details else None,
+                "correctAnswers": correct_answers if metadata["allowViewDetails"] else None,
                 "totalQuestions": total_questions,
                 "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
-                "scoreVisible": score_visible,
-                "allowViewDetails": allow_view_details,
                 "attemptNumber": row["attempt_no"],
                 "maxAttempts": row["max_attempt"],
                 "attemptStatus": row["attempt_status"],
                 "terminated": row["attempt_status"] == "terminated",
+                "terminationReason": row.get("termination_reason"),
+                **metadata,
             })
 
         return results
@@ -205,14 +236,17 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         a.end_time,
         a.submitted_at,
         a.status AS attempt_status,
+        a.termination_reason,
         e.title,
-        e.description,
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
         e.total_points AS exam_total_points,
         e.passing_score,
-        COALESCE(s.subject_name, e.subject_id, e.description, 'General') AS subject,
+        e.subject_id,
+        COALESCE(s.subject_name, e.subject_id, 'General') AS subject_name,
+        se.final_score,
+        COALESCE(es.result_strategy, 'highest') AS result_strategy,
         COUNT(DISTINCT aq.question_id) AS total_questions,
         COALESCE(SUM(COALESCE(aq.question_point_snapshot, aq.question_point, 0)), 0) AS snapshot_total_points,
         COALESCE(SUM(CASE WHEN LOWER(COALESCE(aq.question_type_snapshot, q.question_type)) = 'essay'
@@ -223,6 +257,11 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         ON e.exam_id = a.exam_id
     LEFT JOIN subject s
         ON s.subject_id = e.subject_id
+    LEFT JOIN student_exam se
+        ON se.exam_id = a.exam_id
+        AND se.student_id = a.student_id
+    LEFT JOIN exam_setting es
+        ON es.exam_id = e.exam_id
     LEFT JOIN attempt_question aq
         ON aq.attempt_id = a.attempt_id
     LEFT JOIN question q
@@ -246,15 +285,17 @@ def get_student_result_detail(user_id: int, attempt_id: int):
         a.end_time,
         a.submitted_at,
         a.status,
+        a.termination_reason,
         e.title,
-        e.description,
         e.duration_minutes,
         e.max_attempt,
         e.result_visibility,
         e.total_points,
         e.passing_score,
+        e.subject_id,
         s.subject_name,
-        e.subject_id
+        se.final_score,
+        es.result_strategy
     """
     try:
         cursor.execute(base_query, (user_id, attempt_id))
@@ -263,54 +304,54 @@ def get_student_result_detail(user_id: int, attempt_id: int):
             return None
 
         pending_essay_count = int(row["pending_essay_count"] or 0)
-        status, score_visible, allow_view_details = _result_flags(
-            row["result_visibility"],
-            pending_essay_count,
-        )
+        metadata = _result_metadata(row, pending_essay_count)
         total_questions = int(row["total_questions"] or 0)
         total_points = _attempt_total_points(row["snapshot_total_points"])
 
-        question_details = _get_attempt_questions(cursor, row["attempt_id"]) if allow_view_details else []
+        question_details = _get_attempt_questions(cursor, row["attempt_id"]) if metadata["allowViewDetails"] else []
         raw_earned = sum(
             Decimal(str(question["awardedPoints"] or 0))
             for question in question_details
             if question["awardedPoints"] is not None
-        ) if allow_view_details else None
-        visible_score = _score_value(row["score"]) if score_visible else None
+        ) if metadata["allowViewDetails"] else None
         result = {
             "id": str(row["attempt_id"]),
             "attemptId": row["attempt_id"],
             "examId": row["exam_id"],
             "examTitle": row["title"],
-            "subject": row["subject"] or "General",
+            "subject": row["subject_name"] or "General",
+            "subjectId": row["subject_id"],
+            "subjectName": row["subject_name"] or "General",
             "date": _iso(row["submitted_at"] or row["end_time"] or row["start_time"]),
+            "submittedAt": _iso(row["submitted_at"]),
+            "startedAt": _iso(row["start_time"]),
+            "endedAt": _iso(row["end_time"]),
             "duration": _duration_label(row["duration_minutes"]),
             "timeTaken": _time_taken(row["start_time"], row["end_time"], row["submitted_at"]),
-            "status": status,
-            "score": visible_score,
-            "rawScore": _score_value(raw_earned) if raw_earned is not None and score_visible else None,
-            "rawEarnedScore": _score_value(raw_earned) if raw_earned is not None and score_visible else None,
+            "score": metadata["attemptScore"],
+            "rawScore": _score_value(raw_earned) if raw_earned is not None and metadata["scoreVisible"] else None,
+            "rawEarnedScore": _score_value(raw_earned) if raw_earned is not None and metadata["scoreVisible"] else None,
             "rawPossibleScore": total_points,
             "totalPoints": total_points,
             "gradingScale": _score_value(GRADING_SCALE),
             "passingScore": _score_value(row["passing_score"]),
             "passed": (
-                visible_score >= _score_value(row["passing_score"])
-                if visible_score is not None and row["passing_score"] is not None
+                metadata["finalScore"] >= _score_value(row["passing_score"])
+                if metadata["finalScore"] is not None and row["passing_score"] is not None
                 else None
             ),
             "correctAnswers": None,
             "totalQuestions": total_questions,
-            "scoreVisible": score_visible,
-            "allowViewDetails": allow_view_details,
             "attemptNumber": row["attempt_no"],
             "maxAttempts": row["max_attempt"],
             "attemptStatus": row["attempt_status"],
             "terminated": row["attempt_status"] == "terminated",
+            "terminationReason": row.get("termination_reason"),
+            **metadata,
             "questions": [],
         }
 
-        if allow_view_details:
+        if metadata["allowViewDetails"]:
             result["questions"] = question_details
             result["correctAnswers"] = sum(1 for question in result["questions"] if question["isCorrect"])
 

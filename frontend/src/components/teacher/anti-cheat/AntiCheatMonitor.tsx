@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
+import type { MonitorAttempt, MonitorDetail, MonitorExam, MonitorSubject } from '../../../types/teacher-anti-cheat';
 import {
   Shield,
   RefreshCw,
@@ -87,188 +89,6 @@ interface Subject {
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
-
-const SUBJECTS: Subject[] = [
-  {
-    id: 's1',
-    code: 'DBI202',
-    name: 'Database Systems',
-    exams: [
-      {
-        id: 'e1',
-        name: 'Midterm Exam',
-        date: '2025-11-14',
-        attempts: [
-          {
-            id: 'a1',
-            studentName: 'Alice Johnson',
-            studentId: 'ST001',
-            attemptStatus: 'in-progress',
-            violations: { count: 0, max: 3 },
-            aiFlags: [],
-            lastEvent: 'Exam started',
-            lastActivity: '2 min ago',
-            antiCheatStatus: 'clean',
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [],
-            timeline: [
-              { id: 'e1', time: '10:00 AM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-            ],
-          },
-          {
-            id: 'a2',
-            studentName: 'Bob Smith',
-            studentId: 'ST002',
-            attemptStatus: 'in-progress',
-            violations: { count: 2, max: 3 },
-            aiFlags: [
-              { type: 'phone', label: 'Phone Detected', detectedAt: '10:21 AM' },
-            ],
-            lastEvent: 'Copy attempt',
-            lastActivity: '5 min ago',
-            antiCheatStatus: 'warning',
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [
-              { label: 'Tab switch', count: 1 },
-              { label: 'Copy/paste attempt', count: 1 },
-            ],
-            timeline: [
-              { id: 'e1', time: '10:00 AM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-              { id: 'e2', time: '10:08 AM', type: 'violation', title: 'Tab switch', detail: 'Browser lost focus for 4 seconds.' },
-              { id: 'e3', time: '10:21 AM', type: 'ai-flag', title: 'AI: Phone detected', detail: 'A mobile device was detected in the camera frame.' },
-              { id: 'e4', time: '10:21 AM', type: 'violation', title: 'Copy/paste attempt', detail: 'Ctrl+V detected in answer field.' },
-            ],
-          },
-          {
-            id: 'a3',
-            studentName: 'Carol Williams',
-            studentId: 'ST003',
-            attemptStatus: 'submitted',
-            violations: { count: 1, max: 3 },
-            aiFlags: [
-              { type: 'no-face', label: 'No Face Detected', detectedAt: '10:05 AM' },
-              { type: 'multiple-faces', label: 'Multiple Faces', detectedAt: '10:18 AM' },
-              { type: 'speech', label: 'Speech Detected', detectedAt: '10:30 AM' },
-            ],
-            lastEvent: 'Submitted',
-            lastActivity: '1 hr ago',
-            antiCheatStatus: 'flagged',
-            score: 91,
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [{ label: 'Tab switch', count: 1 }],
-            timeline: [
-              { id: 'e1', time: '10:00 AM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-              { id: 'e2', time: '10:05 AM', type: 'ai-flag', title: 'AI: No face detected', detail: 'Student moved out of camera frame for 12 seconds.' },
-              { id: 'e3', time: '10:08 AM', type: 'violation', title: 'Tab switch', detail: 'Browser lost focus for 2 seconds.' },
-              { id: 'e4', time: '10:18 AM', type: 'ai-flag', title: 'AI: Multiple faces detected', detail: 'Two faces visible in camera frame.' },
-              { id: 'e5', time: '10:30 AM', type: 'ai-flag', title: 'AI: Speech detected', detail: 'Audio detected — possible communication.' },
-              { id: 'e6', time: '10:45 AM', type: 'system', title: 'Exam submitted', detail: 'Student submitted before time limit.' },
-            ],
-          },
-          {
-            id: 'a4',
-            studentName: 'David Brown',
-            studentId: 'ST004',
-            attemptStatus: 'terminated',
-            violations: { count: 3, max: 3 },
-            aiFlags: [
-              { type: 'phone', label: 'Phone Detected', detectedAt: '01:11 AM' },
-            ],
-            lastEvent: 'Auto-terminated',
-            lastActivity: '3 hr ago',
-            antiCheatStatus: 'terminated',
-            terminationReason: 'Exceeded maximum violation limit (3/3). Auto-terminated per exam policy.',
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [
-              { label: 'Tab switch', count: 2 },
-              { label: 'Right-click attempt', count: 1 },
-            ],
-            timeline: [
-              { id: 'e1', time: '01:00 PM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-              { id: 'e2', time: '01:04 PM', type: 'violation', title: 'Tab switch (1/3)', detail: 'Browser lost focus for 8 seconds.' },
-              { id: 'e3', time: '01:11 PM', type: 'ai-flag', title: 'AI: Phone detected', detail: 'Mobile device visible in frame.' },
-              { id: 'e4', time: '01:18 PM', type: 'violation', title: 'Right-click attempt (2/3)', detail: 'Context menu blocked.' },
-              { id: 'e5', time: '01:33 PM', type: 'violation', title: 'Tab switch (3/3) — limit reached', detail: 'Third violation triggered auto-termination.' },
-              { id: 'e6', time: '01:33 PM', type: 'system', title: 'Session terminated', detail: 'Auto-terminated per policy.' },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'e2',
-        name: 'Final Exam',
-        date: '2025-12-20',
-        attempts: [
-          {
-            id: 'a5',
-            studentName: 'Emma Davis',
-            studentId: 'ST005',
-            attemptStatus: 'submitted',
-            violations: { count: 0, max: 3 },
-            aiFlags: [],
-            lastEvent: 'Submitted',
-            lastActivity: '2 hr ago',
-            antiCheatStatus: 'clean',
-            score: 88,
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [],
-            timeline: [
-              { id: 'e1', time: '09:00 AM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-              { id: 'e2', time: '11:28 AM', type: 'system', title: 'Exam submitted', detail: 'Student submitted successfully.' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 's2',
-    code: 'DSA301',
-    name: 'Data Structures & Algorithms',
-    exams: [
-      {
-        id: 'e3',
-        name: 'Midterm Exam',
-        date: '2025-11-12',
-        attempts: [
-          {
-            id: 'a6',
-            studentName: 'Frank Lee',
-            studentId: 'ST006',
-            attemptStatus: 'in-progress',
-            violations: { count: 1, max: 3 },
-            aiFlags: [{ type: 'no-face', label: 'No Face Detected', detectedAt: '02:10 PM' }],
-            lastEvent: 'Tab switch',
-            lastActivity: '1 min ago',
-            antiCheatStatus: 'warning',
-            policy: { maxViolations: 3, aiFlagThreshold: 2, terminateOnExceed: true },
-            violationBreakdown: [{ label: 'Tab switch', count: 1 }],
-            timeline: [
-              { id: 'e1', time: '02:00 PM', type: 'system', title: 'Exam started', detail: 'Student began the exam.' },
-              { id: 'e2', time: '02:10 PM', type: 'ai-flag', title: 'AI: No face detected', detail: 'Student absent from camera for 20 seconds.' },
-              { id: 'e3', time: '02:15 PM', type: 'violation', title: 'Tab switch', detail: 'Browser lost focus.' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 's3',
-    code: 'WEB401',
-    name: 'Web Development',
-    exams: [
-      {
-        id: 'e4',
-        name: 'Quiz #3',
-        date: '2025-11-10',
-        attempts: [],
-      },
-    ],
-  },
-];
-
-// ─── Status configs ───────────────────────────────────────────────────────────
 
 const acConfig: Record<AntiCheatStatus, { label: string; cls: string; icon: typeof CheckCircle }> = {
   clean:      { label: 'Clean',      cls: 'bg-green-50 text-green-700 border-green-200',   icon: CheckCircle },
@@ -591,6 +411,7 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function AntiCheatMonitor() {
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -598,7 +419,7 @@ export function AntiCheatMonitor() {
   const [antiCheatFilter, setAntiCheatFilter] = useState('all');
   const [drawerAttempt, setDrawerAttempt] = useState<Attempt | null>(null);
 
-  const selectedSubject = SUBJECTS.find((s) => s.id === selectedSubjectId) ?? null;
+  const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
   const selectedExam = selectedSubject?.exams.find((e) => e.id === selectedExamId) ?? null;
 
   const handleSubjectChange = (id: string) => {
@@ -607,6 +428,7 @@ export function AntiCheatMonitor() {
     setSearch('');
     setAttemptStatusFilter('all');
     setAntiCheatFilter('all');
+    teacherAntiCheatService.exams(id).then((items: MonitorExam[]) => setSubjects((current) => current.map((subject) => subject.id === id ? { ...subject, exams: items.map((exam) => ({ id: String(exam.examId), name: exam.title, date: String(exam.startTime ?? ''), attempts: [] })) } : subject)));
   };
 
   const handleExamChange = (id: string) => {
@@ -614,7 +436,14 @@ export function AntiCheatMonitor() {
     setSearch('');
     setAttemptStatusFilter('all');
     setAntiCheatFilter('all');
+    if (!selectedSubjectId) return;
+    teacherAntiCheatService.attempts(id).then((items: MonitorAttempt[]) => {
+      const mapped = items.map((attempt): Attempt => ({ id: String(attempt.attemptId), studentName: attempt.studentName, studentId: attempt.studentId, attemptStatus: attempt.attemptStatus.replace('_', '-') as AttemptStatus, violations: { count: attempt.violationCount, max: attempt.violationLimit }, aiFlags: attempt.flagged ? [{ type: 'phone', label: 'AI event recorded', detectedAt: String(attempt.lastEventAt ?? '') }] : [], lastEvent: attempt.lastEventType ?? '-', lastActivity: String(attempt.lastEventAt ?? ''), antiCheatStatus: attempt.attemptStatus === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean', score: attempt.score ?? undefined, terminationReason: attempt.terminationReason ?? undefined, policy: { maxViolations: attempt.violationLimit, aiFlagThreshold: 0, terminateOnExceed: true }, violationBreakdown: [], timeline: [] }));
+      setSubjects((current) => current.map((subject) => subject.id !== selectedSubjectId ? subject : { ...subject, exams: subject.exams.map((exam) => exam.id === id ? { ...exam, attempts: mapped } : exam) }));
+    });
   };
+
+  useEffect(() => { teacherAntiCheatService.subjects().then((items: MonitorSubject[]) => setSubjects(items.map((item) => ({ id: item.subjectId, code: item.code, name: item.name, exams: [] })))); }, []);
 
   const attempts = selectedExam?.attempts ?? [];
 
@@ -658,7 +487,7 @@ export function AntiCheatMonitor() {
                 <SelectValue placeholder="Select a subject" />
               </SelectTrigger>
               <SelectContent>
-                {SUBJECTS.map((s) => (
+                {subjects.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     <span className="font-medium text-gray-700">{s.code}</span>
                     <span className="text-gray-400 ml-1.5">— {s.name}</span>
@@ -671,10 +500,10 @@ export function AntiCheatMonitor() {
             <Select
               value={selectedExamId ?? ''}
               onValueChange={handleExamChange}
-              disabled={!selectedSubjectId}
+              disabled={!selectedSubjectId || !selectedSubject || selectedSubject.exams.length === 0}
             >
               <SelectTrigger className="w-[220px] bg-white shadow-sm disabled:opacity-50">
-                <SelectValue placeholder="Select an exam" />
+                <SelectValue placeholder={selectedSubject && selectedSubject.exams.length === 0 ? "No exams available" : "Select an exam"} />
               </SelectTrigger>
               <SelectContent>
                 {(selectedSubject?.exams ?? []).map((e) => (
@@ -704,7 +533,11 @@ export function AntiCheatMonitor() {
         )}
 
         {selectedSubjectId && !selectedExamId && (
-          <EmptyState icon={FileText} title="No exam selected" description="Select an exam to view anti-cheat activity." />
+          <EmptyState
+            icon={FileText}
+            title={selectedSubject?.exams.length === 0 ? "No exams available" : "No exam selected"}
+            description={selectedSubject?.exams.length === 0 ? "No exams available for this subject." : "Select an exam to view anti-cheat activity."}
+          />
         )}
 
         {/* Monitor content */}

@@ -149,6 +149,8 @@ def _copy_exam_settings(db: Session, source_exam_id: int, target_exam_id: int) -
             force_fullscreen_thresh=source.force_fullscreen_thresh,
             tab_switch_thresh=source.tab_switch_thresh,
             copy_paste_thresh=source.copy_paste_thresh,
+            anti_cheat_enabled=source.anti_cheat_enabled,
+            violation_limit=source.violation_limit,
             auto_grade=source.auto_grade,
             result_strategy=source.result_strategy,
         )

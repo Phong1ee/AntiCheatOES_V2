@@ -171,11 +171,10 @@ class TeacherQuestionBankTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             update_question(created["question_id"], self._payload(), self._current("T2"), {}, self.db)
         self.assertEqual(raised.exception.status_code, 404)
-        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.id, subject_id="DB").update({"is_active": False})
+        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.school_id, subject_id="DB").update({"is_active": False})
         self.db.commit()
         mine = list_my_questions(current_user=self._current(), role_check={}, db=self.db)
-        self.assertFalse(mine["items"][0]["permissions"]["can_edit"])
-        self.assertFalse(mine["items"][0]["permissions"]["can_delete"])
+        self.assertEqual(mine["items"], [])
         with self.assertRaises(HTTPException) as raised:
             update_question(created["question_id"], self._payload(), self._current(), {}, self.db, expected_status="pending")
         self.assertEqual(raised.exception.status_code, 403)
@@ -197,7 +196,7 @@ class TeacherQuestionBankTests(unittest.TestCase):
             delete_question(created["question_id"], self._current(), {}, self.db, expected_status="pending")
         self.assertEqual(raised.exception.status_code, 409)
         self.db.query(ExamQuestion).delete()
-        attempt = Attempt(exam_id=exam.exam_id, student_id=self.teacher_one.id, attempt_no=1)
+        attempt = Attempt(exam_id=exam.exam_id, student_id=self.teacher_one.school_id, attempt_no=1)
         self.db.add(attempt)
         self.db.flush()
         self.db.add(AttemptQuestion(attempt_id=attempt.attempt_id, question_id=created["question_id"], display_order=1))
@@ -259,35 +258,35 @@ class TeacherQuestionBankTests(unittest.TestCase):
         self.assertEqual(approved_view["items"], [])
 
     def test_teacher_with_subject_permission_can_edit_admin_created_approved_question(self):
-        created = self._approved(created_by=self.admin.id)
+        created = self._approved(created_by=self.admin.school_id)
         update_question(created["question_id"], self._payload(question_text="Teacher proposal"), self._current(), {}, self.db)
         active = self.db.get(Question, created["question_id"])
         revision = self.db.query(QuestionRevision).one()
-        self.assertEqual(active.created_by, self.admin.id)
+        self.assertEqual(active.created_by, self.admin.school_id)
         self.assertEqual(active.question_status, QuestionStatus.approved)
         self.assertEqual(active.question_text, "What is normalization?")
-        self.assertEqual(revision.edited_by, self.teacher_one.id)
+        self.assertEqual(revision.edited_by, self.teacher_one.school_id)
         self.assertEqual(revision.question_status, "pending")
 
     def test_teacher_with_subject_permission_can_edit_other_teachers_approved_question(self):
         created = self._approved()
         update_question(created["question_id"], self._payload(question_text="Teacher two proposal"), self._current("T2"), {}, self.db)
         revision = self.db.query(QuestionRevision).one()
-        self.assertEqual(revision.edited_by, self.teacher_two.id)
+        self.assertEqual(revision.edited_by, self.teacher_two.school_id)
         self.assertEqual(revision.question_text, "Teacher two proposal")
 
     def test_approved_edit_requires_subject_permission_even_for_the_owner(self):
         created = self._approved()
-        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.id, subject_id="DB").update({"is_active": False})
+        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.school_id, subject_id="DB").update({"is_active": False})
         self.db.commit()
         with self.assertRaises(HTTPException) as raised:
             update_question(created["question_id"], self._payload(question_text="Blocked"), self._current(), {}, self.db)
         self.assertEqual(raised.exception.status_code, 403)
         bank = list_approved_question_bank(current_user=self._current(), role_check={}, db=self.db)
-        self.assertFalse(bank["items"][0]["permissions"]["can_edit"])
+        self.assertEqual(bank["items"], [])
 
     def test_question_bank_returns_edit_permission_for_authorized_approved_question(self):
-        self._approved(created_by=self.admin.id)
+        self._approved(created_by=self.admin.school_id)
         bank = list_approved_question_bank(current_user=self._current("T2"), role_check={}, db=self.db)
         self.assertTrue(bank["items"][0]["permissions"]["can_edit"])
         self.assertFalse(bank["items"][0]["permissions"]["can_delete"])
@@ -324,14 +323,14 @@ class TeacherQuestionBankTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 404)
         update_question(created["question_id"], self._payload(question_text="Teacher two proposal"), self._current("T2"), {}, self.db)
         revisions = self.db.query(QuestionRevision).order_by(QuestionRevision.edited_by).all()
-        self.assertEqual([item.edited_by for item in revisions], [self.teacher_one.id, self.teacher_two.id])
+        self.assertEqual([item.edited_by for item in revisions], [self.teacher_one.school_id, self.teacher_two.school_id])
 
     def test_rejected_revision_is_retained_and_next_approved_edit_creates_next_pending_version(self):
         created = self._approved()
         rejected = QuestionRevision(
             question_id=created["question_id"], version_number=1, question_text="Rejected proposal", question_type="MCQ",
             question_difficulties="medium", subject_id="DB", question_status="rejected", options_snapshot=[],
-            chapter_ids_snapshot=[], lo_ids_snapshot=[], edited_by=self.teacher_one.id, rejection_reason="Needs clarity",
+            chapter_ids_snapshot=[], lo_ids_snapshot=[], edited_by=self.teacher_one.school_id, rejection_reason="Needs clarity",
         )
         self.db.add(rejected)
         self.db.commit()
@@ -348,7 +347,7 @@ class TeacherQuestionBankTests(unittest.TestCase):
         rejected = QuestionRevision(
             question_id=created["question_id"], version_number=1, question_text="Rejected proposal", question_type="MCQ",
             question_difficulties="medium", subject_id="DB", question_status="rejected", options_snapshot=[],
-            chapter_ids_snapshot=[], lo_ids_snapshot=[], edited_by=self.teacher_one.id, rejection_reason="Needs clarity",
+            chapter_ids_snapshot=[], lo_ids_snapshot=[], edited_by=self.teacher_one.school_id, rejection_reason="Needs clarity",
         )
         self.db.add(rejected)
         self.db.commit()
@@ -370,7 +369,7 @@ class TeacherQuestionBankTests(unittest.TestCase):
         self.assertEqual(bank["items"][0]["question_text"], "What is normalization?")
 
     def test_subject_permission_required_for_create_and_subject_change(self):
-        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.id, subject_id="DB").update({"is_active": False})
+        self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher_one.school_id, subject_id="DB").update({"is_active": False})
         self.db.commit()
         with self.assertRaises(HTTPException) as raised:
             self._create()

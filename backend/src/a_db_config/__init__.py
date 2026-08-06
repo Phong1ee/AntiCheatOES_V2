@@ -454,6 +454,7 @@ class ExamSetting(Base):
         ),
         CheckConstraint("tab_switch_thresh >= 0", name="ck_exam_setting_tab_switch_thresh_nonnegative"),
         CheckConstraint("copy_paste_thresh >= 0", name="ck_exam_setting_copy_paste_thresh_nonnegative"),
+        CheckConstraint("violation_limit > 0", name="ck_exam_setting_violation_limit_positive"),
     )
 
     exam_id: Mapped[int] = mapped_column(
@@ -484,6 +485,12 @@ class ExamSetting(Base):
     )
     copy_paste_thresh: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
+    )
+    anti_cheat_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    violation_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default=text("5")
     )
     auto_grade: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")
@@ -534,6 +541,7 @@ class Attempt(Base):
     __tablename__ = "attempt"
     __table_args__ = (
         UniqueConstraint("exam_id", "student_id", "attempt_no", name="uq_attempt_exam_student_no"),
+        CheckConstraint("violation_count >= 0", name="ck_attempt_violation_count_nonnegative"),
     )
 
     attempt_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -571,6 +579,13 @@ class Attempt(Base):
         String(255),
         nullable=True,
     )
+    violation_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    last_violation_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    device_id_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    session_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class AttemptQuestion(Base):
@@ -780,6 +795,11 @@ class EssayAnswer(Base):
 
 class ExamEvent(Base):
     __tablename__ = "exam_event"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "client_event_id", name="uq_exam_event_attempt_client_event"),
+        Index("ix_exam_event_attempt_timestamp", "attempt_id", "event_timestamp"),
+        Index("ix_exam_event_attempt_violation_timestamp", "attempt_id", "is_violation", "event_timestamp"),
+    )
 
     event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     attempt_id: Mapped[Optional[int]] = mapped_column(
@@ -788,6 +808,14 @@ class ExamEvent(Base):
     event_type: Mapped[Optional[str]] = mapped_column(String(50))
     event_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime)
     details: Mapped[Optional[str]] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="system", server_default=text("'system'")
+    )
+    is_violation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    client_event_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
 
     attempt: Mapped[Optional["Attempt"]] = relationship(back_populates="exam_events")
 

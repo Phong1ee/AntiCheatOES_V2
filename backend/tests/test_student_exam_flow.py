@@ -209,11 +209,13 @@ class StudentExamFlowTests(unittest.TestCase):
             "exams": [],
         })
 
-    def test_get_exam_settings_defaults_sequential_navigation_to_false(self):
+    def test_get_exam_settings_defaults_include_disabled_anti_cheat(self):
         with patch.object(examModel, "get_db_connection", return_value=_Connection([])):
             settings = examModel.getExamSettings(5)
 
         self.assertFalse(settings["sequential_navigation"])
+        self.assertFalse(settings["anti_cheat_enabled"])
+        self.assertEqual(settings["violation_limit"], 5)
 
     def test_verify_code_returns_student_safe_settings(self):
         with (
@@ -222,6 +224,8 @@ class StudentExamFlowTests(unittest.TestCase):
                 "force_fullscreen_thresh": 3,
                 "tab_switch_thresh": 2,
                 "copy_paste_thresh": 1,
+                "anti_cheat_enabled": True,
+                "violation_limit": 5,
                 "auto_submit_on_expire": True,
                 "sequential_navigation": True,
             }),
@@ -231,7 +235,11 @@ class StudentExamFlowTests(unittest.TestCase):
         validate.assert_called_once_with("S1", "student", 5, "CODE")
         self.assertEqual(result["examId"], 5)
         self.assertTrue(result["requiresFullscreen"])
+        self.assertTrue(result["antiCheatEnabled"])
+        self.assertEqual(result["violationLimit"], 5)
         self.assertEqual(result["settings"], {
+            "anti_cheat_enabled": True,
+            "violation_limit": 5,
             "force_fullscreen_thresh": 3,
             "tab_switch_thresh": 2,
             "copy_paste_thresh": 1,
@@ -274,8 +282,8 @@ class StudentExamFlowTests(unittest.TestCase):
         timer = ExamController._timer_payload(
             {"duration_minutes": 60, "end_time": None}, {"start_time": start_time}, database_now
         )
-        self.assertEqual(timer["serverTime"], "2026-07-28T05:00:00Z")
-        self.assertEqual(timer["expiresAt"], "2026-07-28T05:50:00Z")
+        self.assertEqual(timer["serverTime"], "2026-07-28T05:00:00")
+        self.assertEqual(timer["expiresAt"], "2026-07-28T05:50:00")
         self.assertEqual(timer["remainingSeconds"], 3000)
 
     def test_attempt_questions_use_snapshot_and_never_expose_correct_answer(self):
@@ -410,13 +418,18 @@ class StudentExamFlowTests(unittest.TestCase):
             "status": "in_progress",
             "start_time": datetime.now(),
             "last_saved_at": None,
+            "violation_count": 3,
         }
         with (
             patch("src.controller.teacherController.examController.userModel.getUserBySchoolId", return_value={"id": 7, "school_id": "S1"}),
             patch.object(examModel, "getAssignedExamById", return_value={"exam_id": 5, "duration_minutes": 60, "end_time": None}),
             patch.object(examModel, "getAttemptById", return_value=attempt),
             patch.object(examModel, "getExamQuestions", return_value=[]),
-            patch.object(examModel, "getExamSettings", return_value={"sequential_navigation": True}),
+            patch.object(examModel, "getExamSettings", return_value={
+                "sequential_navigation": True,
+                "anti_cheat_enabled": True,
+                "violation_limit": 5,
+            }),
             patch.object(examModel, "get_database_now", return_value=attempt["start_time"]),
         ):
             result = ExamController.restoreAttempt("S1", "student", 5, 10)
@@ -425,6 +438,19 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(result["attempt"]["status"], "in_progress")
         self.assertIn("remainingSeconds", result)
         self.assertTrue(result["settings"]["sequential_navigation"])
+        self.assertEqual((result["violationCount"], result["violationLimit"]), (3, 5))
+
+    def test_start_response_returns_persisted_violation_count_and_limit(self):
+        with patch.object(examModel, "getExamSettings", return_value={
+            "anti_cheat_enabled": True,
+            "violation_limit": 4,
+        }):
+            result = ExamController._start_response(
+                {"exam_id": 5, "duration_minutes": 60, "end_time": None},
+                {"attempt_id": 10, "attempt_no": 1, "start_time": datetime.now(), "violation_count": 2},
+                resumed=True,
+            )
+        self.assertEqual((result["antiCheatEnabled"], result["violationCount"], result["violationLimit"]), (True, 2, 4))
 
     @staticmethod
     def _sequential_questions():
@@ -525,21 +551,12 @@ class StudentExamFlowTests(unittest.TestCase):
         finalize.assert_called_once_with(10, 5, [])
         save.assert_not_called()
 
-    def test_terminate_finalizes_latest_answers_once(self):
-        attempt = {"attempt_id": 10, "exam_id": 5, "student_id": "S1", "status": "in_progress", "start_time": datetime.now(), "submitted_at": None, "end_time": None}
-        finalized = {"score": 2, "essayPending": False, "status": "terminated", "idempotent": False}
-        with (
-            patch.object(ExamController, "_owned_attempt", return_value=({"duration_minutes": 60, "end_time": None}, attempt)),
-            patch.object(examModel, "finalizeAttempt", return_value=finalized) as finalize,
-            patch.object(examModel, "get_database_now", return_value=attempt["start_time"]),
-        ):
-            result = ExamController.terminateAttempt(
+    def test_client_cannot_directly_terminate_attempt(self):
+        with self.assertRaisesRegex(Exception, "Client-controlled termination"):
+            ExamController.terminateAttempt(
                 "S1", "student", 5, 10, "anti_cheat", "tab-switch",
                 [{"questionId": 11, "selectedOptionId": 101}],
             )
-
-        finalize.assert_called_once_with(10, 5, [{"questionId": 11, "selectedOptionId": 101}], "terminated", "anti_cheat:tab-switch")
-        self.assertEqual(result["status"], "terminated")
 
 
 if __name__ == "__main__":

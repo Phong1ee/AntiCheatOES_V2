@@ -22,8 +22,6 @@ interface SettingsTabProps {
   onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
 }
 
-type ThresholdField = 'force_fullscreen_thresh' | 'tab_switch_thresh' | 'copy_paste_thresh';
-
 const gradingMethods: { value: ResultStrategy; label: string}[] = [
   { value: 'highest', label: 'Highest'},
   { value: 'last_attempt', label: 'Last Attempt'},
@@ -48,12 +46,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const lastPositive = useRef<Record<ThresholdField, number>>({
-    force_fullscreen_thresh: 1,
-    tab_switch_thresh: 1,
-    copy_paste_thresh: 1,
-  });
-
   const persistedExamId = examId && !examId.startsWith('new-') ? Number(examId) : null;
   const currentExamId = useRef<number | null>(persistedExamId);
   currentExamId.current = persistedExamId;
@@ -85,16 +77,11 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
           sequential_navigation: data.sequential_navigation,
           auto_submit_on_expire: data.auto_submit_on_expire,
           grace_period: data.grace_period,
-          force_fullscreen_thresh: data.force_fullscreen_thresh,
-          tab_switch_thresh: data.tab_switch_thresh,
-          copy_paste_thresh: data.copy_paste_thresh,
+          anti_cheat_enabled: data.anti_cheat_enabled ?? false,
+          violation_limit: data.violation_limit ?? 5,
           auto_grade: data.auto_grade,
           result_strategy: data.result_strategy,
         };
-        (['force_fullscreen_thresh', 'tab_switch_thresh', 'copy_paste_thresh'] as ThresholdField[])
-          .forEach((field) => {
-            if (mapped[field] > 0) lastPositive.current[field] = mapped[field];
-          });
         setSettings(mapped);
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load exam settings.');
@@ -108,10 +95,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
     };
   }, [persistedExamId]);
 
-  const antiCheatEnabled = settings.force_fullscreen_thresh > 0
-    || settings.tab_switch_thresh > 0
-    || settings.copy_paste_thresh > 0;
-
   const setBoolean = (field: keyof TeacherExamSettingsPayload, value: boolean) => {
     setSettings((current) => ({ ...current, [field]: value }));
   };
@@ -122,39 +105,13 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
   };
 
   const toggleAntiCheat = (enabled: boolean) => {
-    setSettings((current) => {
-      const fields: ThresholdField[] = ['force_fullscreen_thresh', 'tab_switch_thresh', 'copy_paste_thresh'];
-      if (!enabled) {
-        fields.forEach((field) => {
-          if (current[field] > 0) lastPositive.current[field] = current[field];
-        });
-        return {
-          ...current,
-          force_fullscreen_thresh: 0,
-          tab_switch_thresh: 0,
-          copy_paste_thresh: 0,
-        };
-      }
-      return {
-        ...current,
-        force_fullscreen_thresh: current.force_fullscreen_thresh > 0
-          ? current.force_fullscreen_thresh
-          : lastPositive.current.force_fullscreen_thresh,
-        tab_switch_thresh: current.tab_switch_thresh > 0
-          ? current.tab_switch_thresh
-          : lastPositive.current.tab_switch_thresh,
-        copy_paste_thresh: current.copy_paste_thresh > 0
-          ? current.copy_paste_thresh
-          : lastPositive.current.copy_paste_thresh,
-      };
-    });
+    setBoolean('anti_cheat_enabled', enabled);
   };
 
-  const updateThreshold = (field: ThresholdField, rawValue: string) => {
+  const updateViolationLimit = (rawValue: string) => {
     const value = Number(rawValue);
-    const nextValue = rawValue.trim() === '' || !Number.isFinite(value) ? Number.NaN : value;
-    if (nextValue > 0) lastPositive.current[field] = nextValue;
-    setSettings((current) => ({ ...current, [field]: nextValue }));
+    const violation_limit = rawValue.trim() === '' || !Number.isFinite(value) ? Number.NaN : value;
+    setSettings((current) => ({ ...current, violation_limit }));
   };
 
   const saveSettings = async () => {
@@ -164,22 +121,19 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
     }
     const numericValues = [
       settings.grace_period,
-      settings.force_fullscreen_thresh,
-      settings.tab_switch_thresh,
-      settings.copy_paste_thresh,
     ];
     if (numericValues.some((value) => !Number.isInteger(value) || value < 0)) {
-      setError('Grace period and thresholds must be non-negative integers.');
+      setError('Grace period must be a non-negative integer.');
       return;
     }
-    const payload: TeacherExamSettingsPayload = antiCheatEnabled
-      ? settings
-      : {
-          ...settings,
-          force_fullscreen_thresh: 0,
-          tab_switch_thresh: 0,
-          copy_paste_thresh: 0,
-        };
+    if (
+      settings.anti_cheat_enabled
+      && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
+    ) {
+      setError('Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.');
+      return;
+    }
+    const payload: TeacherExamSettingsPayload = settings;
     try {
       const targetExamId = persistedExamId;
       setSaving(true);
@@ -196,9 +150,8 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
         sequential_navigation: saved.sequential_navigation,
         auto_submit_on_expire: saved.auto_submit_on_expire,
         grace_period: saved.grace_period,
-        force_fullscreen_thresh: saved.force_fullscreen_thresh,
-        tab_switch_thresh: saved.tab_switch_thresh,
-        copy_paste_thresh: saved.copy_paste_thresh,
+        anti_cheat_enabled: saved.anti_cheat_enabled,
+        violation_limit: saved.violation_limit,
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
       });
@@ -220,24 +173,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
   if (loading) {
     return <div className="flex h-48 items-center justify-center gap-2 text-gray-600"><Loader2 className="size-5 animate-spin" /> Loading settings...</div>;
   }
-
-  const thresholdControl = (field: ThresholdField, label: string, help: string) => (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <Label htmlFor={field}>{label}</Label>
-        <p className="text-xs text-gray-500">{help}</p>
-      </div>
-      <Input
-        id={field}
-        type="number"
-        min="0"
-        step="1"
-        value={Number.isFinite(settings[field]) ? settings[field] : ''}
-        onChange={(event) => updateThreshold(field, event.target.value)}
-        className="w-24 text-center"
-      />
-    </div>
-  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -318,16 +253,35 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
       </Card>
 
       <Card className="rounded-2xl border-0 border-l-4 border-l-red-500 shadow-md">
-        <CardHeader><CardTitle className="flex items-center gap-2"><Shield className="size-5 text-red-600" /> Anti-Cheating Measures</CardTitle><CardDescription>A threshold of N allows N violations. Enforcement is not enabled yet.</CardDescription></CardHeader>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Shield className="size-5 text-red-600" /> Anti-Cheating Measures</CardTitle>
+          <CardDescription>Set one shared limit for every recorded anti-cheat violation.</CardDescription>
+        </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={antiCheatEnabled} onCheckedChange={toggleAntiCheat} /></div>
-          {antiCheatEnabled && (
+          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={toggleAntiCheat} /></div>
+          {settings.anti_cheat_enabled && (
             <div className="space-y-4 border-t border-gray-200 pt-4">
-              {thresholdControl('force_fullscreen_thresh', 'Force Fullscreen threshold', 'Allowed fullscreen exits before enforcement.')}
-              {thresholdControl('tab_switch_thresh', 'Tab Switch threshold', 'Allowed tab switches before enforcement.')}
-              {thresholdControl('copy_paste_thresh', 'Copy/Paste threshold', 'Allowed copy or paste events before enforcement.')}
+              <div className="space-y-2">
+                <Label htmlFor="violation-limit">Maximum Violations</Label>
+                <Input
+                  id="violation-limit"
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={Number.isFinite(settings.violation_limit) ? settings.violation_limit : ''}
+                  onChange={(event) => updateViolationLimit(event.target.value)}
+                  className="max-w-xs"
+                />
+                <p className="text-xs text-gray-500">All recorded anti-cheat violations count toward this shared limit.</p>
+              </div>
             </div>
           )}
+          <div className="space-y-1 rounded-lg bg-red-50 p-3 text-sm text-red-900">
+            <p>Anti-cheat requires camera, microphone, and fullscreen before an attempt starts.</p>
+            <p>Reaching the limit automatically ends the current attempt with a score of 0.</p>
+            <p>Other attempts remain available when the exam still has attempts left.</p>
+          </div>
         </CardContent>
       </Card>
 

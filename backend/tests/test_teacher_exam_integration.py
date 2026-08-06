@@ -364,6 +364,8 @@ class TeacherExamIntegrationTests(unittest.TestCase):
                     force_fullscreen_thresh=2,
                     tab_switch_thresh=3,
                     copy_paste_thresh=1,
+                    anti_cheat_enabled=True,
+                    violation_limit=7,
                     auto_grade=False,
                 ),
                 StudentExam(student_id=student.school_id, exam_id=source.exam_id),
@@ -418,6 +420,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             ),
             (True, True, 4, False),
         )
+        self.assertEqual((copied_settings.anti_cheat_enabled, copied_settings.violation_limit), (True, 7))
         self.assertEqual(self.db.query(StudentExam).filter_by(exam_id=duplicate.exam_id).count(), 0)
         self.assertEqual(self.db.query(Attempt).filter_by(exam_id=duplicate.exam_id).count(), 0)
         self.assertEqual(result["totalStudents"], 0)
@@ -834,17 +837,21 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             force_fullscreen_thresh=2,
             tab_switch_thresh=0,
             copy_paste_thresh=4,
+            anti_cheat_enabled=True,
+            violation_limit=6,
             auto_grade=False,
             result_strategy="average",
         )
         updated = update_exam_settings(exam_a.exam_id, payload, {"school_id": "T1"}, {}, self.db)
         self.assertEqual((updated.grace_period, updated.force_fullscreen_thresh, updated.tab_switch_thresh, updated.copy_paste_thresh), (5, 2, 0, 4))
+        self.assertEqual((updated.anti_cheat_enabled, updated.violation_limit), (True, 6))
         self.assertTrue(updated.sequential_navigation)
         self.assertEqual(updated.result_strategy, ResultStrategy.average)
         saved = get_exam_settings(exam_a.exam_id, {"school_id": "T1"}, {}, self.db)
         self.assertTrue(saved.sequential_navigation)
         other_defaults = get_exam_settings(exam_b.exam_id, {"school_id": "T1"}, {}, self.db)
         self.assertEqual((other_defaults.grace_period, other_defaults.tab_switch_thresh), (0, 0))
+        self.assertEqual((other_defaults.anti_cheat_enabled, other_defaults.violation_limit), (False, 5))
         self.assertFalse(other_defaults.sequential_navigation)
 
         with self.assertRaises(HTTPException) as forbidden:
@@ -857,6 +864,17 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             ExamSettingsRequest(grace_period=-1)
         with self.assertRaises(ValidationError):
             ExamSettingsRequest(tab_switch_thresh=True)
+        with self.assertRaises(ValidationError):
+            ExamSettingsRequest(anti_cheat_enabled=True)
+        with self.assertRaises(ValidationError):
+            ExamSettingsRequest(anti_cheat_enabled=True, violation_limit=101)
+        for invalid_limit in (0, -1, 1.5, True, "5"):
+            with self.assertRaises(ValidationError):
+                ExamSettingsRequest(anti_cheat_enabled=True, violation_limit=invalid_limit)
+        with self.assertRaises(ValidationError):
+            ExamSettingsRequest(anti_cheat_enabled="true", violation_limit=5)
+        disabled = ExamSettingsRequest(anti_cheat_enabled=False, violation_limit=100)
+        self.assertEqual((disabled.anti_cheat_enabled, disabled.violation_limit), (False, 100))
         with self.assertRaises(ValidationError):
             ExamSettingsRequest(result_strategy="median")
 

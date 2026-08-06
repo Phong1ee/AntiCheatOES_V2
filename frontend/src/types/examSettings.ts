@@ -49,9 +49,12 @@ export interface TeacherExamSettingsPayload {
   sequential_navigation: boolean;
   auto_submit_on_expire: boolean;
   grace_period: number;
-  force_fullscreen_thresh: number;
-  tab_switch_thresh: number;
-  copy_paste_thresh: number;
+  anti_cheat_enabled: boolean;
+  violation_limit: number;
+  // Legacy response fields remain optional while the backend expands its contract.
+  force_fullscreen_thresh?: number;
+  tab_switch_thresh?: number;
+  copy_paste_thresh?: number;
   auto_grade: boolean;
   result_strategy: ResultStrategy;
 }
@@ -66,9 +69,8 @@ export const defaultTeacherExamSettings: TeacherExamSettingsPayload = {
   sequential_navigation: false,
   auto_submit_on_expire: true,
   grace_period: 0,
-  force_fullscreen_thresh: 0,
-  tab_switch_thresh: 0,
-  copy_paste_thresh: 0,
+  anti_cheat_enabled: false,
+  violation_limit: 5,
   auto_grade: true,
   result_strategy: 'highest',
 };

@@ -7,6 +7,19 @@ from src.service.exam_pool_service import seeded_random, select_unique_candidate
 from src.service.scoring_service import GRADING_SCALE, normalize_score, validate_max_score
 
 
+VIOLATION_EVENT_TYPES = {
+    "TAB_HIDDEN", "WINDOW_BLUR", "FULLSCREEN_EXIT", "COPY_ATTEMPT",
+    "PASTE_ATTEMPT", "CUT_ATTEMPT", "PRINT_ATTEMPT", "BLOCKED_SHORTCUT",
+    "PAGE_REFRESH", "CAMERA_PERMISSION_DENIED", "CAMERA_TRACK_MUTED",
+    "CAMERA_TRACK_ENDED", "MIC_PERMISSION_DENIED", "MIC_TRACK_MUTED",
+    "MIC_TRACK_ENDED", "NO_FACE_DETECTED", "MULTIPLE_FACES_DETECTED",
+    "PHONE_DETECTED", "SPEECH_ACTIVITY_DETECTED",
+}
+
+ALLOWED_CLIENT_EVENT_TYPES = VIOLATION_EVENT_TYPES
+ALLOWED_EVENT_SOURCES = {"browser", "camera", "microphone"}
+
+
 def get_database_now():
     """Return MySQL's UTC DATETIME clock for Student attempt decisions."""
     cnx = get_db_connection()
@@ -64,7 +77,9 @@ def getStudentExams(school_id: str):
         e.start_time,
         e.end_time,
         e.result_visibility,
-        COALESCE(es.force_fullscreen_thresh, 0) > 0 AS requires_fullscreen
+        COALESCE(es.anti_cheat_enabled, FALSE) AS anti_cheat_enabled,
+        COALESCE(es.violation_limit, 5) AS violation_limit,
+        COALESCE(es.anti_cheat_enabled, FALSE) AS requires_fullscreen
         ,MAX(CASE
             WHEN a.status = 'in_progress'
              AND a.submitted_at IS NULL
@@ -100,7 +115,8 @@ def getStudentExams(school_id: str):
         e.start_time,
         e.end_time,
         e.result_visibility,
-        es.force_fullscreen_thresh
+        es.anti_cheat_enabled,
+        es.violation_limit
     ORDER BY e.start_time ASC, e.exam_id ASC
     """
     try:
@@ -165,12 +181,16 @@ def getAssignedExamById(school_id: str, exam_id: int):
         COUNT(a.attempt_id) AS attempts_used,
         e.start_time,
         e.end_time,
-        e.result_visibility
+        e.result_visibility,
+        COALESCE(es.anti_cheat_enabled, FALSE) AS anti_cheat_enabled,
+        COALESCE(es.violation_limit, 5) AS violation_limit
     FROM student_exam se
     JOIN user u
         ON u.school_id = se.student_id
     JOIN exam e
         ON e.exam_id = se.exam_id
+    LEFT JOIN exam_setting es
+        ON es.exam_id = e.exam_id
     LEFT JOIN attempt a
         ON a.exam_id = e.exam_id
         AND a.student_id = u.school_id
@@ -184,7 +204,9 @@ def getAssignedExamById(school_id: str, exam_id: int):
         e.max_attempt,
         e.start_time,
         e.end_time,
-        e.result_visibility
+        e.result_visibility,
+        es.anti_cheat_enabled,
+        es.violation_limit
     """
     try:
         cursor.execute(query, (school_id, exam_id))
@@ -678,7 +700,7 @@ def getAttemptById(attempt_id: int):
     cursor = cnx.cursor(dictionary=True)
     query = """
     SELECT attempt_id, exam_id, student_id, attempt_no, score, start_time, end_time,
-           submitted_at, status, last_saved_at
+           submitted_at, status, last_saved_at, violation_count, last_violation_at
     FROM attempt
     WHERE attempt_id = %s
     """
@@ -700,7 +722,8 @@ def getExamSettings(exam_id: int):
         cursor.execute(
             """
             SELECT auto_submit_on_expire, tab_switch_thresh, copy_paste_thresh,
-                   force_fullscreen_thresh, sequential_navigation
+                   force_fullscreen_thresh, sequential_navigation,
+                   anti_cheat_enabled, violation_limit
             FROM exam_setting WHERE exam_id = %s
             """,
             (exam_id,),
@@ -711,6 +734,8 @@ def getExamSettings(exam_id: int):
             "copy_paste_thresh": 0,
             "force_fullscreen_thresh": 0,
             "sequential_navigation": False,
+            "anti_cheat_enabled": False,
+            "violation_limit": 5,
         }
     finally:
         cursor.close()
@@ -1065,7 +1090,12 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         _finalize_essay_answers(cursor, attempt_id, questions)
 
         raw_earned, raw_possible = _attempt_raw_scores(cursor, attempt_id, questions)
-        total_score = normalize_score(raw_earned, raw_possible)
+        if status == "terminated":
+            # A terminated attempt is final, including any submitted essay work.
+            cursor.execute("UPDATE essay_answers SET score = 0 WHERE attempt_id = %s AND score IS NULL", (attempt_id,))
+            total_score = Decimal("0.00")
+        else:
+            total_score = normalize_score(raw_earned, raw_possible)
         essay_pending = _essay_pending(cursor, attempt_id)
         cursor.execute(
             """
@@ -1078,8 +1108,19 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         )
         if status == "terminated":
             cursor.execute(
-                "INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details) VALUES (%s, %s, NOW(), %s)",
-                (attempt_id, "attempt_terminated", reason or "anti_cheat"),
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, %s, NOW(), %s, 'system', 0)
+                """,
+                (attempt_id, "ATTEMPT_TERMINATED", reason or "anti_cheat"),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'ATTEMPT_SUBMITTED', NOW(), NULL, 'system', 0)
+                """,
+                (attempt_id,),
             )
         _sync_student_final_score(cursor, exam_id, attempt["student_id"])
         cnx.commit()
@@ -1103,6 +1144,133 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
 def submitAttempt(attempt_id: int, exam_id: int, answers: list):
     """Backward-compatible entry point; the active atomic finalizer owns scoring."""
     return finalizeAttempt(attempt_id, exam_id, answers)
+
+
+def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict) -> dict:
+    """Persist one client event and enforce the shared limit in one transaction."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cnx.start_transaction()
+        cursor.execute(
+            """
+            SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
+                   score, violation_count
+            FROM attempt
+            WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
+            FOR UPDATE
+            """,
+            (event["attemptId"], exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt:
+            raise Exception("Attempt does not belong to student")
+
+        cursor.execute(
+            "SELECT anti_cheat_enabled, violation_limit FROM exam_setting WHERE exam_id = %s",
+            (exam_id,),
+        )
+        setting = cursor.fetchone() or {"anti_cheat_enabled": False, "violation_limit": 5}
+        enabled = bool(setting["anti_cheat_enabled"])
+        limit = int(setting["violation_limit"] or 5)
+        client_event_id = event["clientEventId"]
+
+        cursor.execute(
+            "SELECT event_id FROM exam_event WHERE attempt_id = %s AND client_event_id = %s",
+            (attempt["attempt_id"], client_event_id),
+        )
+        duplicate = cursor.fetchone() is not None
+        if duplicate:
+            cnx.commit()
+            return _event_response(attempt, enabled, limit, event_accepted=True, duplicate=True)
+
+        if attempt["status"] in {"submitted", "terminated"} or attempt["submitted_at"] or attempt["end_time"]:
+            cnx.commit()
+            return _event_response(attempt, enabled, limit, event_accepted=False, duplicate=False)
+
+        event_type = event["eventType"]
+        is_violation = enabled and event_type in VIOLATION_EVENT_TYPES
+        # Disabled exams retain a non-violation diagnostic event for auditing.
+        cursor.execute(
+            """
+            INSERT INTO exam_event (
+                attempt_id, event_type, event_timestamp, details, source,
+                is_violation, client_event_id, metadata
+            ) VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s)
+            """,
+            (
+                attempt["attempt_id"], event_type, event.get("details"), event["source"],
+                int(is_violation), client_event_id, json.dumps(event["metadata"]) if event.get("metadata") is not None else None,
+            ),
+        )
+        if is_violation:
+            cursor.execute(
+                """
+                UPDATE attempt
+                SET violation_count = violation_count + 1, last_violation_at = NOW()
+                WHERE attempt_id = %s
+                """,
+                (attempt["attempt_id"],),
+            )
+            attempt["violation_count"] = int(attempt["violation_count"] or 0) + 1
+
+        if is_violation and attempt["violation_count"] >= limit:
+            questions = _load_attempt_questions(cursor, attempt["attempt_id"], exam_id)
+            for answer in event.get("answers", []):
+                question = questions.get(int(answer["questionId"]))
+                if not question:
+                    raise Exception("Question does not belong to this attempt")
+                _upsert_answer(cursor, attempt["attempt_id"], question, answer)
+            _finalize_essay_answers(cursor, attempt["attempt_id"], questions)
+            cursor.execute("UPDATE essay_answers SET score = 0 WHERE attempt_id = %s AND score IS NULL", (attempt["attempt_id"],))
+            reason = f"anti_cheat_limit_reached:{event_type}"
+            cursor.execute(
+                """
+                UPDATE attempt
+                SET score = 0.00, end_time = NOW(), submitted_at = NOW(), status = 'terminated',
+                    termination_reason = %s, score_scale_version = 2
+                WHERE attempt_id = %s
+                """,
+                (reason, attempt["attempt_id"]),
+            )
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'ATTEMPT_TERMINATED', NOW(), %s, 'system', 0)
+                """,
+                (attempt["attempt_id"], reason),
+            )
+            attempt.update(status="terminated", score=Decimal("0.00"), submitted_at=True, end_time=True)
+            _sync_student_final_score(cursor, exam_id, student_id)
+
+        cnx.commit()
+        return _event_response(attempt, enabled, limit, event_accepted=True, duplicate=False)
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def _event_response(attempt: dict, enabled: bool, limit: int, event_accepted: bool, duplicate: bool) -> dict:
+    count = int(attempt.get("violation_count") or 0)
+    terminated = attempt.get("status") == "terminated"
+    return {
+        "success": True,
+        "eventAccepted": event_accepted,
+        "duplicate": duplicate,
+        "antiCheatEnabled": enabled,
+        "violationCount": count,
+        "violationLimit": limit,
+        "remainingViolations": max(limit - count, 0) if enabled else None,
+        "terminated": terminated,
+        "attemptStatus": attempt.get("status"),
+        "score": attempt.get("score"),
+        "warningMessage": "Attempt terminated after reaching the violation limit." if terminated else (
+            "Anti-cheat is disabled; the event was recorded without a violation." if not enabled else "Anti-cheat event recorded."
+        ),
+    }
 
 def addQuestionToExam(exam_id: int, question_data: dict):
     """Add a question to an exam."""

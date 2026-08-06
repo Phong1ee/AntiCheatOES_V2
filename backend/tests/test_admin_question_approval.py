@@ -102,7 +102,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
             question_type="MCQ",
             question_difficulties="medium",
             subject_id="DB",
-            created_by=owner if owner is not None else self.teacher_one.id,
+            created_by=owner if owner is not None else self.teacher_one.school_id,
             question_status=status,
         )
         self.db.add(question)
@@ -130,7 +130,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
             "options_snapshot": [option("Candidate key", True), option("Duplicate key")],
             "chapter_ids_snapshot": [2],
             "lo_ids_snapshot": [11],
-            "edited_by": (editor or self.teacher_two).id,
+            "edited_by": (editor or self.teacher_two).school_id,
         }
         data.update(overrides)
         revision = QuestionRevision(**data)
@@ -180,8 +180,8 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(approved.question_text, "Latest pending text")
         self.assertEqual(baseline.version_number, 1)
         self.assertEqual(baseline.question_status, "approved")
-        self.assertEqual(baseline.edited_by, self.teacher_one.id)
-        self.assertEqual(baseline.approved_by, self.admin.id)
+        self.assertEqual(baseline.edited_by, self.teacher_one.school_id)
+        self.assertEqual(baseline.approved_by, self.admin.school_id)
         self.assertIsNotNone(baseline.approved_at)
         with self.assertRaises(HTTPException) as raised:
             self._approve_question(question.question_id)
@@ -199,7 +199,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(rejected.question_status, QuestionStatus.rejected)
         self.assertEqual(audit.question_status, "rejected")
         self.assertEqual(audit.rejection_reason, "Clarify the wording")
-        self.assertEqual(audit.approved_by, self.admin.id)
+        self.assertEqual(audit.approved_by, self.admin.school_id)
         self.assertIsNotNone(audit.approved_at)
         self.assertEqual(self.db.query(Option).filter_by(question_id=question.question_id).count(), 2)
 
@@ -259,7 +259,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual([link.lo_id for link in active.lo_questions], [11])
         self.assertEqual(sorted(item.options_text for item in active.options), ["Candidate key", "Duplicate key"])
         self.assertEqual(applied.question_status, "approved")
-        self.assertEqual(applied.approved_by, self.admin.id)
+        self.assertEqual(applied.approved_by, self.admin.school_id)
         self.assertIsNotNone(applied.approved_at)
         self.assertEqual(result["active_question"]["question_status"], "approved")
 
@@ -303,7 +303,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
     def test_revision_cannot_delete_an_option_referenced_by_an_attempt(self):
         question = self._question(QuestionStatus.approved)
         retained = question.options[0]
-        attempt = Attempt(exam_id=None, student_id=self.teacher_one.id, attempt_no=1)
+        attempt = Attempt(exam_id=None, student_id=self.teacher_one.school_id, attempt_no=1)
         self.db.add(attempt)
         self.db.flush()
         self.db.add(AttemptQuestion(attempt_id=attempt.attempt_id, question_id=question.question_id, display_order=1))

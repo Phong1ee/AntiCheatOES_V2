@@ -66,6 +66,10 @@ class _EssayCursor:
         elif normalized.startswith("UPDATE essay_answers SET answer_text"):
             _answer_text, _attempt_id, question_id = params
             self.essays[int(question_id)]["answer_text"] = _answer_text
+        elif normalized.startswith("UPDATE essay_answers SET score = 0"):
+            for answer in self.essays.values():
+                if answer["score"] is None:
+                    answer["score"] = 0
         elif normalized.startswith("INSERT INTO mcq_answers"):
             _, question_id, option_id = params
             self.mcqs[int(question_id)] = int(option_id)

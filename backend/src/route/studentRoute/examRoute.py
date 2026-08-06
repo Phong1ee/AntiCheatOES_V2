@@ -1,6 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict, Field
+import json
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from src.controller.teacherController.examController import ExamController
+from src.models.teacher.examModel import ALLOWED_CLIENT_EVENT_TYPES
 #from src.controller.authController import ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 
@@ -38,6 +42,34 @@ class TerminateAttemptRequest(BaseModel):
     violationType: str | None = None
     answers: list[SubmitAnswerRequest] = []
     timeSpentSeconds: int | None = None
+
+
+class AntiCheatEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    attemptId: int = Field(gt=0)
+    clientEventId: str = Field(min_length=1, max_length=64)
+    eventType: str = Field(min_length=1, max_length=50)
+    source: Literal["browser", "camera", "microphone"]
+    details: str | None = Field(default=None, max_length=1000)
+    metadata: dict[str, object] | None = None
+    answers: list[SubmitAnswerRequest] = Field(default_factory=list)
+
+    @field_validator("eventType")
+    @classmethod
+    def validate_client_event_type(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in ALLOWED_CLIENT_EVENT_TYPES:
+            raise ValueError("Unsupported or system-only anti-cheat event type")
+        return normalized
+
+    @model_validator(mode="after")
+    def bound_metadata(self):
+        if self.metadata is not None:
+            encoded = json.dumps(self.metadata, separators=(",", ":"))
+            if len(encoded.encode("utf-8")) > 4096:
+                raise ValueError("metadata must not exceed 4096 bytes")
+        return self
 
 
 @router.get("")
@@ -142,6 +174,26 @@ async def submit_exam(
         raise HTTPException(status_code=400, detail=detail)
 
 
+@router.post("/{exam_id}/events")
+async def record_anti_cheat_event(
+    exam_id: int,
+    request: AntiCheatEventRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(STUDENT_ONLY),
+):
+    """Record one bounded client event; the backend classifies and enforces it."""
+    del role_check
+    try:
+        return ExamController.recordAntiCheatEvent(
+            current_user["school_id"], current_user["role"], exam_id, request.model_dump(),
+        )
+    except Exception as exc:
+        detail = str(exc)
+        if detail in {"Only students can manage exam attempts", "Attempt does not belong to student"}:
+            raise HTTPException(status_code=403, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+
 @router.put("/{exam_id}/attempts/{attempt_id}/answers/{question_id}")
 async def save_answer(
     exam_id: int,
@@ -183,7 +235,7 @@ async def terminate_attempt(
         )
     except Exception as e:
         detail = str(e)
-        if detail in {"Only students can manage exam attempts", "Attempt does not belong to student"}:
+        if detail in {"Only students can manage exam attempts", "Attempt does not belong to student", "Client-controlled termination is not allowed"}:
             raise HTTPException(status_code=403, detail=detail)
         if detail in {"User not found", "Exam not found or not assigned to student", "Attempt not found"}:
             raise HTTPException(status_code=404, detail=detail)

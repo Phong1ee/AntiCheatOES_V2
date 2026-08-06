@@ -76,6 +76,9 @@ class ExamController:
 
     @staticmethod
     def _start_response(exam: dict, attempt: dict, resumed: bool, database_now=None) -> dict:
+        settings = examModel.getExamSettings(exam["exam_id"])
+        anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
+        violation_limit = int(settings.get("violation_limit") or 5)
         return {
             "success": True,
             "exam_id": exam["exam_id"],
@@ -87,6 +90,9 @@ class ExamController:
             "attemptNo": attempt["attempt_no"],
             "resumed": resumed,
             "status": attempt.get("status", "in_progress"),
+            "antiCheatEnabled": anti_cheat_enabled,
+            "violationCount": int(attempt.get("violation_count") or 0),
+            "violationLimit": violation_limit,
             **ExamController._timer_payload(exam, attempt, database_now),
         }
 
@@ -174,8 +180,12 @@ class ExamController:
                 "message": "Exam code verified",
                 "exam_id": exam_id,
                 "examId": exam_id,
-                "requiresFullscreen": int(settings.get("force_fullscreen_thresh") or 0) > 0,
+                "requiresFullscreen": bool(settings.get("anti_cheat_enabled", False)),
+                "antiCheatEnabled": bool(settings.get("anti_cheat_enabled", False)),
+                "violationLimit": int(settings.get("violation_limit") or 5),
                 "settings": {
+                    "anti_cheat_enabled": bool(settings.get("anti_cheat_enabled", False)),
+                    "violation_limit": int(settings.get("violation_limit") or 5),
                     "force_fullscreen_thresh": int(settings.get("force_fullscreen_thresh") or 0),
                     "tab_switch_thresh": int(settings.get("tab_switch_thresh") or 0),
                     "copy_paste_thresh": int(settings.get("copy_paste_thresh") or 0),
@@ -226,6 +236,9 @@ class ExamController:
         ):
             raise Exception("Attempt does not belong to student")
 
+        settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
+        anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
+        violation_limit = int(settings.get("violation_limit") or 5)
         timer = ExamController._timer_payload(exam, attempt, examModel.get_database_now())
         if attempt["status"] == "in_progress" and timer["remainingSeconds"] <= 0:
             examModel.finalizeAttempt(attempt_id, exam_id, [])
@@ -236,7 +249,10 @@ class ExamController:
                 "exam": exam,
                 "attempt": {"attempt_id": attempt_id, "attempt_no": attempt["attempt_no"], "status": attempt["status"], "start_time": attempt["start_time"], "lastSavedAt": attempt.get("last_saved_at")},
                 **{**timer, "remainingSeconds": 0},
-                "settings": {"sequential_navigation": False, **examModel.getExamSettings(exam_id)},
+                "antiCheatEnabled": anti_cheat_enabled,
+                "violationCount": int(attempt.get("violation_count") or 0),
+                "violationLimit": violation_limit,
+                "settings": settings,
                 "questions": [],
             }
 
@@ -249,9 +265,13 @@ class ExamController:
                 "status": attempt["status"],
                 "start_time": attempt["start_time"],
                 "lastSavedAt": attempt.get("last_saved_at"),
+                "violationCount": int(attempt.get("violation_count") or 0),
             },
+            "antiCheatEnabled": anti_cheat_enabled,
+            "violationCount": int(attempt.get("violation_count") or 0),
+            "violationLimit": violation_limit,
             **timer,
-            "settings": {"sequential_navigation": False, **examModel.getExamSettings(exam_id)},
+            "settings": settings,
             "questions": examModel.getExamQuestions(exam_id, attempt_id),
         }
 
@@ -294,22 +314,15 @@ class ExamController:
 
     @staticmethod
     def terminateAttempt(school_id: str, role: str, exam_id: int, attempt_id: int, reason: str, violation_type: str | None, answers: list):
-        exam, attempt = ExamController._owned_attempt(school_id, role, exam_id, attempt_id)
-        if attempt["status"] in {"submitted", "terminated"}:
-            return {"success": True, "attemptId": attempt_id, "status": attempt["status"], "idempotent": True}
-        if ExamController._expire_if_needed(exam, attempt, attempt_id, exam_id):
-            expired = examModel.getAttemptById(attempt_id)
-            return {"success": True, "attemptId": attempt_id, "status": expired["status"] if expired else "submitted", "idempotent": True}
-        termination_reason = reason if not violation_type else f"{reason}:{violation_type}"
-        result = examModel.finalizeAttempt(attempt_id, exam_id, answers, "terminated", termination_reason)
-        return {
-            "success": True,
-            "attemptId": attempt_id,
-            "status": result["status"],
-            "score": result["score"],
-            "essayPending": result["essayPending"],
-            "idempotent": result["idempotent"],
-        }
+        del school_id, role, exam_id, attempt_id, reason, violation_type, answers
+        # A browser may report a violation, but cannot declare its own attempt terminated.
+        raise Exception("Client-controlled termination is not allowed")
+
+    @staticmethod
+    def recordAntiCheatEvent(school_id: str, role: str, exam_id: int, event: dict):
+        if role != "student":
+            raise Exception("Only students can manage exam attempts")
+        return examModel.recordAntiCheatEvent(exam_id, school_id, event)
 
     @staticmethod
     def getStudentExam(school_id: str):

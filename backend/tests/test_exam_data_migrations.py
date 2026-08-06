@@ -4,6 +4,8 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from src.service.scoring_service import normalize_score
 
 
@@ -112,6 +114,37 @@ class ExamDataMigrationTests(unittest.TestCase):
         self.assertEqual(normalize_score(50, 100), Decimal("5.00"))
         self.assertEqual(normalize_score(24, 80), Decimal("3.00"))
         self.assertEqual(normalize_score(72, 120), Decimal("6.00"))
+
+    def test_anti_cheat_migration_backfills_legacy_thresholds_and_has_one_head(self):
+        migration = self._load("c9d1e8f2a4b6_expand_anti_cheat_settings_and_events.py")
+        calls: list[tuple[str, object]] = []
+
+        class Operations:
+            def __getattr__(self, name):
+                def record(*args, **kwargs):
+                    calls.append((name, args))
+                return record
+
+        with patch.object(migration, "op", Operations()):
+            migration.upgrade()
+            migration.downgrade()
+
+        upgrade_sql = next(args[0] for name, args in calls if name == "execute")
+        self.assertIn("anti_cheat_enabled = CASE", upgrade_sql)
+        self.assertIn("GREATEST", upgrade_sql)
+        self.assertIn("COALESCE(force_fullscreen_thresh, 0)", upgrade_sql)
+        self.assertIn("COALESCE(tab_switch_thresh, 0)", upgrade_sql)
+        self.assertIn("COALESCE(copy_paste_thresh, 0)", upgrade_sql)
+        self.assertIn("1,", upgrade_sql)
+        self.assertIn("ELSE 5", upgrade_sql)
+        self.assertIn("force_fullscreen_thresh > 0", upgrade_sql)
+        self.assertIn("tab_switch_thresh > 0", upgrade_sql)
+        self.assertIn("copy_paste_thresh > 0", upgrade_sql)
+        self.assertIn(("create_unique_constraint", ("uq_exam_event_attempt_client_event", "exam_event", ["attempt_id", "client_event_id"])), calls)
+
+        config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+        script = ScriptDirectory.from_config(config)
+        self.assertEqual(script.get_heads(), ["c9d1e8f2a4b6"])
 
 
 if __name__ == "__main__":

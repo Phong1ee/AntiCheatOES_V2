@@ -18,16 +18,20 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
+  const [examMediaStream, setExamMediaStream] = useState<MediaStream | null>(null);
   const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
   const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
   const [accessExamId, setAccessExamId] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
 
-  const handleEnterExam = (examId: string) => {
+  const handleEnterExam = (examId: string, stream?: MediaStream) => {
+    setExamMediaStream(stream ?? null);
     setCurrentExamId(examId);
   };
 
   const handleExitExam = () => {
+    examMediaStream?.getTracks().forEach((track) => track.stop());
+    setExamMediaStream(null);
     setCurrentExamId(null);
   };
 
@@ -55,6 +59,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       <ExamInterface
         examId={currentExamId}
         onExit={handleExitExam}
+        mediaStream={examMediaStream ?? undefined}
       />
     );
   }

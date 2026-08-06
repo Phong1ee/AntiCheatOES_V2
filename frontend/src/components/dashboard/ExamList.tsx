@@ -18,6 +18,7 @@ import {
 } from "../ui/select";
 import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
+import { PreExamSecurityDialog } from "./PreExamSecurityDialog";
 import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
 
 type Exam = StudentExamListItem;
@@ -42,7 +43,7 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream) => void;
   onViewResults?: (examId: string) => void;
   exams?: StudentExamListItem[];
   loading?: boolean;
@@ -65,6 +66,9 @@ export function ExamList({
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [securityCode, setSecurityCode] = useState<string | undefined>();
+  const [securityResume, setSecurityResume] = useState(false);
   const [startingExamId, setStartingExamId] = useState<string | null>(null);
   const [fetchedExams, setFetchedExams] = useState<Exam[]>([]);
   const [fetchedLoading, setFetchedLoading] = useState(suppliedExams === undefined);
@@ -112,7 +116,7 @@ export function ExamList({
     onEnterExam?.(examId);
   };
 
-  const startExam = async (exam: Exam, code?: string) => {
+  const startExam = async (exam: Exam, code?: string, stream?: MediaStream) => {
     setStartingExamId(exam.id);
     try {
       const data = await studentExamService.start(exam.id, code);
@@ -126,7 +130,7 @@ export function ExamList({
         })
       );
       setCodeOpen(false);
-      handleEnterExam(exam.id);
+      onEnterExam?.(exam.id, stream);
     } finally {
       setStartingExamId(null);
     }
@@ -135,12 +139,14 @@ export function ExamList({
   const handleRequestCode = (exam: Exam) => {
     setSelectedExam(exam);
     setDetailsOpen(false);
-    if (!exam.requiresExamCode && !exam.requiresFullscreen) {
+    if (!exam.requiresExamCode && !exam.antiCheatEnabled) {
       setFetchedLoadError(null);
       void startExam(exam).catch((error: unknown) => {
         console.error(error);
         setFetchedLoadError(error instanceof Error ? error.message : "Unable to start the exam.");
       });
+    } else if (exam.antiCheatEnabled && !exam.requiresExamCode) {
+      setSecurityCode(undefined); setSecurityResume(false); setSecurityOpen(true);
     } else {
       setCodeOpen(true);
     }
@@ -158,7 +164,9 @@ export function ExamList({
   const handleCodeStart = async (code: string) => {
     if (!selectedExam) throw new Error("No exam selected");
     try {
-      await startExam(selectedExam, code || undefined);
+      if (selectedExam.antiCheatEnabled) {
+        setSecurityCode(code || undefined); setSecurityResume(false); setCodeOpen(false); setSecurityOpen(true);
+      } else await startExam(selectedExam, code || undefined);
     } catch (err) {
       console.error(err);
       throw err;
@@ -168,13 +176,8 @@ export function ExamList({
   const handleResume = async (exam: Exam) => {
     if (!exam.openAttemptId) return;
     setFetchedLoadError(null);
-    try {
-      if (exam.requiresFullscreen && !document.fullscreenElement) {
-        // This runs directly from the Resume Exam button click.
-        await document.documentElement.requestFullscreen();
-      }
-    } catch {
-      setFetchedLoadError("Fullscreen permission is required to resume this exam.");
+    if (exam.antiCheatEnabled) {
+      setSelectedExam(exam); setSecurityCode(undefined); setSecurityResume(true); setSecurityOpen(true);
       return;
     }
     try {
@@ -188,6 +191,19 @@ export function ExamList({
     } catch (error) {
       setFetchedLoadError(error instanceof Error ? error.message : "Unable to resume this exam.");
     }
+  };
+
+  const handleSecurityReady = async (stream: MediaStream) => {
+    if (!selectedExam) throw new Error("No exam selected");
+    if (securityResume) {
+      if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
+      const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
+      if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
+      localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
+      onEnterExam?.(selectedExam.id, stream);
+      return;
+    }
+    await startExam(selectedExam, securityCode, stream);
   };
 
   if (loading) {
@@ -400,6 +416,13 @@ export function ExamList({
         onVerify={handleCodeVerify}
         onStart={handleCodeStart}
       />
+      {selectedExam && <PreExamSecurityDialog
+        open={securityOpen}
+        examTitle={selectedExam.title}
+        violationLimit={selectedExam.violationLimit}
+        onOpenChange={setSecurityOpen}
+        onReady={handleSecurityReady}
+      />}
     </div>
   );
 }

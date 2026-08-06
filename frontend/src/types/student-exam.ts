@@ -24,6 +24,8 @@ export interface StudentExamSettings {
   tabSwitchThreshold: number;
   copyPasteThreshold: number;
   fullscreenExitThreshold: number;
+  antiCheatEnabled: boolean;
+  violationLimit: number;
 }
 
 export interface StudentExamAttempt {

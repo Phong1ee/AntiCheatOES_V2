@@ -5,6 +5,7 @@ import { QuestionPanel } from "./QuestionPanel";
 import { SubmitConfirmDialog } from "./SubmitConfirmDialog";
 import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
+import { WebcamMonitor } from "./WebcamMonitor";
 import { studentExamService } from "../../services/student-exam.service";
 import { attemptSessionStorage } from "../../services/attempt-session.storage";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
@@ -12,6 +13,7 @@ import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestio
 interface ExamInterfaceProps {
   examId: string;
   onExit: () => void;
+  mediaStream?: MediaStream;
 }
 
 const attemptKey = "current_exam_attempt";
@@ -20,7 +22,7 @@ const draftKey = (attemptId: number) => `exam_attempt_draft_${attemptId}`;
 const isAnswered = (answer: StudentAnswer | undefined) =>
   Boolean(answer && ("selectedOptionId" in answer || answer.answerText.trim()));
 
-export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
+export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProps) {
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<StudentAnswers>({});
   const [attemptId, setAttemptId] = useState<number | null>(null);
@@ -150,6 +152,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
       stopAutoSave();
       setShowEssayGradingNote(result.resultVisibility !== "hidden" && result.essayPending);
       setIsSubmitted(true);
+      mediaStream?.getTracks().forEach((track) => track.stop());
       void exitFullscreenIntentionally();
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : automatic ? "Auto-submit failed" : "Submit failed");
@@ -172,6 +175,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
       setIsTerminated(true);
       setViolationType("final");
       setShowViolationWarning(true);
+      mediaStream?.getTracks().forEach((track) => track.stop());
       void exitFullscreenIntentionally();
       window.setTimeout(handleNormalExit, 1500);
     } catch (error) {
@@ -361,6 +365,7 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
   const currentAnswerIsValid = isAnswered(answers[current.id]);
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} warnings={warnings} />
+    {mediaStream && <WebcamMonitor stream={mediaStream} />}
     <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} /></div>
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />

@@ -27,13 +27,13 @@ interface RawExam {
   start_time?: string;
   end_time?: string;
   description?: string | null;
-  requires_fullscreen?: boolean;
+  anti_cheat_enabled?: boolean;
+  violation_limit?: number;
 }
 
 interface RawVerifyCodeResult {
   examId?: number;
   exam_id?: number;
-  requiresFullscreen?: boolean;
   settings?: Record<string, unknown>;
 }
 
@@ -60,7 +60,8 @@ export interface StudentExamListItem {
   hasOpenAttempt: boolean;
   openAttemptId: number | null;
   canResume: boolean;
-  requiresFullscreen: boolean;
+  antiCheatEnabled: boolean;
+  violationLimit: number;
   requiresExamCode: boolean;
   releasedExamCode: string | null;
 }
@@ -72,7 +73,8 @@ export interface StudentExamListResponse {
 
 export interface VerifyCodeResult {
   examId: number;
-  requiresFullscreen: boolean;
+  antiCheatEnabled: boolean;
+  violationLimit: number;
   settings: StudentExamSettings;
 }
 
@@ -124,6 +126,8 @@ const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSetti
   tabSwitchThreshold: Number(settings?.tab_switch_thresh ?? settings?.tabSwitchThreshold ?? 0),
   copyPasteThreshold: Number(settings?.copy_paste_thresh ?? settings?.copyPasteThreshold ?? 0),
   fullscreenExitThreshold: Number(settings?.force_fullscreen_thresh ?? settings?.fullscreenExitThreshold ?? 0),
+  antiCheatEnabled: Boolean(settings?.anti_cheat_enabled ?? settings?.antiCheatEnabled ?? false),
+  violationLimit: Number(settings?.violation_limit ?? settings?.violationLimit ?? 5),
 });
 
 const normalizeExam = (exam: RawExam): StudentExamListItem => ({
@@ -131,7 +135,7 @@ const normalizeExam = (exam: RawExam): StudentExamListItem => ({
   startTime: exam.start_time, endTime: exam.end_time, durationMinutes: exam.duration_minutes,
   status: exam.status, maxAttempts: exam.max_attempt, attemptsUsed: exam.attempts_used,
   hasOpenAttempt: Boolean(exam.has_open_attempt), openAttemptId: exam.open_attempt_id ?? null,
-  canResume: Boolean(exam.can_resume), requiresFullscreen: Boolean(exam.requires_fullscreen),
+  canResume: Boolean(exam.can_resume), antiCheatEnabled: Boolean(exam.anti_cheat_enabled), violationLimit: Number(exam.violation_limit ?? 5),
   requiresExamCode: Boolean(exam.requires_exam_code),
   releasedExamCode: exam.released_examcode?.trim() || null,
 });
@@ -153,7 +157,7 @@ export const studentExamService = {
     const { data } = await apiClient.post<RawVerifyCodeResult>(`/api/exams/${examId}/verify-code`, { code });
     return {
       examId: Number(data.examId ?? data.exam_id ?? examId),
-      requiresFullscreen: Boolean(data.requiresFullscreen),
+      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5),
       settings: normalizeSettings(data.settings),
     };
   },

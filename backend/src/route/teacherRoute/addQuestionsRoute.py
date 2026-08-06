@@ -805,7 +805,7 @@ def add_questions_to_exam_from_question_bank(
             "imported_question_ids": question_ids,
             "automatically_distributed": False,
             "default_max_score_applied": default_max_score_applied,
-            "grading_scale": 10,
+            "grading_scale": 100,
             "points": [
                 {
                     "question_id": question_id,

@@ -7,9 +7,6 @@ import {
   Users,
   TrendingUp,
   Clock,
-  Bell,
-  Database,
-  FileQuestion,
   Calendar,
   ChevronRight,
 } from 'lucide-react';
@@ -22,25 +19,11 @@ interface UpcomingExam {
   end_time: string;
 }
 
-interface QuestionBank {
-  subject_id: string;
-  subject_name: string;
-  subject_description: string;
-  question_count: number;
-}
-
 interface QuickStat {
   activeExams: number;
   totalStudents: number;
   averagePerformance: number; 
 }
-
-const mockNotifications = [
-  { id: '1', message: '35 students completed Quiz 3', time: '10 min ago', type: 'info' },
-  { id: '2', message: 'Midterm Exam starting in 6 days', time: '1 hour ago', type: 'warning' },
-  { id: '3', message: 'New question added to Database bank', time: '2 hours ago', type: 'success' },
-];
-
 
 interface TeacherInfoSidebarProps {
   onExamClick?: (examId: string) => void;
@@ -54,7 +37,6 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
   });
   const [activeExamsCount, setActiveExamsCount] = useState(0);
   const [upcomingExams, setUpcomingExams] = useState<UpcomingExam[]>([]);
-  const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
   const [totalStudentsCount, setTotalStudentsCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -84,13 +66,11 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
         setActiveExamsCount(Array.isArray(data.active_exams) ? data.active_exams.length : 0);
         setTotalStudentsCount(data.total_students || 0);
         setUpcomingExams(data.upcoming_exams || []);
-        setQuestionBanks(data.subjects || []);
       } catch (err) {
         console.error('Failed to fetch data:', err);
         setActiveExamsCount(0);
         setTotalStudentsCount(0);
         setUpcomingExams([]);
-        setQuestionBanks([]);
       } finally {
         setLoading(false);
       }
@@ -217,70 +197,6 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
               );
             })
           )}
-        </CardContent>
-      </Card>
-
-      {/* Question Banks */}
-      <Card className="shadow-lg rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-gray-800">
-            <Database className="size-5 text-teal-600" />
-            Question Banks
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {loading ? (
-            <LoadingState variant="inline" label="Loading question banks..." />
-          ) : questionBanks.length === 0 ? (
-            <p className="text-sm text-gray-500">No subjects available</p>
-          ) : (
-            questionBanks.map((bank) => (
-              <div
-                key={bank.subject_id}
-                className="p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-2 flex-1">
-                    <FileQuestion className="size-4 text-teal-600 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 truncate">{bank.subject_name}</p>
-                      <p className="text-xs text-gray-500">{bank.subject_description}</p>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="bg-white text-xs">
-                    {bank.question_count}
-                  </Badge>
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Notifications */}
-      <Card className="shadow-lg rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-gray-800">
-            <Bell className="size-5 text-teal-600" />
-            Recent Notifications
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {mockNotifications.map((notification) => (
-            <div
-              key={notification.id}
-              className={`p-3 rounded-xl border ${
-                notification.type === 'warning'
-                  ? 'bg-amber-50 border-amber-200'
-                  : notification.type === 'success'
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-blue-50 border-blue-200'
-              }`}
-            >
-              <p className="text-sm text-gray-800">{notification.message}</p>
-              <p className="text-xs text-gray-500 mt-1">{notification.time}</p>
-            </div>
-          ))}
         </CardContent>
       </Card>
     </div>

@@ -1005,7 +1005,7 @@ def _sync_student_final_score(cursor, exam_id: int, student_id: str) -> None:
         SELECT score FROM attempt
         WHERE exam_id = %s AND student_id = %s AND submitted_at IS NOT NULL
           AND status IN ('submitted', 'terminated')
-          AND score_scale_version = 2
+          AND score_scale_version = 3
           AND NOT EXISTS (
               SELECT 1 FROM essay_answers ea
               WHERE ea.attempt_id = attempt.attempt_id
@@ -1136,7 +1136,7 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
             """
             UPDATE attempt
             SET score = %s, end_time = NOW(), submitted_at = NOW(), status = %s,
-                termination_reason = %s, score_scale_version = 2
+                termination_reason = %s, score_scale_version = 3
             WHERE attempt_id = %s
             """,
             (total_score, status, reason, attempt_id),
@@ -1332,7 +1332,7 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
                 """
                 UPDATE attempt
                 SET score = 0.00, end_time = NOW(), submitted_at = NOW(), status = 'terminated',
-                    termination_reason = %s, score_scale_version = 2
+                    termination_reason = %s, score_scale_version = 3
                 WHERE attempt_id = %s
                 """,
                 (reason, attempt["attempt_id"]),

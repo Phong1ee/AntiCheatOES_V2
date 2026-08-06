@@ -206,7 +206,7 @@ class EssayFinalizationTests(unittest.TestCase):
         existing = {11: {"answer_text": "Teacher-reviewed answer", "score": 4}}
         result, cursor, _ = self._finalize([essay_question(11)], [], existing=existing)
         self.assertEqual(cursor.essays[11], existing[11])
-        self.assertEqual(result["score"], Decimal("8.00"))
+        self.assertEqual(result["score"], Decimal("80.00"))
         self.assertFalse(result["essayPending"])
 
     def test_objective_questions_award_full_or_zero_raw_score_before_normalization(self):
@@ -224,7 +224,7 @@ class EssayFinalizationTests(unittest.TestCase):
         )
         self.assertEqual(result["rawEarnedScore"], Decimal("2"))
         self.assertEqual(result["rawPossibleScore"], Decimal("10"))
-        self.assertEqual(result["score"], Decimal("2.00"))
+        self.assertEqual(result["score"], Decimal("20.00"))
 
     def test_mixed_objective_max_scores_normalize_after_exact_sum(self):
         questions = [objective_question(1, "1.5"), objective_question(2, "2.5")]
@@ -237,7 +237,7 @@ class EssayFinalizationTests(unittest.TestCase):
         )
         self.assertEqual(result["rawEarnedScore"], Decimal("4.0"))
         self.assertEqual(result["rawPossibleScore"], Decimal("4.0"))
-        self.assertEqual(result["score"], Decimal("10.00"))
+        self.assertEqual(result["score"], Decimal("100.00"))
 
 
 if __name__ == "__main__":

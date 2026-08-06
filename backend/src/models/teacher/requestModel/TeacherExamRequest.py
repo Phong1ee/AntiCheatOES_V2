@@ -35,8 +35,8 @@ class TeacherExamRequest(BaseModel):
     result_visibility: Literal["hidden", "score-only", "full"] = Field(...)
     subject_id: str = Field(..., description="The ID of the subject associated with the exam.")
 
-    total_points: Literal[10] = Field(default=10, description="Deprecated fixed grading scale.")
-    passing_score: Decimal = Field(default=Decimal("5.00"), ge=0, le=10, max_digits=4, decimal_places=2)
+    total_points: Literal[100] = Field(default=100, description="Deprecated fixed grading scale.")
+    passing_score: Decimal = Field(default=Decimal("50.00"), ge=0, le=100, max_digits=5, decimal_places=2)
 
     @model_validator(mode="after")
     def validate_score_range(self):

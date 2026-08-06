@@ -140,9 +140,9 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": get_exam_status(exam, now_time),
         "subject": exam.subject.subject_name if exam.subject else None,
-        "total_points": 10,
-        "grading_scale": 10,
-        "passing_score": exam.passing_score if exam.passing_score is not None else 5,
+        "total_points": 100,
+        "grading_scale": 100,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
         "question_selection_mode": (
             exam.question_selection_mode.value
             if hasattr(exam.question_selection_mode, "value")

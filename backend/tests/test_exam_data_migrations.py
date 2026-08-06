@@ -111,9 +111,9 @@ class ExamDataMigrationTests(unittest.TestCase):
         self.assertIn("invalid_or_missing_exam_scores_using_5.00_fallback", source)
 
     def test_legacy_hundred_and_non_hundred_totals_normalize_consistently(self):
-        self.assertEqual(normalize_score(50, 100), Decimal("5.00"))
-        self.assertEqual(normalize_score(24, 80), Decimal("3.00"))
-        self.assertEqual(normalize_score(72, 120), Decimal("6.00"))
+        self.assertEqual(normalize_score(50, 100), Decimal("50.00"))
+        self.assertEqual(normalize_score(24, 80), Decimal("30.00"))
+        self.assertEqual(normalize_score(72, 120), Decimal("60.00"))
 
     def test_anti_cheat_migration_backfills_legacy_thresholds_and_has_one_head(self):
         migration = self._load("c9d1e8f2a4b6_expand_anti_cheat_settings_and_events.py")
@@ -144,7 +144,7 @@ class ExamDataMigrationTests(unittest.TestCase):
 
         config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_heads(), ["f3b8d2a7c5e1"])
+        self.assertEqual(script.get_heads(), ["ccd8210b8297"])
 
 
 if __name__ == "__main__":

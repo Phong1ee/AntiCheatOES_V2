@@ -26,7 +26,7 @@ export interface TeacherExamApi {
   subject_id: string | null;
   result_visibility: ResultVisibility | null;
   total_points: number;
-  grading_scale: 10;
+  grading_scale: 100;
   passing_score: number;
   question_selection_mode: "manual" | "fixed_randomization" | "pool";
 }
@@ -42,8 +42,8 @@ export interface TeacherExamRequest {
   status: ExamStatus;
   result_visibility: ResultVisibility;
   subject_id: string;
-  /** Deprecated compatibility field; the backend fixes this to 10. */
-  total_points?: 10;
+  /** Deprecated compatibility field; the backend fixes this to 100. */
+  total_points?: 100;
   passing_score: number;
 }
 

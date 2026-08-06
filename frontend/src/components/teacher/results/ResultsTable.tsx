@@ -54,7 +54,7 @@ interface ResultsTableProps {
   onViewDetail: (attemptId: number) => void;
 }
 
-const CSV_HEADERS = ['Student ID', 'Name', 'Final Score (/10)', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
+const CSV_HEADERS = ['Student ID', 'Name', 'Final Score (/100)', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
 
 function toCsvRow(result: StudentResult): (string | number)[] {
   return [
@@ -146,8 +146,8 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
                   <div className="flex items-center gap-4">
                     {/* Stats */}
                     <div className="text-right">
-                      <p className={`text-lg font-medium ${attempt.score >= 9 ? 'text-green-600' : attempt.score >= 7.5 ? 'text-blue-600' : attempt.score >= 6 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {attempt.score.toFixed(2)} / 10
+                      <p className={`text-lg font-medium ${attempt.score >= 90 ? 'text-green-600' : attempt.score >= 75 ? 'text-blue-600' : attempt.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {attempt.score.toFixed(2)} / 100
                       </p>
                       <div className="flex items-center gap-2 text-xs text-gray-400">
                         <span className="flex items-center gap-1">
@@ -421,11 +421,11 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     <TableCell className="text-center">
                       <span
                         className={`inline-flex items-center justify-center w-12 h-8 rounded-lg ${
-                          result.score >= 9
+                          result.score >= 90
                             ? 'bg-green-100 text-green-700'
-                            : result.score >= 7.5
+                            : result.score >= 75
                             ? 'bg-blue-100 text-blue-700'
-                            : result.score >= 6
+                            : result.score >= 60
                             ? 'bg-amber-100 text-amber-700'
                             : result.score > 0
                             ? 'bg-red-100 text-red-700'

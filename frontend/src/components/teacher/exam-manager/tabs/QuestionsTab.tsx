@@ -762,7 +762,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
       {/* Question List - Left */}
-      <div className="lg:col-span-1 border-r border-gray-200 bg-gray-50">
+      <div className="lg:col-span-1 flex min-h-0 flex-col border-r border-gray-200 bg-gray-50">
         <div className="question-sidebar-actions-container min-w-0 space-y-3 border-b border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm text-gray-700">
@@ -880,7 +880,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
 
         {isPoolMode && poolConfig && activePoolRuleId === null ? (
           /* Pool Configuration Summary */
-          <div className="p-4 space-y-3 overflow-y-auto h-[calc(100vh-400px)]">
+          <div className="flex-1 min-h-0 space-y-3 overflow-y-auto p-4">
             <div className="space-y-2">
               <h4 className="text-xs text-gray-700 uppercase">Subject</h4>
               <Badge variant="outline" className="bg-white">
@@ -927,7 +927,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
             </div>
           </div>
         ) : (
-        <div className="overflow-y-auto h-[calc(100vh-400px)]">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {questions.map((question, index) => {
             const difficultyColors = {
               easy: 'bg-green-100 text-green-700',
@@ -1021,7 +1021,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       </div>
 
       {/* Question Editor - Right */}
-      <div className="lg:col-span-2 p-6 overflow-y-auto h-[calc(100vh-200px)]">
+      <div className="lg:col-span-2 min-h-0 overflow-y-auto p-6">
         {!selectedQ ? (
           <div className="h-full flex items-center justify-center text-gray-500">
             <div className="text-center">

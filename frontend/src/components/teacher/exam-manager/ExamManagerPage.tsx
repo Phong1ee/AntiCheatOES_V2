@@ -116,7 +116,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
       status: examData.status,
       result_visibility: examData.resultVisibility,
       subject_id: examData.subjectId,
-      total_points: 10 as const,
+      total_points: 100 as const,
       passing_score: examData.passingScore,
     };
 
@@ -162,20 +162,20 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
 
   if (loading) {
     return (
-      <div className="h-[calc(100vh-64px)] flex items-center justify-center">
+      <div className="h-[calc(100vh-80px)] flex items-center justify-center">
         <LoadingState label="Loading exams..." />
       </div>
     );
   }
 
   if (loadError) {
-    return <div className="h-[calc(100vh-64px)] flex flex-col gap-3 items-center justify-center text-red-600"><p>{loadError}</p><button className="underline" onClick={() => void loadManagerData()}>Retry</button></div>;
+    return <div className="h-[calc(100vh-80px)] flex flex-col gap-3 items-center justify-center text-red-600"><p>{loadError}</p><button className="underline" onClick={() => void loadManagerData()}>Retry</button></div>;
   }
 
   const selectedExam = exams.find((exam) => exam.id === selectedExamId) ?? null;
 
   return (
-    <div className="h-[calc(100vh-64px)] flex">
+    <div className="h-[calc(100vh-80px)] flex overflow-hidden">
       <div className="w-[35%] min-w-[320px] max-w-[500px]">
         <ExamListSidebar
           exams={exams}

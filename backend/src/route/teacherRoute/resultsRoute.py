@@ -208,7 +208,7 @@ def _all_submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, l
             Attempt.exam_id == exam_id,
             Attempt.submitted_at.isnot(None),
             Attempt.status.in_(["submitted", "terminated"]),
-            Attempt.score_scale_version == 2,
+            Attempt.score_scale_version == 3,
         )
         .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
         .all()
@@ -477,7 +477,7 @@ def _recompute_attempt_score(db: Session, attempt_id: int) -> Attempt:
     if attempt is None:
         raise HTTPException(status_code=404, detail="Attempt not found")
     attempt.score = normalize_score(raw_earned, raw_possible)
-    attempt.score_scale_version = 2
+    attempt.score_scale_version = 3
     db.flush()
     return attempt
 
@@ -805,7 +805,7 @@ def export_exam_results_xlsx(
     results_sheet = workbook.active
     results_sheet.title = "Student Results"
     results_sheet.append(
-        ["Student ID", "Name", "Score (/10)", "Correct Answers", "Total Questions", "Time Spent", "Status", "Submitted At"]
+        ["Student ID", "Name", "Score (/100)", "Correct Answers", "Total Questions", "Time Spent", "Status", "Submitted At"]
     )
     for row in students:
         results_sheet.append([

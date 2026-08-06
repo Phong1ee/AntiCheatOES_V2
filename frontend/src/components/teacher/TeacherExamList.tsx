@@ -62,7 +62,6 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const modalExam = selectedExam ? {
     id: String(selectedExam.exam_id),
     title: selectedExam.title,
@@ -159,9 +158,9 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
     });
 
   return (
-    <div className="space-y-6">
+    <div className="flex h-full flex-col gap-6">
       {/* Filters & Search */}
-      <Card className="shadow-lg rounded-2xl border-0">
+      <Card className="shadow-lg rounded-2xl border-0 shrink-0">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 relative">
@@ -203,6 +202,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
       </Card>
 
       {/* Exam List */}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
       <div className="grid gap-4">
         {filteredExams.map((exam) => {
           return (
@@ -312,6 +312,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
           </CardContent>
         </Card>
       )}
+      </div>
 
       {/* Modals */}
       {showDetailsModal && selectedExam && modalExam && (

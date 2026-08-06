@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import {
@@ -11,9 +13,9 @@ import {
 } from '../../ui/select';
 import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
-import { SettingsTab } from './tabs/SettingsTab';
+import { SettingsTab, type SettingsTabHandle } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
-import { FileText, BookOpen, Clock, Hash } from 'lucide-react';
+import { FileText, BookOpen, Clock, Hash, Settings2, Users, CheckCircle2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -68,7 +70,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [examCode, setExamCode] = useState('');
   const [requireExamCode, setRequireExamCode] = useState(false);
   const [maxAttempt, setMaxAttempt] = useState(1);
-  const [passingScore, setPassingScore] = useState(5);
+  const [passingScore, setPassingScore] = useState(50);
   const [status, setStatus] = useState<ExamStatus>('draft');
   const [resultVisibility, setResultVisibility] = useState<ResultVisibility>('hidden');
   const [startDate, setStartDate] = useState('');
@@ -79,6 +81,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [activeTab, setActiveTab] = useState<ExamEditorTab>('general');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const settingsTabRef = useRef<SettingsTabHandle>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   // Generate unique exam code for new exams
   const generateExamCode = () => {
@@ -103,7 +107,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setExamCode('');
       setRequireExamCode(false);
       setMaxAttempt(1);
-      setPassingScore(5);
+      setPassingScore(50);
       setStatus('draft');
       setResultVisibility('hidden');
       setStartDate('');
@@ -124,7 +128,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setExamCode(generateExamCode());
       setRequireExamCode(true);
       setMaxAttempt(1);
-      setPassingScore(5);
+      setPassingScore(50);
       setStatus('draft');
       setResultVisibility('hidden');
       setStartDate('');
@@ -219,8 +223,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setSaveError('End date and time must be later than start date and time.');
       return;
     }
-    if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 10) {
-      setSaveError('Passing score must be between 0 and 10.');
+    if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 100) {
+      setSaveError('Passing score must be between 0 and 100.');
       return;
     }
     const normalizedExamCode = examCode.trim();
@@ -258,7 +262,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   // Check if has unsaved changes
   const scoresAreValid = Number.isFinite(passingScore)
     && passingScore >= 0
-    && passingScore <= 10;
+    && passingScore <= 100;
   const scheduleIsValid = Boolean(startDate && startClock && endDate && endClock)
     && `${endDate}T${endClock}` > `${startDate}T${startClock}`;
   const hasRequiredData = title.trim() !== ''
@@ -278,51 +282,41 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       )}
 
       {/* Header */}
-      <div className="border-b border-gray-200 p-4 space-y-4">
+      <div className="border-b border-gray-200 bg-gradient-to-b from-gray-50/80 to-white px-6 py-5 space-y-4">
         {/* Title & Actions */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1 space-y-2">
-            <div
-              className="grid items-center gap-3"
-              style={{ gridTemplateColumns: '85px minmax(0, 1fr)' }}
-            >
-              <label
-                htmlFor="exam-title"
-                className="inline-flex w-full justify-end rounded px-2 py-0.5 text-sm font-medium text-black-600 font-bold"
-              >
-                Exam Title
-              </label>
-              <Input
-                id="exam-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter exam title..."
-                className="w-full min-w-0 text-2xl border-0 px-3 focus-visible:ring-0"
-              />
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm space-y-1">
+              <div className="space-y-0.5">
+                <Label htmlFor="exam-title" className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  Exam Title
+                </Label>
+                <Input
+                  id="exam-title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Untitled exam"
+                  className="h-auto w-full min-w-0 border-0 bg-transparent px-0 text-lg font-bold text-black shadow-none placeholder:font-normal placeholder:text-gray-400 focus-visible:ring-0"
+                />
+              </div>
+              <div className="space-y-0.5 border-t border-gray-100 pt-1">
+                <Label htmlFor="exam-description" className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  Description
+                </Label>
+                <Textarea
+                  id="exam-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Add a description or instructions for students..."
+                  className="min-h-0 w-full min-w-0 resize-none border-0 bg-transparent px-0 py-0 text-xs font-medium text-gray-800 shadow-none placeholder:font-normal placeholder:text-gray-400 focus-visible:ring-0"
+                  rows={1}
+                />
+              </div>
             </div>
-            <div
-              className="grid items-start gap-3"
-              style={{ gridTemplateColumns: '85px minmax(0, 1fr)' }}
-            >
-              <label
-                htmlFor="exam-description"
-                className="inline-flex w-full justify-end rounded px-2 py-0.5 text-sm font-medium text-black-600 font-bold"
-              >
-                Description
-              </label>
-              <Textarea
-                id="exam-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Add description or instructions..."
-                className="w-full min-w-0 resize-none text-sm border-0 px-3 focus-visible:ring-0"
-                rows={2}
-              />
-            </div>
-            
+
             {/* Exam Info Bar - Only show for existing exams with data */}
             {!isNewExam && (subject || duration || (requireExamCode && examCode)) && (
-              <div className="flex flex-wrap items-center gap-4 pt-2 text-sm text-gray-600">
+              <div className="flex flex-wrap items-center gap-4 pt-1 text-sm text-gray-600">
                 {subject && (
                   <div className="flex items-center gap-1.5">
                     <BookOpen className="size-4 text-teal-600" />
@@ -345,11 +339,11 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             )}
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-col items-stretch gap-2 flex-shrink-0">
             <Select value={status} onValueChange={(value) => {
               if (value === 'draft' || value === 'published') setStatus(value);
             }}>
-              <SelectTrigger className={`w-36 ${statusConfig[status].color}`} aria-label="Exam status">
+              <SelectTrigger className={`w-36 rounded-full font-medium ${statusConfig[status].color}`} aria-label="Exam status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -357,47 +351,74 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                 <SelectItem value="published">Published</SelectItem>
               </SelectContent>
             </Select>
+
+            {activeTab === 'general' && (
+              <Button
+                onClick={() => void handleSave()}
+                disabled={!hasRequiredData || isSaving}
+                className="w-36 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="mr-2 size-4" />
+                {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
+              </Button>
+            )}
+
+            {activeTab === 'settings' && (
+              <Button
+                onClick={() => void settingsTabRef.current?.save()}
+                disabled={settingsSaving}
+                className="w-36 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="mr-2 size-4" />
+                {settingsSaving ? 'Saving...' : 'Save Settings'}
+              </Button>
+            )}
           </div>
         </div>
 
         {/* Auto-save indicator */}
-        <div className="text-xs text-gray-500">
-          Auto-saved {getTimeSinceLastSave()}
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <CheckCircle2 className="size-3.5 text-teal-500" />
+          <span>Auto-saved {getTimeSinceLastSave()}</span>
         </div>
       </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(value) => {
         if (isExamEditorTab(value)) setActiveTab(value);
-      }} className="flex-1 flex flex-col">
-        <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
+      }} className="flex-1 flex flex-col min-h-0">
+        <TabsList className="w-full justify-start gap-1 border-b rounded-none h-auto p-0 bg-transparent">
           <TabsTrigger
             value="general"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
+            className="gap-1.5 rounded-none border-b-2 border-transparent px-4 text-gray-500 data-[state=active]:border-teal-500 data-[state=active]:bg-transparent data-[state=active]:text-teal-700"
           >
+            <FileText className="size-4" />
             General Info
           </TabsTrigger>
           <TabsTrigger
             value="questions"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
+            className="gap-1.5 rounded-none border-b-2 border-transparent px-4 text-gray-500 data-[state=active]:border-teal-500 data-[state=active]:bg-transparent data-[state=active]:text-teal-700"
           >
+            <BookOpen className="size-4" />
             Questions
           </TabsTrigger>
           <TabsTrigger
             value="settings"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
+            className="gap-1.5 rounded-none border-b-2 border-transparent px-4 text-gray-500 data-[state=active]:border-teal-500 data-[state=active]:bg-transparent data-[state=active]:text-teal-700"
           >
+            <Settings2 className="size-4" />
             Settings
           </TabsTrigger>
           <TabsTrigger
             value="assignment"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-teal-500 data-[state=active]:bg-transparent"
+            className="gap-1.5 rounded-none border-b-2 border-transparent px-4 text-gray-500 data-[state=active]:border-teal-500 data-[state=active]:bg-transparent data-[state=active]:text-teal-700"
           >
+            <Users className="size-4" />
             Assignment
           </TabsTrigger>
         </TabsList>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 min-h-0 ${activeTab === 'questions' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <TabsContent value="general" className="m-0 p-6">
             <GeneralInfoTab
               subject={subject}
@@ -430,23 +451,21 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               onStartTimeChange={setStartClock}
               onEndDateChange={setEndDate}
               onEndTimeChange={setEndClock}
-              canSave={hasRequiredData}
-              isSaving={isSaving}
-              isNewExam={isNewExam}
               saveError={saveError}
               onCancel={onClose}
-              onSave={() => void handleSave()}
             />
           </TabsContent>
 
-          <TabsContent value="questions" className="m-0 p-0">
+          <TabsContent value="questions" className="m-0 h-full p-0">
             <QuestionsTab examId={examId} subjectId={subjectId} />
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 p-6">
             <SettingsTab
+              ref={settingsTabRef}
               examId={examId}
               resultVisibility={resultVisibility}
+              onSavingChange={setSettingsSaving}
               onResultVisibilityChange={async (nextVisibility) => {
                 await onResultVisibilityChange(examId, nextVisibility);
                 setResultVisibility(nextVisibility);

@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
-import { AlertCircle, Calendar, Clock, Hash, Save } from 'lucide-react';
+import { AlertCircle, Award, Clock, Hash, Info, ListOrdered } from 'lucide-react';
 import type { TeacherSubject } from '../../../../types/teacher-exam';
 
 interface GeneralInfoTabProps {
@@ -36,12 +36,8 @@ interface GeneralInfoTabProps {
   onStartTimeChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
-  canSave: boolean;
-  isSaving: boolean;
-  isNewExam: boolean;
   saveError: string | null;
   onCancel: () => void;
-  onSave: () => void;
 }
 
 export function GeneralInfoTab({
@@ -67,12 +63,8 @@ export function GeneralInfoTab({
   onStartTimeChange,
   onEndDateChange,
   onEndTimeChange,
-  canSave,
-  isSaving,
-  isNewExam,
   saveError,
   onCancel,
-  onSave,
 }: GeneralInfoTabProps) {
   const subjectSelectValue = subjectId;
 
@@ -80,8 +72,8 @@ export function GeneralInfoTab({
   const errors: string[] = [];
   if (!subject) errors.push('Subject is required');
   if (requireExamCode && !examCode.trim()) errors.push('Exam code is required when code protection is enabled');
-  if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 10) {
-    errors.push('Passing score must be between 0 and 10');
+  if (!Number.isFinite(passingScore) || passingScore < 0 || passingScore > 100) {
+    errors.push('Passing score must be between 0 and 100');
   }
   if (!startDate || !startTime) errors.push('Start date and time are required');
   if (!endDate || !endTime) errors.push('End date and time are required');
@@ -113,7 +105,12 @@ export function GeneralInfoTab({
       {/* Basic Information */}
       <Card className="shadow-md rounded-2xl border-0">
         <CardHeader>
-          <CardTitle className="text-gray-800">Basic Information</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-gray-800">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+              <Info className="size-4" />
+            </span>
+            Basic Information
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="max-w-xl space-y-2">
@@ -130,7 +127,7 @@ export function GeneralInfoTab({
               </Select>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/60 p-4">
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label htmlFor="require-exam-code">Require exam code</Label>
@@ -143,15 +140,15 @@ export function GeneralInfoTab({
               />
             </div>
             {requireExamCode && (
-              <div className="space-y-2">
+              <div className="space-y-2 pt-1">
                 <Label htmlFor="examCode">Exam Code *</Label>
-                <div className="relative">
+                <div className="relative max-w-xs">
                   <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
                   <Input
                     id="examCode"
                     value={examCode}
                     onChange={(e) => onExamCodeChange(e.target.value)}
-                    className={`pl-10 ${!examCode.trim() ? 'border-red-300' : ''}`}
+                    className={`pl-10 font-mono ${!examCode.trim() ? 'border-red-300' : ''}`}
                     maxLength={20}
                   />
                 </div>
@@ -165,68 +162,58 @@ export function GeneralInfoTab({
       {/* Schedule & Duration */}
       <Card className="shadow-md rounded-2xl border-0">
         <CardHeader>
-          <CardTitle className="text-gray-800">Schedule & Duration</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-gray-800">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+              <Clock className="size-4" />
+            </span>
+            Schedule & Duration
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="startDate">Start Date</Label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => onStartDateChange(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <Input
+                id="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => onStartDateChange(e.target.value)}
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="startTime">Start Time</Label>
-              <div className="relative">
-                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-                <Input
-                  id="startTime"
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => onStartTimeChange(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <Input
+                id="startTime"
+                type="time"
+                value={startTime}
+                onChange={(e) => onStartTimeChange(e.target.value)}
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="endDate">End Date</Label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => onEndDateChange(e.target.value)}
-                  className={
-                    startDate && startTime && endDate && endTime && `${endDate}T${endTime}` <= `${startDate}T${startTime}`
-                      ? 'pl-10 border-red-300'
-                      : 'pl-10'
-                  }
-                />
-              </div>
+              <Input
+                id="endDate"
+                type="date"
+                value={endDate}
+                onChange={(e) => onEndDateChange(e.target.value)}
+                className={
+                  startDate && startTime && endDate && endTime && `${endDate}T${endTime}` <= `${startDate}T${startTime}`
+                    ? 'border-red-300'
+                    : ''
+                }
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="endTime">End Time</Label>
-              <div className="relative">
-                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-                <Input
-                  id="endTime"
-                  type="time"
-                  value={endTime}
-                  onChange={(e) => onEndTimeChange(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <Input
+                id="endTime"
+                type="time"
+                value={endTime}
+                onChange={(e) => onEndTimeChange(e.target.value)}
+              />
             </div>
           </div>
 
@@ -242,13 +229,13 @@ export function GeneralInfoTab({
             />
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+            <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label htmlFor="unlimited-attempts">Allow unlimited attempts</Label>
-                {/* <p className="text-sm text-gray-500">
-                  Students can retake this exam without a limit
-                </p> */}
+                <p className="text-xs text-gray-500">
+                  Students can retake this exam as many times as they like.
+                </p>
               </div>
               <Switch
                 id="unlimited-attempts"
@@ -258,18 +245,22 @@ export function GeneralInfoTab({
             </div>
 
             {maxAttempt !== 0 && (
-              <div className="space-y-2">
-                {/* <Label htmlFor="attempts">Number of Attempts</Label> */}
-                <Input
-                  id="attempts"
-                  type="number"
-                  value={maxAttempt}
-                  onChange={(e) => onMaxAttemptChange(Math.max(1, Number(e.target.value) || 1))}
-                  min="1"
-                  step="1"
-                  inputMode="numeric"
-                  placeholder="Enter number of attempts"
-                />
+              <div className="space-y-2 pt-1">
+                <Label htmlFor="attempts">Number of Attempts</Label>
+                <div className="relative max-w-[160px]">
+                  <ListOrdered className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+                  <Input
+                    id="attempts"
+                    type="number"
+                    value={maxAttempt}
+                    onChange={(e) => onMaxAttemptChange(Math.max(1, Number(e.target.value) || 1))}
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    placeholder="1"
+                    className="pl-10"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -279,17 +270,23 @@ export function GeneralInfoTab({
       {/* Grading */}
       <Card className="shadow-md rounded-2xl border-0">
         <CardHeader>
-          <CardTitle className="text-gray-800">Grading</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-gray-800">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
+              <Award className="size-4" />
+            </span>
+            Grading
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Grading Scale</Label>
-              <div className="rounded-md border bg-gray-50 px-3 py-2 text-sm text-gray-800">
-                10 points (fixed)
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
+                <Award className="size-3.5" />
+                100 points (fixed)
               </div>
               <p className="text-xs text-gray-500">
-                Raw question scores are summed and normalized to a final score out of 10.
+                Raw question scores are summed and normalized to a final score out of 100.
               </p>
             </div>
 
@@ -304,10 +301,15 @@ export function GeneralInfoTab({
                   onPassingScoreChange(Number.isFinite(value) ? value : 0);
                 }}
                 min="0"
-                max="10"
+                max="100"
                 step="0.01"
+                className="max-w-[160px]"
               />
-              <p className="text-xs text-gray-500">Enter a passing threshold from 0.00 to 10.00.</p>
+              <p className="text-xs text-gray-500">
+                {Number.isFinite(passingScore)
+                  ? `Students need a score of ${passingScore} or higher (out of 100) to pass.`
+                  : 'Enter a passing threshold from 0.00 to 100.00.'}
+              </p>
             </div>
           </div>
         </CardContent>
@@ -317,14 +319,6 @@ export function GeneralInfoTab({
       <div className="flex items-center justify-end gap-3 pt-2">
         <Button variant="outline" onClick={onCancel}>
           Cancel
-        </Button>
-        <Button
-          onClick={onSave}
-          disabled={!canSave || isSaving}
-          className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Save className="mr-2 size-4" />
-          {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
         </Button>
       </div>
 

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { CheckCircle, Clock, GraduationCap, Loader2, Save, Shield, Shuffle } from 'lucide-react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
@@ -7,7 +7,6 @@ import {
   defaultTeacherExamSettings,
   type TeacherExamSettingsPayload,
 } from '../../../../types/examSettings';
-import { Button } from '../../../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
@@ -16,10 +15,15 @@ import { Switch } from '../../../ui/switch';
 import type { ResultStrategy } from '../../../../types/teacher-results';
 import type { ResultVisibility } from '../../../../types/teacher-exam';
 
+export interface SettingsTabHandle {
+  save: () => Promise<void>;
+}
+
 interface SettingsTabProps {
   examId: string | null;
   resultVisibility: ResultVisibility;
   onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
+  onSavingChange?: (saving: boolean) => void;
 }
 
 const gradingMethods: { value: ResultStrategy; label: string}[] = [
@@ -40,7 +44,10 @@ const visibilityOptions: { value: ResultVisibility; label: string}[] = [
 const isResultVisibility = (value: string): value is ResultVisibility =>
   visibilityOptions.some((option) => option.value === value);
 
-export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange }: SettingsTabProps) {
+export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
+  { examId, resultVisibility, onResultVisibilityChange, onSavingChange },
+  ref,
+) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
   const [draftResultVisibility, setDraftResultVisibility] = useState<ResultVisibility>(resultVisibility);
   const [loading, setLoading] = useState(false);
@@ -53,6 +60,10 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
   useEffect(() => {
     setDraftResultVisibility(resultVisibility);
   }, [resultVisibility]);
+
+  useEffect(() => {
+    onSavingChange?.(saving);
+  }, [saving, onSavingChange]);
 
   useEffect(() => {
     let active = true;
@@ -167,6 +178,8 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
     }
   };
 
+  useImperativeHandle(ref, () => ({ save: saveSettings }));
+
   if (!persistedExamId) {
     return <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Create the exam before configuring settings.</div>;
   }
@@ -204,7 +217,7 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
           <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
             Essay grading takes precedence. Results remain pending until all submitted essay answers for the attempt are graded.
           </p>
-          <p className="text-sm text-gray-500">This change is saved when you click Save Settings below.</p>
+          <p className="text-sm text-gray-500">This change is saved when you click Save Settings above.</p>
         </CardContent>
       </Card>
 
@@ -313,13 +326,6 @@ export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange
           </div>
         </CardContent>
       </Card>
-
-      <div className="flex justify-end">
-        <Button onClick={() => void saveSettings()} disabled={loading || saving} className="bg-gradient-to-r from-teal-500 to-blue-600">
-          {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
-          {saving ? 'Saving...' : 'Save Settings'}
-        </Button>
-      </div>
     </div>
   );
-}
+});

@@ -3,9 +3,9 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
-GRADING_SCALE = Decimal("10.00")
+GRADING_SCALE = Decimal("100.00")
 SCORE_QUANTUM = Decimal("0.01")
-CURRENT_SCORE_SCALE_VERSION = 2
+CURRENT_SCORE_SCALE_VERSION = 3
 
 
 def decimal_score(value: Decimal | int | str | float | None, *, field_name: str) -> Decimal:

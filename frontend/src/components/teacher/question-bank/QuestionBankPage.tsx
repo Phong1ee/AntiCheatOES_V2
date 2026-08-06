@@ -48,6 +48,13 @@ export function QuestionBankPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+
+  // Jump back to the top of the list on every page change so "Next" doesn't
+  // leave the reader stranded at the bottom of a page they haven't seen yet.
+  useEffect(() => {
+    listScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [page]);
   const [reloadKey, setReloadKey] = useState(0);
   const [editorQuestionId, setEditorQuestionId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -351,7 +358,7 @@ export function QuestionBankPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-gray-50 text-gray-800">
+    <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-gray-50 text-gray-800">
       <div className="hidden w-56 shrink-0 min-w-0 md:block">
         <SubjectSidebar
           selectedSubject={selectedSubject}
@@ -484,7 +491,10 @@ export function QuestionBankPage() {
           )}
         </header>
 
-        <section className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5">
+        <section
+          ref={listScrollRef}
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
+        >
           <div className="mx-auto w-full max-w-4xl">
             {activeTab === "bank" ? (
               <BankQuestionList

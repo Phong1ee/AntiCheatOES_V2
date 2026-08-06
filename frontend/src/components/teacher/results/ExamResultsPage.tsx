@@ -85,7 +85,7 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50">
+    <div className="h-[calc(100vh-80px)] flex flex-col overflow-hidden bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50">
       {/* Header — only shown when an exam is selected */}
       {selectedExamId && (
         <div className="px-6 pt-5 max-w-7xl mx-auto w-full">
@@ -130,7 +130,7 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="max-w-7xl mx-auto space-y-6">
           {!selectedExamId ? (
             // Exam List View

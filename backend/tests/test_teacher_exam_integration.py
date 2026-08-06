@@ -217,14 +217,14 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             status="draft",
             result_visibility="score-only",
             subject_id="DB",
-            total_points=10,
+            total_points=100,
             passing_score=6,
         )
         update_exam_in_database(exam.exam_id, request, {"school_id": "T1"}, {}, self.db)
         self.db.expire_all()
         updated = self.db.get(Exam, exam.exam_id)
         self.assertEqual((updated.title, updated.max_attempt), ("Updated title", 3))
-        self.assertEqual((updated.total_points, updated.passing_score), (10, 6))
+        self.assertEqual((updated.total_points, updated.passing_score), (100, 6))
         self.assertEqual((updated.start_time, updated.end_time), (datetime(2026, 8, 3, 9, 15), datetime(2026, 8, 3, 17, 45)))
         self.assertEqual(updated.status.value, "draft")
         teacher = self.db.query(User).filter_by(school_id="T1").one()
@@ -251,9 +251,9 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             self.assertEqual(self.db.get(Exam, exam.exam_id).status.value, exam_status)
         detail = get_exam(exam.exam_id, {"school_id": "T1"}, {}, self.db)
         listed = get_teacher_exams({"school_id": "T1"}, {}, self.db)
-        self.assertEqual((detail["total_points"], detail["passing_score"]), (10, 6))
+        self.assertEqual((detail["total_points"], detail["passing_score"]), (100, 6))
         listed_exam = next(item for item in listed if item["exam_id"] == exam.exam_id)
-        self.assertEqual((listed_exam["total_points"], listed_exam["passing_score"]), (10, 6))
+        self.assertEqual((listed_exam["total_points"], listed_exam["passing_score"]), (100, 6))
         self.assertEqual((detail["status"], listed_exam["status"]), ("published", "published"))
         self.assertEqual(detail["start_time"], "2026-08-03T09:15:00")
         other = self.db.query(Exam).filter_by(examcode="O").one()
@@ -537,12 +537,12 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             end_time=datetime(2026, 9, 12, 18, 30),
             result_visibility="full",
             subject_id="DB",
-            total_points=10,
+            total_points=100,
             passing_score=6,
         )
         created = add_exam_to_database(request, {"school_id": "T1"}, {}, self.db)
         reloaded = get_exam(created["exam_id"], {"school_id": "T1"}, {}, self.db)
-        self.assertEqual((reloaded["total_points"], reloaded["passing_score"]), (10, 6))
+        self.assertEqual((reloaded["total_points"], reloaded["passing_score"]), (100, 6))
         self.assertEqual((reloaded["start_time"], reloaded["end_time"]), ("2026-09-10T08:00:00", "2026-09-12T18:30:00"))
         self.assertEqual(reloaded["status"], "draft")
         for exam_status in ("draft",):
@@ -576,8 +576,8 @@ class TeacherExamIntegrationTests(unittest.TestCase):
                 end_time=datetime(2026, 9, 10, 7, 59),
                 result_visibility="full",
                 subject_id="DB",
-                total_points=10,
-                passing_score=10.01,
+                total_points=100,
+                passing_score=100.01,
             )
 
     def test_exam_code_can_be_disabled_enabled_and_remains_unique_when_present(self):
@@ -591,7 +591,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             end_time=datetime(2026, 9, 10, 9, 0),
             result_visibility="hidden",
             subject_id="DB",
-            total_points=10,
+            total_points=100,
             passing_score=5,
         )
         first = add_exam_to_database(template, {"school_id": "T1"}, {}, self.db)
@@ -977,8 +977,8 @@ class TeacherExamIntegrationTests(unittest.TestCase):
             {},
             self.db,
         )
-        self.assertEqual((graded["attemptScore"], graded["finalScore"]), (4.0, 4.0))
-        self.assertEqual(float(self.db.get(StudentExam, (student.school_id, exam.exam_id)).final_score), 4)
+        self.assertEqual((graded["attemptScore"], graded["finalScore"]), (40.0, 40.0))
+        self.assertEqual(float(self.db.get(StudentExam, (student.school_id, exam.exam_id)).final_score), 40)
 
         rollback_question = Question(
             question_text="Rollback",
@@ -1011,7 +1011,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
                 )
         self.db.expire_all()
         self.assertIsNone(self.db.get(EssayAnswer, rollback_essay.essay_answer_id).score)
-        self.assertEqual(float(self.db.get(Attempt, attempt.attempt_id).score), 4)
+        self.assertEqual(float(self.db.get(Attempt, attempt.attempt_id).score), 40)
 
     def test_delete_exam_preserves_reusable_question(self):
         result, exam = self._create(options=[option("A", True), option("B")])

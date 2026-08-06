@@ -25,22 +25,22 @@ def _exam_payload(**overrides):
     return payload
 
 
-@pytest.mark.parametrize("passing", [0, Decimal("5.50"), 10])
-def test_passing_score_accepts_zero_through_ten(passing):
+@pytest.mark.parametrize("passing", [0, Decimal("5.50"), 100])
+def test_passing_score_accepts_zero_through_hundred(passing):
     request = TeacherExamRequest(**_exam_payload(passing_score=passing))
-    assert request.total_points == 10
+    assert request.total_points == 100
     assert request.passing_score == Decimal(str(passing))
 
 
-@pytest.mark.parametrize("passing", [Decimal("-0.01"), Decimal("10.01")])
-def test_passing_score_rejects_values_outside_ten_point_scale(passing):
+@pytest.mark.parametrize("passing", [Decimal("-0.01"), Decimal("100.01")])
+def test_passing_score_rejects_values_outside_hundred_point_scale(passing):
     with pytest.raises(ValidationError):
         TeacherExamRequest(**_exam_payload(passing_score=passing))
 
 
 def test_legacy_total_points_cannot_select_another_scale():
     with pytest.raises(ValidationError):
-        TeacherExamRequest(**_exam_payload(total_points=100))
+        TeacherExamRequest(**_exam_payload(total_points=10))
 
 
 def test_import_defaults_max_score_and_accepts_legacy_name():

@@ -79,9 +79,9 @@ def _serialize(exam: Exam) -> dict:
         "totalStudents": len(exam.student_exams),
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": schedule_status,
-        "total_points": 10,
-        "grading_scale": 10,
-        "passing_score": exam.passing_score if exam.passing_score is not None else 5,
+        "total_points": 100,
+        "grading_scale": 100,
+        "passing_score": exam.passing_score if exam.passing_score is not None else 50,
         "question_selection_mode": (
             exam.question_selection_mode.value
             if hasattr(exam.question_selection_mode, "value")
@@ -217,7 +217,7 @@ def add_exam_to_database(
             status=request.status,
             result_visibility=request.result_visibility,
             subject_id=request.subject_id,
-            total_points=10,
+            total_points=100,
             passing_score=request.passing_score,
         )
         db.add(exam)
@@ -260,7 +260,7 @@ def update_exam_in_database(
         if request.status == "published":
             _validate_publishable(db, exam)
         exam.status = request.status
-        exam.total_points = 10
+        exam.total_points = 100
         exam.passing_score = request.passing_score
         db.commit()
         db.refresh(exam)
@@ -295,7 +295,7 @@ def duplicate_exam(
             status="draft",
             result_visibility=source.result_visibility,
             subject_id=source.subject_id,
-            total_points=10,
+            total_points=100,
             passing_score=source.passing_score,
             question_selection_mode=source.question_selection_mode,
         )

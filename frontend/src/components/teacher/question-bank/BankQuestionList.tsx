@@ -141,10 +141,6 @@ export function BankQuestionList({
           <strong className="font-semibold text-gray-700">{total}</strong>{' '}
           question{total === 1 ? '' : 's'} found
         </p>
-
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-          Page {page} of {totalPages}
-        </p>
       </div>
 
       {loading ? (
@@ -349,24 +345,30 @@ export function BankQuestionList({
       )}
 
       {!loading && !error && totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            className="inline-flex h-10 items-center justify-center rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={page <= 1}
-            onClick={() => onPageChange(page - 1)}
-          >
-            Previous
-          </button>
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            Page {page} of {totalPages}
+          </p>
 
-          <button
-            type="button"
-            className="inline-flex h-10 items-center justify-center rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={page >= totalPages}
-            onClick={() => onPageChange(page + 1)}
-          >
-            Next
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={page <= 1}
+              onClick={() => onPageChange(page - 1)}
+            >
+              Previous
+            </button>
+
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={page >= totalPages}
+              onClick={() => onPageChange(page + 1)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </div>

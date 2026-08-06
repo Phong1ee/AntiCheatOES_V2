@@ -419,10 +419,10 @@ class Exam(Base):
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam")
     student_exams: Mapped[list["StudentExam"]] = relationship(back_populates="exam")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="exam")
-    # Deprecated compatibility field. All authoritative scores use the fixed 10-point scale.
-    total_points: Mapped[Optional[int]] = mapped_column(Integer, default=10, server_default=text("10"))
+    # Deprecated compatibility field. All authoritative scores use the fixed 100-point scale.
+    total_points: Mapped[Optional[int]] = mapped_column(Integer, default=100, server_default=text("100"))
     passing_score: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(4, 2), default=Decimal("5.00"), server_default=text("5.00")
+        Numeric(5, 2), default=Decimal("50.00"), server_default=text("50.00")
     )
     question_selection_mode: Mapped[QuestionSelectionMode] = mapped_column(
         Enum(QuestionSelectionMode),
@@ -535,7 +535,7 @@ class Attempt(Base):
     attempt_no: Mapped[Optional[int]] = mapped_column(Integer)
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     score_scale_version: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, default=2, server_default=text("2")
+        SmallInteger, nullable=False, default=3, server_default=text("3")
     )
     start_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime)

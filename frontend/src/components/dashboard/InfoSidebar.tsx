@@ -74,7 +74,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
               <div>
                 <p className="text-sm text-gray-600">Average Score</p>
                 <p className="text-xl text-gray-800">
-                  {averageScore === null ? 'No scores available yet' : `${averageScore.toFixed(2)} / 10`}
+                  {averageScore === null ? 'No scores available yet' : `${averageScore.toFixed(2)} / 100`}
                 </p>
               </div>
             </div>
@@ -141,7 +141,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
               </div>
               {result.scoreVisible && result.score !== null ? (
                 <Badge className="bg-teal-100 text-teal-700 hover:bg-teal-100 whitespace-nowrap">
-                  {result.score.toFixed(2)} / 10
+                  {result.score.toFixed(2)} / 100
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-gray-600 whitespace-nowrap">

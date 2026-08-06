@@ -16,7 +16,7 @@ def submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[A
             Attempt.exam_id == exam_id,
             Attempt.submitted_at.isnot(None),
             Attempt.status.in_([AttemptStatus.submitted, AttemptStatus.terminated]),
-            Attempt.score_scale_version == 2,
+            Attempt.score_scale_version == 3,
         )
         .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
         .all()

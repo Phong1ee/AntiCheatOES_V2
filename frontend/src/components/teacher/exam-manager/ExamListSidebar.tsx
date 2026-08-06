@@ -36,11 +36,32 @@ import {
   Send,
   FilePenLine,
   Trash2,
-  Clock,
+  Calendar,
   Users,
   FileText,
+  Inbox,
 } from 'lucide-react';
 import type { ExamStatus } from '../../../types/teacher-exam';
+
+const SUBJECT_DOT_COLORS = [
+  'bg-teal-500',
+  'bg-violet-500',
+  'bg-blue-500',
+  'bg-rose-500',
+  'bg-amber-500',
+];
+
+function getSubjectDotColor(subject: string, subjects: string[]) {
+  const idx = subjects.indexOf(subject);
+  return SUBJECT_DOT_COLORS[idx % SUBJECT_DOT_COLORS.length];
+}
+
+function scoreTone(avg: number) {
+  if (avg >= 85) return 'bg-green-50 text-green-700';
+  if (avg >= 70) return 'bg-blue-50 text-blue-700';
+  if (avg >= 55) return 'bg-amber-50 text-amber-700';
+  return 'bg-red-50 text-red-700';
+}
 
 interface Exam {
   id: string;
@@ -58,8 +79,8 @@ interface Exam {
 }
 
 const statusConfig = {
-  draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700 border-gray-200' },
-  published: { label: 'Published', color: 'bg-green-100 text-green-700 border-green-200' },
+  draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700 border-gray-200', accent: 'border-l-gray-300' },
+  published: { label: 'Published', color: 'bg-green-100 text-green-700 border-green-200', accent: 'border-l-green-500' },
 };
 
 interface ExamListSidebarProps {
@@ -139,6 +160,7 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
       exam.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       exam.subject.toLowerCase().includes(searchQuery.toLowerCase())
     );
+  const subjectNames = subjectOptions.map((subject) => subject.name);
 
   return (
     <div className="h-full flex flex-col bg-white border-r border-gray-200">
@@ -192,13 +214,17 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
       </div>
 
       {/* Exam List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50/50">
         {filteredExams.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <p>No exams found</p>
+          <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+            <div className="flex size-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+              <Inbox className="size-5" />
+            </div>
+            <p className="text-sm font-medium text-gray-600">No exams found</p>
+            <p className="text-xs text-gray-400">Try adjusting your search or filters.</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="space-y-2 p-3">
             {filteredExams.map((exam) => {
               const config = statusConfig[exam.status];
               const isSelected = selectedExamId === exam.id;
@@ -208,18 +234,23 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                 <div
                   key={exam.id}
                   onClick={() => onSelectExam(exam.id)}
-                  className={`p-4 cursor-pointer transition-colors hover:bg-gray-50 ${
-                    isSelected ? 'bg-teal-50 border-l-4 border-teal-500' : ''
+                  className={`group cursor-pointer rounded-xl border-l-4 bg-white p-3.5 shadow-sm transition-all hover:shadow-md ${
+                    isSelected
+                      ? 'border-l-teal-500 ring-1 ring-teal-500'
+                      : `${config.accent} hover:border-l-teal-400`
                   }`}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {/* Title & Status */}
                     <div className="flex items-start justify-between gap-2">
-                      <h4 className="text-sm text-gray-800 line-clamp-2 flex-1">{exam.title}</h4>
+                      <h4 className="line-clamp-2 flex-1 text-sm font-semibold text-gray-900">{exam.title}</h4>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                          <button disabled={Boolean(activeOperation) || isDeleting} className="p-1 hover:bg-gray-200 rounded disabled:opacity-50">
-                            <MoreVertical className="size-4 text-gray-500" />
+                          <button
+                            disabled={Boolean(activeOperation) || isDeleting}
+                            className="rounded-lg p-1.5 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 group-hover:opacity-100 data-[state=open]:opacity-100"
+                          >
+                            <MoreVertical className="size-4" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -248,12 +279,13 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                       </DropdownMenu>
                     </div>
 
-                    {/* Subject */}
+                    {/* Subject & Status */}
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600">
+                      <span className={`size-1.5 rounded-full ${getSubjectDotColor(exam.subject, subjectNames)}`} />
+                      <span className="text-xs font-medium text-gray-600">
                         {exam.subject}
                       </span>
-                      <Badge variant="outline" className={`text-xs ${config.color}`}>
+                      <Badge variant="outline" className={`ml-auto text-xs ${config.color}`}>
                         {config.label}
                       </Badge>
                     </div>
@@ -261,12 +293,12 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                     {/* Meta Info */}
                     <div className="flex items-center gap-3 text-xs text-gray-500">
                       <div className="flex items-center gap-1">
-                        <Clock className="size-3" />
+                        <Calendar className="size-3" />
                         {new Date(exam.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </div>
                       <div className="flex items-center gap-1">
                         <FileText className="size-3" />
-                        {exam.questionCount} Q
+                        {exam.questionCount} {exam.questionCount === 1 ? 'question' : 'questions'}
                       </div>
                       {exam.assignedStudents > 0 && (
                         <div className="flex items-center gap-1">
@@ -278,9 +310,8 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
 
                     {/* Average Score */}
                     {exam.averageScore !== null && (
-                      <div className="text-xs">
-                        <span className="text-gray-600">Avg: </span>
-                        <span className="text-teal-700">{exam.averageScore.toFixed(2)} / 10</span>
+                      <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${scoreTone(exam.averageScore)}`}>
+                        Avg {exam.averageScore.toFixed(1)} / 100
                       </div>
                     )}
                   </div>

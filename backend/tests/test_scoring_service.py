@@ -12,11 +12,11 @@ from src.service.scoring_service import (
 @pytest.mark.parametrize(
     ("earned", "possible", "expected"),
     [
-        ("13", "13", Decimal("10.00")),
-        ("11.5", "13", Decimal("8.85")),
+        ("13", "13", Decimal("100.00")),
+        ("11.5", "13", Decimal("88.46")),
         ("0", "13", Decimal("0.00")),
-        ("14", "13", Decimal("10.00")),
-        (Decimal("0.1") + Decimal("0.2"), "0.3", Decimal("10.00")),
+        ("14", "13", Decimal("100.00")),
+        (Decimal("0.1") + Decimal("0.2"), "0.3", Decimal("100.00")),
     ],
 )
 def test_normalize_score_uses_decimal_and_rounds_once(earned, possible, expected):

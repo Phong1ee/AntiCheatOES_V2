@@ -1,4 +1,7 @@
 import json
+import hashlib
+import hmac
+import secrets
 from datetime import timedelta
 from decimal import Decimal
 
@@ -18,6 +21,38 @@ VIOLATION_EVENT_TYPES = {
 
 ALLOWED_CLIENT_EVENT_TYPES = VIOLATION_EVENT_TYPES
 ALLOWED_EVENT_SOURCES = {"browser", "camera", "microphone"}
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def create_attempt_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> None:
+    """Validate an active attempt session without exposing stored hashes."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT device_id_hash, session_token_hash, status, submitted_at, end_time
+            FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
+            """,
+            (attempt_id, exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+            raise Exception("Attempt is no longer in progress")
+        if not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id)):
+            raise Exception("Attempt device does not match")
+        if not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token)):
+            raise Exception("Attempt session is invalid")
+    finally:
+        cursor.close()
+        cnx.close()
 
 
 def get_database_now():
@@ -448,7 +483,8 @@ def getOpenAttempt(exam_id: int, student_id: str):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     query = """
-    SELECT attempt_id, attempt_no, exam_id, student_id, start_time, status, last_saved_at
+    SELECT attempt_id, attempt_no, exam_id, student_id, start_time, status, last_saved_at,
+           violation_count, device_id_hash
     FROM attempt
     WHERE exam_id = %s
       AND student_id = %s
@@ -468,7 +504,7 @@ def getOpenAttempt(exam_id: int, student_id: str):
         cnx.close()
 
 
-def createAttempt(exam_id: int, student_id: str, attempt_no: int):
+def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str = "internal", session_token: str = "internal"):
     """Create an attempt and immutable question/point snapshot in one transaction."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
@@ -481,9 +517,12 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
         start_time,
         end_time,
         submitted_at,
-        status
+        status,
+        device_id_hash,
+        session_token_hash,
+        last_heartbeat_at
     )
-    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress')
+    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress', %s, %s, NOW())
     """
     try:
         cnx.start_transaction()
@@ -505,7 +544,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int):
             cnx.commit()
             return int(existing[0])
 
-        cursor.execute(insert_attempt, (exam_id, student_id, attempt_no))
+        cursor.execute(insert_attempt, (exam_id, student_id, attempt_no, _sha256(device_id), _sha256(session_token)))
         attempt_id = cursor.lastrowid
         cursor.execute(
             "SELECT question_selection_mode FROM exam WHERE exam_id = %s FOR UPDATE",
@@ -700,7 +739,8 @@ def getAttemptById(attempt_id: int):
     cursor = cnx.cursor(dictionary=True)
     query = """
     SELECT attempt_id, exam_id, student_id, attempt_no, score, start_time, end_time,
-           submitted_at, status, last_saved_at, violation_count, last_violation_at
+           submitted_at, status, last_saved_at, violation_count, last_violation_at,
+           device_id_hash, session_token_hash, last_heartbeat_at
     FROM attempt
     WHERE attempt_id = %s
     """
@@ -1146,7 +1186,72 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
     return finalizeAttempt(attempt_id, exam_id, answers)
 
 
-def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict) -> dict:
+def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str) -> tuple[dict, str, bool]:
+    """Claim a legacy attempt once or rotate the session on its bound browser."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cnx.start_transaction()
+        cursor.execute(
+            """
+            SELECT attempt_id, exam_id, student_id, attempt_no, status, submitted_at, end_time,
+                   score, violation_count, device_id_hash
+            FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s FOR UPDATE
+            """,
+            (attempt_id, exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+            raise Exception("Attempt is no longer in progress")
+        device_hash = _sha256(device_id)
+        claimed_legacy = attempt["device_id_hash"] is None
+        if not claimed_legacy and not hmac.compare_digest(attempt["device_id_hash"], device_hash):
+            raise Exception("Attempt device does not match")
+        session_token = create_attempt_session_token()
+        cursor.execute(
+            """
+            UPDATE attempt
+            SET device_id_hash = %s, session_token_hash = %s, last_heartbeat_at = NOW()
+            WHERE attempt_id = %s
+            """,
+            (device_hash, _sha256(session_token), attempt_id),
+        )
+        if claimed_legacy:
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'DEVICE_BOUND_ON_RESUME', NOW(), NULL, 'system', 0)
+                """,
+                (attempt_id,),
+            )
+        cnx.commit()
+        return attempt, session_token, claimed_legacy
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> dict:
+    assertAttemptSession(exam_id, attempt_id, student_id, device_id, session_token)
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s", (attempt_id,))
+        cnx.commit()
+        cursor.execute("SELECT last_heartbeat_at, violation_count, status FROM attempt WHERE attempt_id = %s", (attempt_id,))
+        return cursor.fetchone()
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: str = "", session_token: str = "") -> dict:
     """Persist one client event and enforce the shared limit in one transaction."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -1155,7 +1260,7 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict) -> dict:
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
-                   score, violation_count
+                   score, violation_count, device_id_hash, session_token_hash
             FROM attempt
             WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
             FOR UPDATE
@@ -1165,6 +1270,10 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict) -> dict:
         attempt = cursor.fetchone()
         if not attempt:
             raise Exception("Attempt does not belong to student")
+        if device_id and (not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id))):
+            raise Exception("Attempt device does not match")
+        if session_token and (not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token))):
+            raise Exception("Attempt session is invalid")
 
         cursor.execute(
             "SELECT anti_cheat_enabled, violation_limit FROM exam_setting WHERE exam_id = %s",

@@ -32,4 +32,5 @@ export interface StudentExamAttempt {
   status: string;
   startTime?: string;
   lastSavedAt?: string | null;
+  violationCount?: number;
 }

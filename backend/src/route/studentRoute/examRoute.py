@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 import json
 from typing import Literal
 
@@ -12,6 +12,24 @@ router = APIRouter()
 
 class VerifyCodeRequest(BaseModel):
     code: str | None = None
+
+
+class StartExamRequest(VerifyCodeRequest):
+    deviceId: str = Field(min_length=1, max_length=255)
+
+
+class ResumeAttemptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deviceId: str = Field(min_length=1, max_length=255)
+    resumeCause: Literal["page_refresh", "unexpected_exit", "normal_resume"]
+    clientEventId: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def require_refresh_id(self):
+        if self.resumeCause == "page_refresh" and not self.clientEventId:
+            raise ValueError("clientEventId is required for page_refresh")
+        return self
 
 class SubmitAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -126,7 +144,7 @@ async def verify_exam_code(
 @router.post("/{exam_id}/start")
 async def start_exam(
     exam_id: int,
-    request: VerifyCodeRequest,
+    request: StartExamRequest,
     current_user: dict = Depends(verify_token)
 ):
     """Start exam and create or reuse an attempt."""
@@ -135,7 +153,7 @@ async def start_exam(
             current_user["school_id"],
             current_user["role"],
             exam_id,
-            request.code
+            request.code, request.deviceId
         )
     except Exception as e:
         detail = str(e)
@@ -152,7 +170,9 @@ async def start_exam(
 async def submit_exam(
     exam_id: int,
     request: SubmitExamRequest,
-    current_user: dict = Depends(verify_token)
+    current_user: dict = Depends(verify_token),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
 ):
     """Submit an exam attempt and close it."""
     try:
@@ -161,7 +181,7 @@ async def submit_exam(
             current_user["role"],
             exam_id,
             request.attemptId,
-            [answer.model_dump() for answer in request.answers]
+            [answer.model_dump() for answer in request.answers], device_id, attempt_session
         )
     except Exception as e:
         detail = str(e)
@@ -180,12 +200,15 @@ async def record_anti_cheat_event(
     request: AntiCheatEventRequest,
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(STUDENT_ONLY),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
 ):
     """Record one bounded client event; the backend classifies and enforces it."""
     del role_check
     try:
         return ExamController.recordAntiCheatEvent(
             current_user["school_id"], current_user["role"], exam_id, request.model_dump(),
+            device_id, attempt_session,
         )
     except Exception as exc:
         detail = str(exc)
@@ -201,12 +224,14 @@ async def save_answer(
     question_id: int,
     request: AutoSaveAnswerRequest,
     current_user: dict = Depends(verify_token),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
 ):
     """Persist the student's latest answer for one attempt question."""
     try:
         return ExamController.saveAnswer(
             current_user["school_id"], current_user["role"], exam_id, attempt_id,
-            question_id, request.model_dump(exclude_none=True),
+            question_id, request.model_dump(exclude_none=True), device_id, attempt_session,
         )
     except Exception as e:
         detail = str(e)
@@ -225,6 +250,8 @@ async def terminate_attempt(
     attempt_id: int,
     request: TerminateAttemptRequest,
     current_user: dict = Depends(verify_token),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
 ):
     """Finalize an attempt when an anti-cheat policy terminates it."""
     try:
@@ -232,6 +259,7 @@ async def terminate_attempt(
             current_user["school_id"], current_user["role"], exam_id, attempt_id,
             request.reason, request.violationType,
             [answer.model_dump(exclude_none=True) for answer in request.answers],
+            device_id, attempt_session,
         )
     except Exception as e:
         detail = str(e)
@@ -247,6 +275,8 @@ async def restore_attempt(
     exam_id: int,
     attempt_id: int,
     current_user: dict = Depends(verify_token),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
 ):
     """Read an owned attempt snapshot without changing the attempt."""
     try:
@@ -254,7 +284,7 @@ async def restore_attempt(
             current_user["school_id"],
             current_user["role"],
             exam_id,
-            attempt_id,
+            attempt_id, device_id, attempt_session,
         )
     except Exception as e:
         detail = str(e)
@@ -263,6 +293,39 @@ async def restore_attempt(
         if detail == "Exam not found or not assigned to student":
             raise HTTPException(status_code=404, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
+
+
+@router.post("/{exam_id}/attempts/{attempt_id}/resume")
+async def resume_attempt(
+    exam_id: int,
+    attempt_id: int,
+    request: ResumeAttemptRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(STUDENT_ONLY),
+):
+    del role_check
+    try:
+        return ExamController.resumeAttempt(
+            current_user["school_id"], current_user["role"], exam_id, attempt_id,
+            request.deviceId, request.resumeCause, request.clientEventId,
+        )
+    except Exception as exc:
+        detail = str(exc)
+        raise HTTPException(status_code=403 if "device" in detail or "Attempt" in detail else 400, detail=detail)
+
+
+@router.post("/{exam_id}/attempts/{attempt_id}/heartbeat")
+async def heartbeat_attempt(
+    exam_id: int,
+    attempt_id: int,
+    current_user: dict = Depends(verify_token),
+    device_id: str = Header(min_length=1, alias="X-Device-Id"),
+    attempt_session: str = Header(min_length=1, alias="X-Attempt-Session"),
+):
+    try:
+        return ExamController.heartbeatAttempt(current_user["school_id"], current_user["role"], exam_id, attempt_id, device_id, attempt_session)
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 @router.get("/{exam_id}")

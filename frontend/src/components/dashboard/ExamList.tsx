@@ -177,8 +177,17 @@ export function ExamList({
       setFetchedLoadError("Fullscreen permission is required to resume this exam.");
       return;
     }
-    localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
-    onEnterExam?.(exam.id);
+    try {
+      const resumed = await studentExamService.resume(exam.id, exam.openAttemptId, "normal_resume");
+      if (Boolean(resumed.terminated)) {
+        setFetchedLoadError("This attempt has already ended and cannot be resumed.");
+        return;
+      }
+      localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
+      onEnterExam?.(exam.id);
+    } catch (error) {
+      setFetchedLoadError(error instanceof Error ? error.message : "Unable to resume this exam.");
+    }
   };
 
   if (loading) {

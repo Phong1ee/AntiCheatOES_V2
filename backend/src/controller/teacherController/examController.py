@@ -75,7 +75,7 @@ class ExamController:
         }
 
     @staticmethod
-    def _start_response(exam: dict, attempt: dict, resumed: bool, database_now=None) -> dict:
+    def _start_response(exam: dict, attempt: dict, resumed: bool, database_now=None, session_token: str | None = None) -> dict:
         settings = examModel.getExamSettings(exam["exam_id"])
         anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
         violation_limit = int(settings.get("violation_limit") or 5)
@@ -93,6 +93,7 @@ class ExamController:
             "antiCheatEnabled": anti_cheat_enabled,
             "violationCount": int(attempt.get("violation_count") or 0),
             "violationLimit": violation_limit,
+            "sessionToken": session_token,
             **ExamController._timer_payload(exam, attempt, database_now),
         }
 
@@ -196,7 +197,7 @@ class ExamController:
             raise e
 
     @staticmethod
-    def startExam(school_id: str, role: str, exam_id: int, code: str | None):
+    def startExam(school_id: str, role: str, exam_id: int, code: str | None, device_id: str = ""):
         """Start an exam and create or reuse an open attempt."""
         try:
             validated = ExamController._validateStudentExamAccess(school_id, role, exam_id, code)
@@ -206,19 +207,22 @@ class ExamController:
 
             open_attempt = validated["open_attempt"]
             if open_attempt:
-                return ExamController._start_response(exam, open_attempt, resumed=True, database_now=validated["database_now"])
+                if not device_id:
+                    return ExamController._start_response(exam, open_attempt, resumed=True, database_now=validated["database_now"])
+                raise Exception("Open attempt must be resumed")
 
             attempt_no = attempts_used + 1
-            attempt_id = examModel.createAttempt(exam_id, user.get("school_id", school_id), attempt_no)
+            session_token = examModel.create_attempt_session_token()
+            attempt_id = examModel.createAttempt(exam_id, user.get("school_id", school_id), attempt_no, device_id, session_token)
             attempt = examModel.getAttemptById(attempt_id)
             if not attempt:
                 raise Exception("Attempt not found")
-            return ExamController._start_response(exam, attempt, resumed=False, database_now=examModel.get_database_now())
+            return ExamController._start_response(exam, attempt, resumed=False, database_now=examModel.get_database_now(), session_token=session_token)
         except Exception as e:
             raise e
 
     @staticmethod
-    def restoreAttempt(school_id: str, role: str, exam_id: int, attempt_id: int):
+    def restoreAttempt(school_id: str, role: str, exam_id: int, attempt_id: int, device_id: str = "", session_token: str = ""):
         """Restore an assigned student's attempt without modifying its state."""
         if role != "student":
             raise Exception("Only students can view assigned exams")
@@ -235,6 +239,8 @@ class ExamController:
             or attempt["student_id"] != user.get("school_id", school_id)
         ):
             raise Exception("Attempt does not belong to student")
+        if device_id and session_token:
+            examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
 
         settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
         anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
@@ -276,10 +282,12 @@ class ExamController:
         }
 
     @staticmethod
-    def submitExam(school_id: str, role: str, exam_id: int, attempt_id: int, answers: list):
+    def submitExam(school_id: str, role: str, exam_id: int, attempt_id: int, answers: list, device_id: str = "", session_token: str = ""):
         """Submit an attempt, save MCQ and essay answers, and close the attempt."""
         try:
             exam, attempt = ExamController._owned_attempt(school_id, role, exam_id, attempt_id)
+            if device_id and session_token:
+                examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
             if attempt["status"] not in {"in_progress", "submitted", "terminated"}:
                 raise Exception("Attempt is no longer in progress")
             expired = ExamController._expire_if_needed(exam, attempt, attempt_id, exam_id)
@@ -298,8 +306,10 @@ class ExamController:
             raise e
 
     @staticmethod
-    def saveAnswer(school_id: str, role: str, exam_id: int, attempt_id: int, question_id: int, answer: dict):
+    def saveAnswer(school_id: str, role: str, exam_id: int, attempt_id: int, question_id: int, answer: dict, device_id: str = "", session_token: str = ""):
         exam, attempt = ExamController._owned_attempt(school_id, role, exam_id, attempt_id)
+        if device_id and session_token:
+            examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         if ExamController._expire_if_needed(exam, attempt, attempt_id, exam_id):
@@ -313,16 +323,70 @@ class ExamController:
         }
 
     @staticmethod
-    def terminateAttempt(school_id: str, role: str, exam_id: int, attempt_id: int, reason: str, violation_type: str | None, answers: list):
-        del school_id, role, exam_id, attempt_id, reason, violation_type, answers
+    def terminateAttempt(school_id: str, role: str, exam_id: int, attempt_id: int, reason: str, violation_type: str | None, answers: list, device_id: str = "", session_token: str = ""):
+        if device_id and session_token:
+            examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
+        del school_id, role, exam_id, attempt_id, reason, violation_type, answers, device_id, session_token
         # A browser may report a violation, but cannot declare its own attempt terminated.
         raise Exception("Client-controlled termination is not allowed")
 
     @staticmethod
-    def recordAntiCheatEvent(school_id: str, role: str, exam_id: int, event: dict):
+    def recordAntiCheatEvent(school_id: str, role: str, exam_id: int, event: dict, device_id: str, session_token: str):
         if role != "student":
             raise Exception("Only students can manage exam attempts")
-        return examModel.recordAntiCheatEvent(exam_id, school_id, event)
+        return examModel.recordAntiCheatEvent(exam_id, school_id, event, device_id, session_token)
+
+    @staticmethod
+    def resumeAttempt(
+        school_id: str, role: str, exam_id: int, attempt_id: int, device_id: str,
+        resume_cause: str, client_event_id: str | None,
+    ):
+        if role != "student":
+            raise Exception("Only students can manage exam attempts")
+        exam = examModel.getAssignedExamById(school_id, exam_id)
+        if not exam:
+            raise Exception("Exam not found or not assigned to student")
+        now_time = examModel.get_database_now()
+        if exam.get("start_time") and now_time < exam["start_time"]:
+            raise Exception("Exam is not open yet")
+        if exam.get("end_time") and now_time > exam["end_time"]:
+            raise Exception("Exam has closed")
+        attempt, session_token, _claimed_legacy = examModel.resumeAttempt(exam_id, attempt_id, school_id, device_id)
+        settings = examModel.getExamSettings(exam_id)
+        event_state = None
+        if resume_cause == "page_refresh" and settings.get("anti_cheat_enabled"):
+            event_state = examModel.recordAntiCheatEvent(
+                exam_id,
+                school_id,
+                {
+                    "attemptId": attempt_id,
+                    "clientEventId": client_event_id,
+                    "eventType": "PAGE_REFRESH",
+                    "source": "browser",
+                    "details": "Resume after page refresh",
+                    "metadata": {"resumeCause": resume_cause},
+                    "answers": [],
+                },
+                device_id,
+                session_token,
+            )
+        return {
+            "success": True,
+            "attemptId": attempt_id,
+            "sessionToken": session_token,
+            "antiCheatEnabled": bool(settings.get("anti_cheat_enabled", False)),
+            "violationCount": event_state["violationCount"] if event_state else int(attempt.get("violation_count") or 0),
+            "violationLimit": int(settings.get("violation_limit") or 5),
+            "terminated": event_state["terminated"] if event_state else attempt["status"] == "terminated",
+            "attemptStatus": event_state["attemptStatus"] if event_state else attempt["status"],
+        }
+
+    @staticmethod
+    def heartbeatAttempt(school_id: str, role: str, exam_id: int, attempt_id: int, device_id: str, session_token: str):
+        if role != "student":
+            raise Exception("Only students can manage exam attempts")
+        state = examModel.heartbeatAttempt(exam_id, attempt_id, school_id, device_id, session_token)
+        return {"success": True, "attemptId": attempt_id, "attemptStatus": state["status"], "violationCount": int(state["violation_count"] or 0), "lastHeartbeatAt": state["last_heartbeat_at"]}
 
     @staticmethod
     def getStudentExam(school_id: str):

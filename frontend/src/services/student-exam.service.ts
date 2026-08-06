@@ -1,4 +1,5 @@
 import { apiClient } from "./api-client";
+import { attemptSessionStorage } from "./attempt-session.storage";
 import type { StudentAnswer, StudentAnswers, StudentExamAttempt, StudentExamSettings, StudentQuestion } from "../types/student-exam";
 
 interface RawQuestion {
@@ -82,6 +83,8 @@ export interface StartExamResult extends StudentExamAttempt {
   serverTime: string;
   expiresAt: string;
   remainingSeconds: number;
+  antiCheatEnabled: boolean;
+  violationLimit: number;
 }
 
 export interface SubmitExamResult {
@@ -101,6 +104,9 @@ export interface RestoreAttemptResult {
   expiresAt: string;
   remainingSeconds: number;
   settings: StudentExamSettings;
+  antiCheatEnabled: boolean;
+  violationCount: number;
+  violationLimit: number;
 }
 
 const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
@@ -153,27 +159,36 @@ export const studentExamService = {
   },
 
   async start(examId: string | number, code?: string): Promise<StartExamResult> {
-    const { data } = await apiClient.post<Record<string, unknown>>(`/api/exams/${examId}/start`, { code });
-    return {
+    const { data } = await apiClient.post<Record<string, unknown>>(`/api/exams/${examId}/start`, {
+      code,
+      deviceId: attemptSessionStorage.getDeviceId(),
+    });
+    const result = {
       examId: Number(data.examId ?? data.exam_id), attemptId: Number(data.attemptId ?? data.attempt_id),
       attemptNo: Number(data.attemptNo ?? data.attempt_no), durationMinutes: Number(data.duration_minutes),
       resumed: Boolean(data.resumed), status: String(data.status ?? "in_progress"),
       serverTime: String(data.serverTime), expiresAt: String(data.expiresAt), remainingSeconds: Number(data.remainingSeconds),
+      violationCount: Number(data.violationCount ?? 0), antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5),
     };
+    const sessionToken = String(data.sessionToken ?? "");
+    if (!sessionToken) throw new Error("Server did not create an attempt session.");
+    attemptSessionStorage.setSessionToken(result.attemptId, sessionToken);
+    return result;
   },
 
   async restore(examId: string | number, attemptId: number): Promise<RestoreAttemptResult> {
-    const { data } = await apiClient.get<RawRestore>(`/api/exams/${examId}/attempts/${attemptId}`);
+    const { data } = await apiClient.get<RawRestore & Record<string, unknown>>(`/api/exams/${examId}/attempts/${attemptId}`, { headers: attemptSessionStorage.headers(attemptId) });
     return {
       exam: { examId: Number(data.exam.exam_id), title: data.exam.title, durationMinutes: Number(data.exam.duration_minutes) },
-      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt },
+      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0) },
       questions: (data.questions ?? []).map(normalizeQuestion), serverTime: data.serverTime,
       expiresAt: data.expiresAt, remainingSeconds: Number(data.remainingSeconds), settings: normalizeSettings(data.settings),
+      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5),
     };
   },
 
   async saveAnswer(examId: string | number, attemptId: number, questionId: number, answer: StudentAnswer) {
-    const { data } = await apiClient.put<{ savedAt: string }>(`/api/exams/${examId}/attempts/${attemptId}/answers/${questionId}`, answer);
+    const { data } = await apiClient.put<{ savedAt: string }>(`/api/exams/${examId}/attempts/${attemptId}/answers/${questionId}`, answer, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },
 
@@ -181,7 +196,8 @@ export const studentExamService = {
     const payload = Object.entries(answers)
       .filter(([, answer]) => !("answerText" in answer) || Boolean(answer.answerText.trim()))
       .map(([questionId, answer]) => ({ questionId: Number(questionId), ...answer }));
-    const { data } = await apiClient.post<SubmitExamResult>(`/api/exams/${examId}/submit`, { attemptId, answers: payload });
+    const { data } = await apiClient.post<SubmitExamResult>(`/api/exams/${examId}/submit`, { attemptId, answers: payload }, { headers: attemptSessionStorage.headers(attemptId) });
+    attemptSessionStorage.clearSessionToken(attemptId);
     return data;
   },
 
@@ -189,7 +205,23 @@ export const studentExamService = {
     const payload = Object.entries(answers)
       .filter(([, answer]) => !("answerText" in answer) || Boolean(answer.answerText.trim()))
       .map(([questionId, answer]) => ({ questionId: Number(questionId), ...answer }));
-    const { data } = await apiClient.post(`/api/exams/${examId}/attempts/${attemptId}/terminate`, { reason, violationType, answers: payload });
+    const { data } = await apiClient.post(`/api/exams/${examId}/attempts/${attemptId}/terminate`, { reason, violationType, answers: payload }, { headers: attemptSessionStorage.headers(attemptId) });
+    return data;
+  },
+
+  async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string) {
+    const { data } = await apiClient.post<Record<string, unknown>>(`/api/exams/${examId}/attempts/${attemptId}/resume`, {
+      deviceId: attemptSessionStorage.getDeviceId(), resumeCause, clientEventId,
+    });
+    const sessionToken = String(data.sessionToken ?? "");
+    if (!sessionToken) throw new Error("Server did not rotate the attempt session.");
+    attemptSessionStorage.setSessionToken(attemptId, sessionToken);
+    if (resumeCause === "page_refresh" && clientEventId) attemptSessionStorage.clearPageRefreshEventId(attemptId);
+    return data;
+  },
+
+  async heartbeat(examId: string | number, attemptId: number) {
+    const { data } = await apiClient.post(`/api/exams/${examId}/attempts/${attemptId}/heartbeat`, undefined, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },
 };

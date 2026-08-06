@@ -6,6 +6,7 @@ import { SubmitConfirmDialog } from "./SubmitConfirmDialog";
 import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { studentExamService } from "../../services/student-exam.service";
+import { attemptSessionStorage } from "../../services/attempt-session.storage";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
 interface ExamInterfaceProps {
@@ -126,6 +127,17 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
     await Promise.all([...dirtyRef.current].map(saveQuestion));
   }, [saveQuestion]);
 
+  useEffect(() => {
+    if (!attemptId || attemptStatus !== "in_progress") return undefined;
+    const heartbeat = window.setInterval(() => {
+      void studentExamService.heartbeat(examId, attemptId).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "Attempt session is invalid. Resume from My Exams.";
+        stopAutoSave(message);
+      });
+    }, 25_000);
+    return () => window.clearInterval(heartbeat);
+  }, [attemptId, attemptStatus, examId, stopAutoSave]);
+
   const submit = useCallback(async (automatic = false) => {
     if (!attemptId || attemptStatus !== "in_progress" || isSubmitted || isTerminating || terminationFailed) return;
     setSubmitError(null);
@@ -178,6 +190,15 @@ export function ExamInterface({ examId, onExit }: ExamInterfaceProps) {
       const hint = JSON.parse(raw) as { examId?: string | number; attemptId?: number };
       if (String(hint.examId) !== String(examId) || !hint.attemptId) throw new Error();
       const load = async () => {
+        const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+        if (navigation?.type === "reload") {
+          const clientEventId = attemptSessionStorage.getOrCreatePageRefreshEventId(hint.attemptId!);
+          const resumed = await studentExamService.resume(examId, hint.attemptId!, "page_refresh", clientEventId);
+          if (Boolean(resumed.terminated)) {
+            localStorage.removeItem(attemptKey);
+            throw new Error("This attempt was terminated after the refresh violation.");
+          }
+        }
         const restored = await studentExamService.restore(examId, hint.attemptId!);
         setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});

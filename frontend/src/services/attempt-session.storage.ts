@@ -1,6 +1,7 @@
 const DEVICE_ID_KEY = "oes_device_id";
 const SESSION_PREFIX = "oes_attempt_session_";
 const REFRESH_EVENT_PREFIX = "oes_page_refresh_event_";
+const PENDING_REFRESH_PREFIX = "oes_pending_refresh_";
 
 const requireBrowser = () => {
   if (typeof window === "undefined") throw new Error("Attempt session storage is unavailable.");
@@ -46,6 +47,23 @@ export const attemptSessionStorage = {
   clearPageRefreshEventId(attemptId: number): void {
     requireBrowser();
     window.sessionStorage.removeItem(`${REFRESH_EVENT_PREFIX}${attemptId}`);
+  },
+
+  markPendingRefresh(attemptId: number): string {
+    const clientEventId = this.getOrCreatePageRefreshEventId(attemptId);
+    window.localStorage.setItem(`${PENDING_REFRESH_PREFIX}${attemptId}`, clientEventId);
+    return clientEventId;
+  },
+
+  getPendingRefresh(attemptId: number): string | null {
+    requireBrowser();
+    return window.localStorage.getItem(`${PENDING_REFRESH_PREFIX}${attemptId}`);
+  },
+
+  clearPendingRefresh(attemptId: number): void {
+    requireBrowser();
+    window.localStorage.removeItem(`${PENDING_REFRESH_PREFIX}${attemptId}`);
+    this.clearPageRefreshEventId(attemptId);
   },
 
   headers(attemptId: number): Record<string, string> {

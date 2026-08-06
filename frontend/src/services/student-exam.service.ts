@@ -98,6 +98,18 @@ export interface SubmitExamResult {
   status: string;
 }
 
+export interface AntiCheatEventResult {
+  eventAccepted: boolean;
+  duplicate: boolean;
+  antiCheatEnabled: boolean;
+  violationCount: number;
+  violationLimit: number;
+  remainingViolations: number | null;
+  terminated: boolean;
+  attemptStatus: string;
+  warningMessage?: string | null;
+}
+
 export interface RestoreAttemptResult {
   exam: { examId: number; title: string; durationMinutes: number };
   attempt: StudentExamAttempt;
@@ -214,13 +226,24 @@ export const studentExamService = {
   },
 
   async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string) {
+    const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    const pendingRefreshId = resumeCause === "normal_resume" && navigation?.type === "reload" ? attemptSessionStorage.getPendingRefresh(attemptId) : null;
+    const actualCause = pendingRefreshId ? "page_refresh" : resumeCause;
+    const actualEventId = pendingRefreshId ?? clientEventId;
     const { data } = await apiClient.post<Record<string, unknown>>(`/api/exams/${examId}/attempts/${attemptId}/resume`, {
-      deviceId: attemptSessionStorage.getDeviceId(), resumeCause, clientEventId,
+      deviceId: attemptSessionStorage.getDeviceId(), resumeCause: actualCause, clientEventId: actualEventId,
     });
     const sessionToken = String(data.sessionToken ?? "");
     if (!sessionToken) throw new Error("Server did not rotate the attempt session.");
     attemptSessionStorage.setSessionToken(attemptId, sessionToken);
-    if (resumeCause === "page_refresh" && clientEventId) attemptSessionStorage.clearPageRefreshEventId(attemptId);
+    if (actualCause === "page_refresh" && actualEventId) attemptSessionStorage.clearPendingRefresh(attemptId);
+    return data;
+  },
+
+  async recordAntiCheatEvent(examId: string | number, attemptId: number, eventType: string, source: "browser" | "camera" | "microphone", details?: string): Promise<AntiCheatEventResult> {
+    const { data } = await apiClient.post<AntiCheatEventResult>(`/api/exams/${examId}/events`, {
+      attemptId, clientEventId: window.crypto.randomUUID(), eventType, source, details,
+    }, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },
 

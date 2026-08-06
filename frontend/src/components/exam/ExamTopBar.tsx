@@ -6,10 +6,12 @@ interface ExamTopBarProps {
   examTitle: string;
   timeRemaining: number;
   onSubmit: () => void;
-  warnings: number;
+  antiCheatEnabled: boolean;
+  violationCount: number;
+  violationLimit: number;
 }
 
-export function ExamTopBar({ examTitle, timeRemaining, onSubmit, warnings }: ExamTopBarProps) {
+export function ExamTopBar({ examTitle, timeRemaining, onSubmit, antiCheatEnabled, violationCount, violationLimit }: ExamTopBarProps) {
   const hours = Math.floor(timeRemaining / 3600);
   const minutes = Math.floor((timeRemaining % 3600) / 60);
   const seconds = timeRemaining % 60;
@@ -21,10 +23,10 @@ export function ExamTopBar({ examTitle, timeRemaining, onSubmit, warnings }: Exa
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl text-gray-800">{examTitle}</h1>
-          {warnings > 0 && (
+          {antiCheatEnabled && (
             <div className="flex items-center gap-2 mt-1">
               <AlertTriangle className="size-4 text-red-600" />
-              <span className="text-sm text-red-600">Warnings: {warnings}</span>
+              <span className="text-sm text-red-600">Violations: {violationCount}/{violationLimit}</span>
             </div>
           )}
         </div>

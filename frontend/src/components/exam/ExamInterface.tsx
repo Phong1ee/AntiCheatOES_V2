@@ -8,6 +8,7 @@ import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { WebcamMonitor } from "./WebcamMonitor";
 import { studentExamService } from "../../services/student-exam.service";
 import { attemptSessionStorage } from "../../services/attempt-session.storage";
+import { useAntiCheatMonitoring } from "../../hooks/useAntiCheatMonitoring";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
 interface ExamInterfaceProps {
@@ -37,14 +38,14 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showEssayGradingNote, setShowEssayGradingNote] = useState(false);
-  const [isTerminating, setIsTerminating] = useState(false);
-  const [terminationFailed, setTerminationFailed] = useState(false);
   const [attemptStatus, setAttemptStatus] = useState("initializing");
   const [timerReady, setTimerReady] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
-  const [warnings, setWarnings] = useState(0);
-  const [violationType, setViolationType] = useState<"copy-paste" | "tab-switch" | "fullscreen-exit" | "final">("copy-paste");
+  const [violationType, setViolationType] = useState<string>("");
   const [violationCount, setViolationCount] = useState(0);
+  const [violationLimit, setViolationLimit] = useState(5);
+  const [remainingViolations, setRemainingViolations] = useState<number | null>(null);
+  const [antiCheatEnabled, setAntiCheatEnabled] = useState(false);
   const [showViolationWarning, setShowViolationWarning] = useState(false);
   const [fullscreenLocked, setFullscreenLocked] = useState(false);
   const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, tabSwitchThreshold: 0, copyPasteThreshold: 0, fullscreenExitThreshold: 0 });
@@ -60,8 +61,6 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const serverOffsetInitializedRef = useRef(false);
   const autoSubmitRef = useRef(false);
   const hadPositiveTimerRef = useRef(false);
-  const terminateRef = useRef(false);
-  const lastTabViolationRef = useRef(0);
   const fullscreenArmedRef = useRef(false);
   const intentionalFullscreenExitRef = useRef(false);
   const nextInFlightRef = useRef(false);
@@ -141,7 +140,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   }, [attemptId, attemptStatus, examId, stopAutoSave]);
 
   const submit = useCallback(async (automatic = false) => {
-    if (!attemptId || attemptStatus !== "in_progress" || isSubmitted || isTerminating || terminationFailed) return;
+    if (!attemptId || attemptStatus !== "in_progress" || isSubmitted) return;
     setSubmitError(null);
     await flushDirty();
     try {
@@ -157,35 +156,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : automatic ? "Auto-submit failed" : "Submit failed");
     }
-  }, [attemptId, attemptStatus, examId, exitFullscreenIntentionally, flushDirty, isSubmitted, isTerminating, terminationFailed, stopAutoSave]);
-
-  const terminate = useCallback(async (type: string) => {
-    if (!attemptId || terminateRef.current) return;
-    terminateRef.current = true;
-    setIsTerminating(true);
-    setTerminationFailed(false);
-    setSubmitError(null);
-    await flushDirty();
-    try {
-      await studentExamService.terminate(examId, attemptId, "anti_cheat", type, answersRef.current);
-      localStorage.removeItem(attemptKey);
-      localStorage.removeItem(draftKey(attemptId));
-      setAttemptStatus("terminated");
-      stopAutoSave();
-      setIsTerminated(true);
-      setViolationType("final");
-      setShowViolationWarning(true);
-      mediaStream?.getTracks().forEach((track) => track.stop());
-      void exitFullscreenIntentionally();
-      window.setTimeout(handleNormalExit, 1500);
-    } catch (error) {
-      terminateRef.current = false;
-      setTerminationFailed(true);
-      setSubmitError(error instanceof Error ? error.message : "Termination failed. Retry while the exam remains locked.");
-    } finally {
-      setIsTerminating(false);
-    }
-  }, [attemptId, examId, exitFullscreenIntentionally, flushDirty, handleNormalExit, stopAutoSave]);
+  }, [attemptId, attemptStatus, examId, exitFullscreenIntentionally, flushDirty, isSubmitted, stopAutoSave]);
 
   useEffect(() => {
     const raw = localStorage.getItem(attemptKey);
@@ -212,7 +183,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
         const local = localStorage.getItem(draftKey(restored.attempt.attemptId));
         const draft = local ? JSON.parse(local) as StudentAnswers : {};
         answersRef.current = { ...saved, ...draft }; setAnswers(answersRef.current);
-        setSettings(restored.settings);
+        setSettings(restored.settings); setAntiCheatEnabled(restored.antiCheatEnabled); setViolationCount(restored.violationCount); setViolationLimit(restored.violationLimit); setRemainingViolations(restored.antiCheatEnabled ? Math.max(restored.violationLimit - restored.violationCount, 0) : null);
         if (restored.settings.sequentialNavigation) {
           const firstUnanswered = restored.questions.findIndex((question) => !isAnswered(saved[question.id]));
           setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
@@ -256,7 +227,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   }, [attemptStatus, flushDirty]);
 
   const handleAnswerChange = (questionId: number, answer: StudentAnswer) => {
-    if (attemptStatus !== "in_progress" || isTerminating || terminationFailed || fullscreenLocked) return;
+    if (attemptStatus !== "in_progress" || fullscreenLocked) return;
     const next = { ...answersRef.current, [questionId]: answer };
     answersRef.current = next; setAnswers(next); dirtyRef.current.add(questionId);
     if (attemptId) persistDraft(attemptId, next);
@@ -301,19 +272,11 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
     nextInFlightRef.current = false;
   }, [currentQuestion, questions, saveQuestion, settings.sequentialNavigation]);
 
-  const handleViolation = useCallback((type: "copy-paste" | "tab-switch" | "fullscreen-exit") => {
-    const threshold = type === "copy-paste" ? settings.copyPasteThreshold : type === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold;
-    if (!threshold || isSubmitted || isTerminated || isTerminating || terminationFailed) return;
-    setWarnings((value) => value + 1); setViolationType(type);
-    setViolationCount((value) => { const next = value + 1; if (next >= threshold) void terminate(type); else setShowViolationWarning(true); return next; });
-  }, [isSubmitted, isTerminated, isTerminating, terminationFailed, settings, terminate]);
-
   const returnToFullscreen = async () => {
     setSubmitError(null);
     try {
       // This is called only by an explicit user action from the blocking gate.
       await document.documentElement.requestFullscreen();
-      fullscreenArmedRef.current = true;
       setFullscreenLocked(false);
       setShowViolationWarning(false);
     } catch {
@@ -322,54 +285,29 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
     }
   };
 
-  const fullscreenRequired = settings.fullscreenExitThreshold > 0;
-
-  useEffect(() => {
-    const fullscreen = () => {
-      if (document.fullscreenElement) {
-        if (fullscreenRequired && attemptStatus === "in_progress") {
-          fullscreenArmedRef.current = true;
-          setFullscreenLocked(false);
-        }
-        return;
-      }
-      if (intentionalFullscreenExitRef.current || !fullscreenRequired || !fullscreenArmedRef.current || attemptStatus !== "in_progress") return;
-      setFullscreenLocked(true);
-      handleViolation("fullscreen-exit");
-    };
-    document.addEventListener("fullscreenchange", fullscreen);
-    return () => document.removeEventListener("fullscreenchange", fullscreen);
-  }, [attemptStatus, fullscreenRequired, handleViolation]);
-
-  useEffect(() => {
-    const tabEvent = () => { if (document.hidden || document.hasFocus() === false) { const now = Date.now(); if (now - lastTabViolationRef.current > 750) { lastTabViolationRef.current = now; handleViolation("tab-switch"); } } };
-    document.addEventListener("visibilitychange", tabEvent); window.addEventListener("blur", tabEvent);
-    return () => { document.removeEventListener("visibilitychange", tabEvent); window.removeEventListener("blur", tabEvent); };
-  }, [handleViolation]);
-
-  useEffect(() => {
-    const copy = (event: ClipboardEvent) => { event.preventDefault(); handleViolation("copy-paste"); };
-    document.addEventListener("copy", copy); document.addEventListener("paste", copy); document.addEventListener("cut", copy);
-    return () => { document.removeEventListener("copy", copy); document.removeEventListener("paste", copy); document.removeEventListener("cut", copy); };
-  }, [handleViolation]);
+  useAntiCheatMonitoring({
+    active: antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId), examId, attemptId, mediaStream,
+    onFullscreenLost: () => setFullscreenLocked(true), onMediaProblem: () => { setFullscreenLocked(true); setSubmitError("Camera or microphone access was lost. Return to Dashboard and resume after granting permission."); },
+    onEvent: (event, eventType) => { setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true); if (event.terminated) { setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave("Violation limit reached. This attempt was ended and scored 0."); mediaStream?.getTracks().forEach((track) => track.stop()); } },
+  });
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
   if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
 
-  if (fullscreenLocked && fullscreenRequired) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Fullscreen required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen to continue answering. Leaving fullscreen is recorded as an exam violation.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} /></div>;
+  if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} /></div>;
 
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
   const currentAnswerIsValid = isAnswered(answers[current.id]);
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
-    <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} warnings={warnings} />
+    <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} violationLimit={violationLimit} />
     {mediaStream && <WebcamMonitor stream={mediaStream} />}
     <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} /></div>
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
-    {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}{terminationFailed && <button className="ml-3 underline" onClick={() => void terminate(violationType)}>Retry termination</button>}</div>}
-    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} violationType={violationType} violationCount={violationCount} threshold={violationType === "copy-paste" ? settings.copyPasteThreshold : violationType === "tab-switch" ? settings.tabSwitchThreshold : settings.fullscreenExitThreshold} onReturnToFullscreen={violationType === "fullscreen-exit" && !isTerminated ? () => void returnToFullscreen() : undefined} />
+    {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
+    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={violationType === "FULLSCREEN_EXIT" && !isTerminated ? () => void returnToFullscreen() : undefined} />
   </div>;
 }

@@ -221,9 +221,6 @@ class StudentExamFlowTests(unittest.TestCase):
         with (
             patch.object(ExamController, "_validateStudentExamAccess", return_value={}) as validate,
             patch.object(examModel, "getExamSettings", return_value={
-                "force_fullscreen_thresh": 3,
-                "tab_switch_thresh": 2,
-                "copy_paste_thresh": 1,
                 "anti_cheat_enabled": True,
                 "violation_limit": 5,
                 "auto_submit_on_expire": True,
@@ -240,9 +237,6 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(result["settings"], {
             "anti_cheat_enabled": True,
             "violation_limit": 5,
-            "force_fullscreen_thresh": 3,
-            "tab_switch_thresh": 2,
-            "copy_paste_thresh": 1,
             "sequential_navigation": True,
         })
 

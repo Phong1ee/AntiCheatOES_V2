@@ -33,9 +33,6 @@ def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
         sequential_navigation=setting.sequential_navigation,
         auto_submit_on_expire=setting.auto_submit_on_expire,
         grace_period=setting.grace_period,
-        force_fullscreen_thresh=setting.force_fullscreen_thresh,
-        tab_switch_thresh=setting.tab_switch_thresh,
-        copy_paste_thresh=setting.copy_paste_thresh,
         anti_cheat_enabled=setting.anti_cheat_enabled,
         violation_limit=setting.violation_limit,
         auto_grade=setting.auto_grade,
@@ -45,8 +42,6 @@ def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
 
 def _apply(setting: ExamSetting, payload: ExamSettingsRequest) -> None:
     for field, value in payload.model_dump().items():
-        if field in {"anti_cheat_enabled", "violation_limit"} and field not in payload.model_fields_set:
-            continue
         setattr(setting, field, value)
 
 

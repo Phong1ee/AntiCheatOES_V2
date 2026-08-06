@@ -7,7 +7,6 @@ import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { WebcamMonitor } from "./WebcamMonitor";
 import { studentExamService } from "../../services/student-exam.service";
-import { attemptSessionStorage } from "../../services/attempt-session.storage";
 import { useAntiCheatMonitoring } from "../../hooks/useAntiCheatMonitoring";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
@@ -48,7 +47,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false);
   const [showViolationWarning, setShowViolationWarning] = useState(false);
   const [fullscreenLocked, setFullscreenLocked] = useState(false);
-  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, tabSwitchThreshold: 0, copyPasteThreshold: 0, fullscreenExitThreshold: 0 });
+  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, antiCheatEnabled: false, violationLimit: 5 });
   const [isSavingNext, setIsSavingNext] = useState(false);
 
   const answersRef = useRef<StudentAnswers>({});
@@ -64,6 +63,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const fullscreenArmedRef = useRef(false);
   const intentionalFullscreenExitRef = useRef(false);
   const nextInFlightRef = useRef(false);
+  const terminatedRedirectRef = useRef<number | null>(null);
 
   const exitFullscreenIntentionally = useCallback(async () => {
     if (!document.fullscreenElement) return;
@@ -78,6 +78,16 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const handleNormalExit = useCallback(() => {
     void exitFullscreenIntentionally().finally(onExit);
   }, [exitFullscreenIntentionally, onExit]);
+
+  const exitAfterTermination = useCallback(() => {
+    if (terminatedRedirectRef.current) window.clearTimeout(terminatedRedirectRef.current);
+    terminatedRedirectRef.current = null;
+    void exitFullscreenIntentionally().finally(onExit);
+  }, [exitFullscreenIntentionally, onExit]);
+
+  useEffect(() => () => {
+    if (terminatedRedirectRef.current) window.clearTimeout(terminatedRedirectRef.current);
+  }, []);
 
   const persistDraft = useCallback((id: number, nextAnswers: StudentAnswers) => {
     localStorage.setItem(draftKey(id), JSON.stringify(nextAnswers));
@@ -165,15 +175,8 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
       const hint = JSON.parse(raw) as { examId?: string | number; attemptId?: number };
       if (String(hint.examId) !== String(examId) || !hint.attemptId) throw new Error();
       const load = async () => {
-        const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
-        if (navigation?.type === "reload") {
-          const clientEventId = attemptSessionStorage.getOrCreatePageRefreshEventId(hint.attemptId!);
-          const resumed = await studentExamService.resume(examId, hint.attemptId!, "page_refresh", clientEventId);
-          if (Boolean(resumed.terminated)) {
-            localStorage.removeItem(attemptKey);
-            throw new Error("This attempt was terminated after the refresh violation.");
-          }
-        }
+        // A navigation entry describes the Dashboard page load too. Only the
+        // explicit Resume flow may turn a pending page refresh into a violation.
         const restored = await studentExamService.restore(examId, hint.attemptId!);
         setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
@@ -189,7 +192,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
           setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
         }
         fullscreenArmedRef.current = Boolean(document.fullscreenElement);
-        setFullscreenLocked(restored.settings.fullscreenExitThreshold > 0 && !document.fullscreenElement);
+        setFullscreenLocked(restored.antiCheatEnabled && !document.fullscreenElement);
         const serverTime = Date.parse(restored.serverTime);
         const expiresAt = Date.parse(restored.expiresAt);
         if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt) || expiresAt <= 0) throw new Error("Invalid server timer response");
@@ -288,14 +291,23 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   useAntiCheatMonitoring({
     active: antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId), examId, attemptId, mediaStream,
     onFullscreenLost: () => setFullscreenLocked(true), onMediaProblem: () => { setFullscreenLocked(true); setSubmitError("Camera or microphone access was lost. Return to Dashboard and resume after granting permission."); },
-    onEvent: (event, eventType) => { setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true); if (event.terminated) { setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave("Violation limit reached. This attempt was ended and scored 0."); mediaStream?.getTracks().forEach((track) => track.stop()); } },
+    onEvent: (event, eventType) => {
+      setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true);
+      if (event.terminated) {
+        setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave();
+        localStorage.removeItem(attemptKey);
+        if (attemptId) localStorage.removeItem(draftKey(attemptId));
+        mediaStream?.getTracks().forEach((track) => track.stop());
+        terminatedRedirectRef.current = window.setTimeout(exitAfterTermination, 2_500);
+      }
+    },
   });
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
   if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
 
-  if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} /></div>;
+  if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} /></div>;
 
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
@@ -308,6 +320,6 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
-    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={violationType === "FULLSCREEN_EXIT" && !isTerminated ? () => void returnToFullscreen() : undefined} />
+    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={violationType === "FULLSCREEN_EXIT" && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} />
   </div>;
 }

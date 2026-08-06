@@ -135,9 +135,6 @@ const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
 const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSettings => ({
   autoSubmitOnExpire: Boolean(settings?.auto_submit_on_expire ?? settings?.autoSubmitOnExpire ?? true),
   sequentialNavigation: Boolean(settings?.sequential_navigation ?? settings?.sequentialNavigation ?? false),
-  tabSwitchThreshold: Number(settings?.tab_switch_thresh ?? settings?.tabSwitchThreshold ?? 0),
-  copyPasteThreshold: Number(settings?.copy_paste_thresh ?? settings?.copyPasteThreshold ?? 0),
-  fullscreenExitThreshold: Number(settings?.force_fullscreen_thresh ?? settings?.fullscreenExitThreshold ?? 0),
   antiCheatEnabled: Boolean(settings?.anti_cheat_enabled ?? settings?.antiCheatEnabled ?? false),
   violationLimit: Number(settings?.violation_limit ?? settings?.violationLimit ?? 5),
 });
@@ -217,13 +214,6 @@ export const studentExamService = {
     return data;
   },
 
-  async terminate(examId: string | number, attemptId: number, reason: string, violationType: string, answers: StudentAnswers) {
-    const payload = Object.entries(answers)
-      .filter(([, answer]) => !("answerText" in answer) || Boolean(answer.answerText.trim()))
-      .map(([questionId, answer]) => ({ questionId: Number(questionId), ...answer }));
-    const { data } = await apiClient.post(`/api/exams/${examId}/attempts/${attemptId}/terminate`, { reason, violationType, answers: payload }, { headers: attemptSessionStorage.headers(attemptId) });
-    return data;
-  },
 
   async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string) {
     const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;

@@ -50,7 +50,8 @@ def attempts(exam_id:int, search:str="", status:str="", limit:int=Query(50,ge=1,
     return rows("""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
     (SELECT ee.event_type FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventType,
     (SELECT ee.event_timestamp FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventAt,
-    EXISTS(SELECT 1 FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) flagged
+    EXISTS(SELECT 1 FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) flagged,
+    (SELECT COUNT(*) FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) aiFlagCount
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
     WHERE a.exam_id=%s AND (%s='' OR u.full_name LIKE CONCAT('%%',%s,'%%') OR a.student_id LIKE CONCAT('%%',%s,'%%')) AND (%s='' OR a.status=%s) ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""",(exam_id,search,search,search,status,status,limit,offset))
 

@@ -187,9 +187,6 @@ class ExamController:
                 "settings": {
                     "anti_cheat_enabled": bool(settings.get("anti_cheat_enabled", False)),
                     "violation_limit": int(settings.get("violation_limit") or 5),
-                    "force_fullscreen_thresh": int(settings.get("force_fullscreen_thresh") or 0),
-                    "tab_switch_thresh": int(settings.get("tab_switch_thresh") or 0),
-                    "copy_paste_thresh": int(settings.get("copy_paste_thresh") or 0),
                     "sequential_navigation": bool(settings["sequential_navigation"]),
                 },
             }

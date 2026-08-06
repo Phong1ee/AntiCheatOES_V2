@@ -448,12 +448,6 @@ class ExamSetting(Base):
     __tablename__ = "exam_setting"
     __table_args__ = (
         CheckConstraint("grace_period >= 0", name="ck_exam_setting_grace_period_nonnegative"),
-        CheckConstraint(
-            "force_fullscreen_thresh >= 0",
-            name="ck_exam_setting_force_fullscreen_thresh_nonnegative",
-        ),
-        CheckConstraint("tab_switch_thresh >= 0", name="ck_exam_setting_tab_switch_thresh_nonnegative"),
-        CheckConstraint("copy_paste_thresh >= 0", name="ck_exam_setting_copy_paste_thresh_nonnegative"),
         CheckConstraint("violation_limit > 0", name="ck_exam_setting_violation_limit_positive"),
     )
 
@@ -475,15 +469,6 @@ class ExamSetting(Base):
         Boolean, nullable=False, default=True, server_default=text("1")
     )
     grace_period: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
-    force_fullscreen_thresh: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
-    tab_switch_thresh: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
-    copy_paste_thresh: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
     anti_cheat_enabled: Mapped[bool] = mapped_column(

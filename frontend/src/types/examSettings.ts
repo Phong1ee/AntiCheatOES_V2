@@ -16,10 +16,6 @@ export interface ExamSettings {
   webcamMonitoring: boolean;
   lockdownBrowser: boolean;
 
-  // Violation Thresholds
-  tabSwitchThreshold: number;
-  copyPasteThreshold: number;
-  fullscreenExitThreshold: number;
 
   // Grading
   autoGradeMcq: boolean;
@@ -36,9 +32,6 @@ export const defaultExamSettings: ExamSettings = {
   disableCopyPaste: true,
   webcamMonitoring: true,
   lockdownBrowser: false,
-  tabSwitchThreshold: 3,
-  copyPasteThreshold: 5,
-  fullscreenExitThreshold: 3,
   autoGradeMcq: true,
   manualGradeEssay: true,
 };
@@ -51,10 +44,6 @@ export interface TeacherExamSettingsPayload {
   grace_period: number;
   anti_cheat_enabled: boolean;
   violation_limit: number;
-  // Legacy response fields remain optional while the backend expands its contract.
-  force_fullscreen_thresh?: number;
-  tab_switch_thresh?: number;
-  copy_paste_thresh?: number;
   auto_grade: boolean;
   result_strategy: ResultStrategy;
 }

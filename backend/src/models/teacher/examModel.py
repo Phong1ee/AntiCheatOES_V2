@@ -761,18 +761,13 @@ def getExamSettings(exam_id: int):
     try:
         cursor.execute(
             """
-            SELECT auto_submit_on_expire, tab_switch_thresh, copy_paste_thresh,
-                   force_fullscreen_thresh, sequential_navigation,
-                   anti_cheat_enabled, violation_limit
+            SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit
             FROM exam_setting WHERE exam_id = %s
             """,
             (exam_id,),
         )
         return cursor.fetchone() or {
             "auto_submit_on_expire": True,
-            "tab_switch_thresh": 0,
-            "copy_paste_thresh": 0,
-            "force_fullscreen_thresh": 0,
             "sequential_navigation": False,
             "anti_cheat_enabled": False,
             "violation_limit": 5,

@@ -69,9 +69,58 @@ interface Attempt {
   antiCheatStatus: AntiCheatStatus;
   score?: number;
   terminationReason?: string;
-  policy: { maxViolations: number; aiFlagThreshold: number; terminateOnExceed: boolean };
+  examTitle?: string;
+  aiFlagCount: number;
+  policy: { maxViolations: number };
   violationBreakdown: { label: string; count: number }[];
   timeline: TimelineEvent[];
+}
+
+const AI_EVENT_TYPES = new Set(['NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED', 'PHONE_DETECTED', 'SPEECH_ACTIVITY_DETECTED']);
+
+function mapAiFlag(eventType: string, detectedAt: string): AiFlag | null {
+  const flags: Record<string, AiFlag['type']> = {
+    NO_FACE_DETECTED: 'no-face',
+    MULTIPLE_FACES_DETECTED: 'multiple-faces',
+    PHONE_DETECTED: 'phone',
+    SPEECH_ACTIVITY_DETECTED: 'speech',
+  };
+  const type = flags[eventType];
+  return type ? { type, label: eventType.replaceAll('_', ' ').toLowerCase(), detectedAt } : null;
+}
+
+function mapAttempt(attempt: MonitorAttempt): Attempt {
+  const status = attempt.attemptStatus.replace('_', '-') as AttemptStatus;
+  return {
+    id: String(attempt.attemptId), studentName: attempt.studentName, studentId: attempt.studentId,
+    attemptStatus: status, violations: { count: attempt.violationCount, max: attempt.violationLimit },
+    aiFlags: [], aiFlagCount: attempt.aiFlagCount, lastEvent: attempt.lastEventType ?? '-',
+    lastActivity: String(attempt.lastEventAt ?? ''),
+    antiCheatStatus: status === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean',
+    score: attempt.score ?? undefined, terminationReason: attempt.terminationReason ?? undefined,
+    policy: { maxViolations: attempt.violationLimit }, violationBreakdown: [], timeline: [],
+  };
+}
+
+function mapDetail(detail: MonitorDetail): Attempt {
+  const attempt = mapAttempt(detail.attempt);
+  const aiFlags = detail.timeline
+    .map((event) => mapAiFlag(event.eventType, String(event.eventTimestamp)))
+    .filter((event): event is AiFlag => event !== null);
+  return {
+    ...attempt,
+    examTitle: detail.attempt.title,
+    aiFlags,
+    aiFlagCount: aiFlags.length,
+    violationBreakdown: detail.breakdown.map((item) => ({ label: item.eventType, count: item.count })),
+    timeline: detail.timeline.map((event, index) => ({
+      id: `${event.eventTimestamp}-${index}`,
+      time: String(event.eventTimestamp),
+      type: event.isViolation ? 'violation' : AI_EVENT_TYPES.has(event.eventType) ? 'ai-flag' : 'system',
+      title: event.eventType,
+      detail: event.details || event.source,
+    })),
+  };
 }
 
 interface Exam {
@@ -189,7 +238,7 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
             <div className="h-8 w-px bg-gray-200 mx-1" />
             <div>
               <p className="text-xs text-gray-400">Exam</p>
-              <p className="text-sm text-gray-700 font-medium">Database Systems Midterm</p>
+              <p className="text-sm text-gray-700 font-medium">{attempt.examTitle ?? 'Exam details'}</p>
             </div>
             <div className="flex items-center gap-2 ml-2">
               <Badge variant="outline" className={`text-xs ${asConfig[attempt.attemptStatus].cls}`}>
@@ -222,22 +271,20 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
           {/* AI Flags */}
           <div className="px-8 py-4">
             <p className="text-xs text-gray-400 mb-1">AI Flags</p>
-            <p className={`text-2xl font-semibold ${attempt.aiFlags.length >= 2 ? 'text-violet-600' : attempt.aiFlags.length > 0 ? 'text-amber-500' : 'text-gray-800'}`}>
-              {attempt.aiFlags.length}
+            <p className={`text-2xl font-semibold ${attempt.aiFlagCount >= 2 ? 'text-violet-600' : attempt.aiFlagCount > 0 ? 'text-amber-500' : 'text-gray-800'}`}>
+              {attempt.aiFlagCount}
             </p>
           </div>
           {/* Current Question */}
           <div className="px-8 py-4">
             <p className="text-xs text-gray-400 mb-1">Current Question</p>
-            <p className="text-2xl font-semibold text-gray-800">
-              {attempt.attemptStatus === 'in-progress' ? 'Q7' : '—'}
-            </p>
+            <p className="text-2xl font-semibold text-gray-800">-</p>
           </div>
           {/* Time Remaining */}
           <div className="px-8 py-4">
             <p className="text-xs text-gray-400 mb-1">Time Remaining</p>
             <p className={`text-2xl font-semibold ${attempt.attemptStatus === 'terminated' ? 'text-red-500' : 'text-gray-800'}`}>
-              {attempt.attemptStatus === 'in-progress' ? '42:18' : attempt.attemptStatus === 'terminated' ? 'Ended' : '—'}
+              {attempt.attemptStatus === 'terminated' ? 'Ended' : '-'}
             </p>
           </div>
         </div>
@@ -314,18 +361,8 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Applied Policy</p>
               <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50">
                 <div className="flex items-center justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-500">Max violations</span>
+                  <span className="text-gray-500">Shared violation limit</span>
                   <span className="text-gray-800 font-medium">{attempt.policy.maxViolations}</span>
-                </div>
-                <div className="flex items-center justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-500">AI flag threshold</span>
-                  <span className="text-gray-800 font-medium">{attempt.policy.aiFlagThreshold}</span>
-                </div>
-                <div className="flex items-center justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-500">Auto-terminate</span>
-                  <span className={`font-medium ${attempt.policy.terminateOnExceed ? 'text-red-600' : 'text-gray-400'}`}>
-                    {attempt.policy.terminateOnExceed ? 'Yes' : 'No'}
-                  </span>
                 </div>
               </div>
             </div>
@@ -438,7 +475,7 @@ export function AntiCheatMonitor() {
     setAntiCheatFilter('all');
     if (!selectedSubjectId) return;
     teacherAntiCheatService.attempts(id).then((items: MonitorAttempt[]) => {
-      const mapped = items.map((attempt): Attempt => ({ id: String(attempt.attemptId), studentName: attempt.studentName, studentId: attempt.studentId, attemptStatus: attempt.attemptStatus.replace('_', '-') as AttemptStatus, violations: { count: attempt.violationCount, max: attempt.violationLimit }, aiFlags: attempt.flagged ? [{ type: 'phone', label: 'AI event recorded', detectedAt: String(attempt.lastEventAt ?? '') }] : [], lastEvent: attempt.lastEventType ?? '-', lastActivity: String(attempt.lastEventAt ?? ''), antiCheatStatus: attempt.attemptStatus === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean', score: attempt.score ?? undefined, terminationReason: attempt.terminationReason ?? undefined, policy: { maxViolations: attempt.violationLimit, aiFlagThreshold: 0, terminateOnExceed: true }, violationBreakdown: [], timeline: [] }));
+      const mapped = items.map(mapAttempt);
       setSubjects((current) => current.map((subject) => subject.id !== selectedSubjectId ? subject : { ...subject, exams: subject.exams.map((exam) => exam.id === id ? { ...exam, attempts: mapped } : exam) }));
     });
   };
@@ -650,13 +687,13 @@ export function AntiCheatMonitor() {
                         </TableCell>
                         <TableCell className="text-center">
                           <span className={`text-sm font-medium ${
-                            attempt.aiFlags.length >= 2
+                            attempt.aiFlagCount >= 2
                               ? 'text-violet-600'
-                              : attempt.aiFlags.length > 0
+                              : attempt.aiFlagCount > 0
                               ? 'text-amber-500'
                               : 'text-gray-400'
                           }`}>
-                            {attempt.aiFlags.length}
+                            {attempt.aiFlagCount}
                           </span>
                         </TableCell>
                         <TableCell>
@@ -675,7 +712,11 @@ export function AntiCheatMonitor() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setDrawerAttempt(attempt)}
+                            onClick={() => {
+                              teacherAntiCheatService.detail(Number(attempt.id))
+                                .then((detail) => setDrawerAttempt(mapDetail(detail)))
+                                .catch(() => setDrawerAttempt(attempt));
+                            }}
                             className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 text-xs"
                           >
                             View

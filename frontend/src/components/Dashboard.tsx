@@ -33,6 +33,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
     examMediaStream?.getTracks().forEach((track) => track.stop());
     setExamMediaStream(null);
     setCurrentExamId(null);
+    // The attempt may have been submitted or terminated while the exam view
+    // was open. Reload before showing My Exams so stale Resume buttons vanish.
+    void dashboardData.retry();
   };
 
   // ✅ dùng cho nút "View" trong trang Exam Results

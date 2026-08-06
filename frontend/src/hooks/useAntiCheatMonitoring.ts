@@ -11,13 +11,23 @@ interface Options {
 }
 
 export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream, onEvent, onFullscreenLost, onMediaProblem }: Options) {
-  const lastSent = useRef(new Map<string, number>());
+  // A browser action can fire blur, visibility, and fullscreen events together.
+  // Count only the first event in that burst so one action costs one violation.
+  const lastViolationBurst = useRef(0);
   const unloading = useRef(false);
+
+  useEffect(() => {
+    if (!active) {
+      unloading.current = false;
+      lastViolationBurst.current = 0;
+    }
+  }, [active, attemptId]);
+
   const send = useCallback(async (eventType: EventType, source: "browser" | "camera" | "microphone") => {
     if (!active || !attemptId || unloading.current) return;
     const now = Date.now();
-    if (now - (lastSent.current.get(eventType) ?? 0) < 1000) return;
-    lastSent.current.set(eventType, now);
+    if (now - lastViolationBurst.current < 1_500) return;
+    lastViolationBurst.current = now;
     try { onEvent(await studentExamService.recordAntiCheatEvent(examId, attemptId, eventType, source), eventType); } catch { /* Session failures are handled by the existing save/heartbeat gate. */ }
   }, [active, attemptId, examId, onEvent]);
 

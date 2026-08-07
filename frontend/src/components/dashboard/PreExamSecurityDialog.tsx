@@ -17,6 +17,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
 
   const stopStream = () => {
     ownedStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -25,12 +26,25 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
   };
 
   useEffect(() => () => { ownedStreamRef.current?.getTracks().forEach((track) => track.stop()); }, []);
-  useEffect(() => { if (videoRef.current && stream) videoRef.current.srcObject = stream; }, [stream]);
+  useEffect(() => {
+    if (!stream) return;
+    if (videoRef.current) videoRef.current.srcObject = stream;
+    const settings = stream.getVideoTracks()[0]?.getSettings();
+    const aspectRatio = settings?.aspectRatio ?? (settings?.width && settings?.height ? settings.width / settings.height : undefined);
+    setCameraAspectRatio(aspectRatio && Number.isFinite(aspectRatio) ? aspectRatio : 16 / 9);
+  }, [stream]);
 
   const requestMedia = async () => {
     setError(null); setWorking(true);
     try {
-      const nextStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
+      const videoConstraints: MediaTrackConstraints = {};
+
+      // Let each camera provide its native frame; do not force a mode that can crop it.
+      if (supportedConstraints.facingMode) videoConstraints.facingMode = { ideal: "user" };
+      if (supportedConstraints.resizeMode) videoConstraints.resizeMode = { ideal: "none" };
+
+      const nextStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
       const cameraReady = nextStream.getVideoTracks().some((track) => track.readyState === "live");
       const microphoneReady = nextStream.getAudioTracks().some((track) => track.readyState === "live");
       if (!cameraReady || !microphoneReady) {
@@ -72,7 +86,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
         <li>Camera and microphone must remain active. Refreshing is recorded when resumed.</li>
         <li>All violations share one limit of <strong>{violationLimit}</strong>. Reaching it ends this attempt with 0 points.</li>
       </ul>
-      {stream && <div className="grid grid-cols-[9rem_1fr] gap-4 rounded-xl border p-3"><video ref={videoRef} autoPlay playsInline muted className="h-24 w-36 rounded-lg bg-slate-900 object-cover" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}
+      {stream && <div className="grid grid-cols-1 gap-4 rounded-xl border p-3 sm:grid-cols-[13.5rem_1fr]"><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="w-[216px] max-w-full rounded-lg bg-slate-900 object-contain" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}
       {error && <p className="flex gap-2 text-sm text-red-600"><AlertCircle className="size-4 shrink-0" />{error}</p>}
       <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={close} disabled={working}>Cancel</Button>{!stream ? <Button className="flex-1" onClick={() => void requestMedia()} disabled={working}>{working ? "Checking..." : "Take Test"}</Button> : <Button className="flex-1" onClick={() => void continueToExam()} disabled={working}><Maximize className="mr-2 size-4" />{working ? "Starting..." : "Enter Fullscreen & Start"}</Button>}</div>
     </DialogContent>

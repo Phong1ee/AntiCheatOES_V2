@@ -1,6 +1,55 @@
 from datetime import datetime
 from src.a_db_config.config import get_db_connection
 
+from src.service.exam_pool_service import seeded_random, select_unique_candidates
+from src.service.scoring_service import GRADING_SCALE, normalize_score, validate_max_score
+from src.service.anti_cheat_event_policy import validate_event_payload
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def create_attempt_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> None:
+    """Validate an active attempt session without exposing stored hashes."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT device_id_hash, session_token_hash, status, submitted_at, end_time
+            FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
+            """,
+            (attempt_id, exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+            raise Exception("Attempt is no longer in progress")
+        if not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id)):
+            raise Exception("Attempt device does not match")
+        if not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token)):
+            raise Exception("Attempt session is invalid")
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def get_database_now():
+    """Return MySQL's UTC DATETIME clock for Student attempt decisions."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor()
+    try:
+        cursor.execute("SELECT NOW()")
+        return cursor.fetchone()[0]
+    finally:
+        cursor.close()
+        cnx.close()
+
+
 
 def insertQuestion(question_text: str, question_type: str):
     """Insert a new question into the database."""
@@ -445,6 +494,212 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list):
     finally:
         cursor.close()
         cnx.close()
+
+
+
+def submitAttempt(attempt_id: int, exam_id: int, answers: list):
+    """Backward-compatible entry point; the active atomic finalizer owns scoring."""
+    return finalizeAttempt(attempt_id, exam_id, answers)
+
+
+def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str) -> tuple[dict, str, bool]:
+    """Claim a legacy attempt once or rotate the session on its bound browser."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cnx.start_transaction()
+        cursor.execute(
+            """
+            SELECT attempt_id, exam_id, student_id, attempt_no, status, submitted_at, end_time,
+                   score, violation_count, device_id_hash
+            FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s FOR UPDATE
+            """,
+            (attempt_id, exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+            raise Exception("Attempt is no longer in progress")
+        device_hash = _sha256(device_id)
+        claimed_legacy = attempt["device_id_hash"] is None
+        if not claimed_legacy and not hmac.compare_digest(attempt["device_id_hash"], device_hash):
+            raise Exception("Attempt device does not match")
+        session_token = create_attempt_session_token()
+        cursor.execute(
+            """
+            UPDATE attempt
+            SET device_id_hash = %s, session_token_hash = %s, last_heartbeat_at = NOW()
+            WHERE attempt_id = %s
+            """,
+            (device_hash, _sha256(session_token), attempt_id),
+        )
+        if claimed_legacy:
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'DEVICE_BOUND_ON_RESUME', NOW(), NULL, 'system', 0)
+                """,
+                (attempt_id,),
+            )
+        cnx.commit()
+        return attempt, session_token, claimed_legacy
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> dict:
+    assertAttemptSession(exam_id, attempt_id, student_id, device_id, session_token)
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s", (attempt_id,))
+        cnx.commit()
+        cursor.execute("SELECT last_heartbeat_at, violation_count, status FROM attempt WHERE attempt_id = %s", (attempt_id,))
+        return cursor.fetchone()
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: str = "", session_token: str = "") -> dict:
+    """Persist one client event and enforce the shared limit in one transaction."""
+    policy = validate_event_payload(event["eventType"], event["source"], event.get("metadata"))
+    event_type = event["eventType"].strip().upper()
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cnx.start_transaction()
+        cursor.execute(
+            """
+            SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
+                   score, violation_count, device_id_hash, session_token_hash
+            FROM attempt
+            WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
+            FOR UPDATE
+            """,
+            (event["attemptId"], exam_id, student_id),
+        )
+        attempt = cursor.fetchone()
+        if not attempt:
+            raise Exception("Attempt does not belong to student")
+        if device_id and (not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id))):
+            raise Exception("Attempt device does not match")
+        if session_token and (not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token))):
+            raise Exception("Attempt session is invalid")
+
+        cursor.execute(
+            "SELECT anti_cheat_enabled, violation_limit FROM exam_setting WHERE exam_id = %s",
+            (exam_id,),
+        )
+        setting = cursor.fetchone() or {"anti_cheat_enabled": False, "violation_limit": 5}
+        enabled = bool(setting["anti_cheat_enabled"])
+        limit = int(setting["violation_limit"] or 5)
+        client_event_id = event["clientEventId"]
+
+        cursor.execute(
+            "SELECT event_id FROM exam_event WHERE attempt_id = %s AND client_event_id = %s",
+            (attempt["attempt_id"], client_event_id),
+        )
+        duplicate = cursor.fetchone() is not None
+        if duplicate:
+            cnx.commit()
+            return _event_response(attempt, enabled, limit, policy, event_accepted=True, duplicate=True)
+
+        if attempt["status"] in {"submitted", "terminated"} or attempt["submitted_at"] or attempt["end_time"]:
+            cnx.commit()
+            return _event_response(attempt, enabled, limit, policy, event_accepted=False, duplicate=False)
+
+        is_violation = enabled and policy.counts_toward_limit
+        # Disabled exams retain a non-violation diagnostic event for auditing.
+        cursor.execute(
+            """
+            INSERT INTO exam_event (
+                attempt_id, event_type, event_timestamp, details, source,
+                is_violation, client_event_id, metadata
+            ) VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s)
+            """,
+            (
+                attempt["attempt_id"], event_type, event.get("details"), event["source"],
+                int(is_violation), client_event_id, json.dumps(event["metadata"]) if event.get("metadata") is not None else None,
+            ),
+        )
+        if is_violation:
+            cursor.execute(
+                """
+                UPDATE attempt
+                SET violation_count = violation_count + 1, last_violation_at = NOW()
+                WHERE attempt_id = %s
+                """,
+                (attempt["attempt_id"],),
+            )
+            attempt["violation_count"] = int(attempt["violation_count"] or 0) + 1
+
+        if is_violation and attempt["violation_count"] >= limit:
+            questions = _load_attempt_questions(cursor, attempt["attempt_id"], exam_id)
+            for answer in event.get("answers", []):
+                question = questions.get(int(answer["questionId"]))
+                if not question:
+                    raise Exception("Question does not belong to this attempt")
+                _upsert_answer(cursor, attempt["attempt_id"], question, answer)
+            _finalize_essay_answers(cursor, attempt["attempt_id"], questions)
+            cursor.execute("UPDATE essay_answers SET score = 0 WHERE attempt_id = %s AND score IS NULL", (attempt["attempt_id"],))
+            reason = f"anti_cheat_limit_reached:{event_type}"
+            cursor.execute(
+                """
+                UPDATE attempt
+                SET score = 0.00, end_time = NOW(), submitted_at = NOW(), status = 'terminated',
+                    termination_reason = %s, score_scale_version = 2
+                WHERE attempt_id = %s
+                """,
+                (reason, attempt["attempt_id"]),
+            )
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'ATTEMPT_TERMINATED', NOW(), %s, 'system', 0)
+                """,
+                (attempt["attempt_id"], reason),
+            )
+            attempt.update(status="terminated", score=Decimal("0.00"), submitted_at=True, end_time=True)
+            _sync_student_final_score(cursor, exam_id, student_id)
+
+        cnx.commit()
+        return _event_response(attempt, enabled, limit, policy, event_accepted=True, duplicate=False)
+    except Exception:
+        cnx.rollback()
+        raise
+    finally:
+        cursor.close()
+        cnx.close()
+
+
+def _event_response(attempt: dict, enabled: bool, limit: int, policy, event_accepted: bool, duplicate: bool) -> dict:
+    count = int(attempt.get("violation_count") or 0)
+    terminated = attempt.get("status") == "terminated"
+    return {
+        "success": True,
+        "eventAccepted": event_accepted,
+        "duplicate": duplicate,
+        "antiCheatEnabled": enabled,
+        "violationCount": count,
+        "violationLimit": limit,
+        "remainingViolations": max(limit - count, 0) if enabled else None,
+        "terminated": terminated,
+        "attemptStatus": attempt.get("status"),
+        "automatedFlag": policy.automated_flag,
+        "countsTowardLimit": policy.counts_toward_limit,
+        "score": attempt.get("score"),
+        "warningMessage": "Attempt terminated after reaching the violation limit." if terminated else (
+            "Anti-cheat is disabled; the event was recorded without a violation." if not enabled else "Anti-cheat event recorded."
+        ),
+    }
+
 
 def addQuestionToExam(exam_id: int, question_data: dict):
     """Add a question to an exam."""

@@ -94,28 +94,79 @@ Before making a database change:
    changes.
 8. Do not manually renumber existing primary keys or foreign keys.
 
-Use only the following project tables unless the current task explicitly
-introduces an approved new table:
+Required Alembic Workflow
 
-* user
-* subject
-* teacher_subject
-* lo
-* chapter
-* chapter_lo
-* exam
-* question
-* options
-* exam_question
-* chapter_question
-* lo_question
-* question_revision
-* student_exam
-* attempt
-* attempt_question
-* mcq_answers
-* essay_answers
-* exam_event
+For every database schema change, including adding, changing, or removing acolumn, index, constraint, enum, or table, complete and report this workflow:
+
+Run uv run alembic current, uv run alembic heads, and uv run alembic history from backend before creating a migration.
+
+Create one focused migration whose down_revision is the actual current Alembic head; never hard-code a revision supplied by a database dump when the repository head differs.
+
+Read the generated migration and verify its upgrade and downgrade operations before applying it.
+
+Run uv run alembic heads and confirm that the repository has exactly one head.
+
+Run uv run alembic upgrade head against the configured project database.
+
+Run uv run alembic current and verify the intended schema change in the database.
+
+If any command cannot run, do not claim the schema changed; report the exact blocking error and do not treat source-model changes as a database migration.
+
+Do not remove a migration file after it may have been applied to any shared orconfigured database. Create a new focused migration to reverse the schemachange instead.
+
+Use the existing project tables and do not introduce a new table unless thecurrent task explicitly approves it. The current SQLAlchemy model set includes:
+
+user
+
+subject
+
+teacher_subject
+
+lo
+
+chapter
+
+chapter_lo
+
+class
+
+student_class
+
+exam
+
+exam_setting
+
+exam_pool_config
+
+exam_pool_rule
+
+exam_pool_question
+
+question
+
+options
+
+exam_question
+
+chapter_question
+
+lo_question
+
+question_revision
+
+student_exam
+
+attempt
+
+attempt_question
+
+mcq_answers
+
+essay_answers
+
+exam_event
+
+Anti-cheat changes must extend the existing exam_setting, attempt, andexam_event tables. Do not create a separate anti-cheat table.
 
 Do not use these table names from other projects:
 
@@ -255,45 +306,33 @@ Teacher Question Detail endpoint or another explicitly authorized workflow.
 
 Run backend:
 
-```bash
 cd backend
 uv run python main.py
-```
 
 Check Python syntax:
 
-```bash
 cd backend
 uv run python -m py_compile main.py
-```
 
 Run backend tests if a test suite exists:
 
-```bash
 cd backend
 uv run pytest
-```
 
 Run a focused backend test file when appropriate:
 
-```bash
 cd backend
 uv run pytest path/to/test_file.py
-```
 
 Check Alembic current revision if Alembic is present:
 
-```bash
 cd backend
 uv run alembic current
-```
 
 Check Alembic heads if Alembic is present:
 
-```bash
 cd backend
 uv run alembic heads
-```
 
 Do not run `alembic upgrade head` without first inspecting the generated
 migration.
@@ -302,31 +341,23 @@ migration.
 
 Run frontend:
 
-```bash
 cd frontend
 npm run dev
-```
 
 Build frontend:
 
-```bash
 cd frontend
 npm run build
-```
 
 Run TypeScript type checking if the project defines a typecheck script:
 
-```bash
 cd frontend
 npm run typecheck
-```
 
 Run lint if configured:
 
-```bash
 cd frontend
 npm run lint
-```
 
 Do not add a new frontend test framework only for a single task unless
 explicitly requested.
@@ -489,23 +520,35 @@ Each event should include:
 
 ### Your Questions tab
 
-* Your Questions returns only questions where:
-  `question.created_by == current_teacher.id`.
-* Your Questions may display:
-  - draft
-  - pending
-  - approved
-  - rejected
-* New Question is displayed only in Your Questions.
-* Your Questions may show status filters:
-  - All
-  - Draft
-  - Pending
-  - Approved
-  - Rejected
-* Your Questions Subject counts include only questions owned by the current
-  Teacher.
-* Your Questions may show No Subject for drafts whose `subject_id` is null.
+Your Questions returns only questions where:question.created_by == current_teacher.school_id.
+
+Your Questions may display:
+
+draft
+
+pending
+
+approved
+
+rejected
+
+New Question is displayed only in Your Questions.
+
+Your Questions may show status filters:
+
+All
+
+Draft
+
+Pending
+
+Approved
+
+Rejected
+
+Your Questions Subject counts include only questions owned by the currentTeacher.
+
+Your Questions may show No Subject for drafts whose subject_id is null.
 
 ### Ownership and authorization
 
@@ -543,10 +586,8 @@ new -> draft
 
 Submit:
 
-```text
 draft -> pending
 rejected -> pending
-```
 
 Edit approved:
 
@@ -666,18 +707,14 @@ Supported cases:
 
 Subject, Chapter, and LO selected:
 
-```text
 question.subject_id
 chapter_question
 lo_question
-```
 
 Subject and Chapter selected, no LO:
 
-```text
 question.subject_id
 chapter_question
-```
 
 Subject selected, no Chapter or LO:
 
@@ -687,11 +724,9 @@ question.subject_id
 
 Draft without Subject:
 
-```text
 question.subject_id = NULL
 no chapter_question rows
 no lo_question rows
-```
 
 ### Question revision
 
@@ -846,21 +881,14 @@ Do not represent Chapters or Learning Objectives as one string.
 
 Use arrays, for example:
 
-```ts
 interface SubjectSummary {
   subject_id: string;
   subject_name: string;
 }
 
-interface ChapterSummary {
-  chapter_id: number;
-  chapter_name: string;
-}
+interface ChapterSummary {chapter_id: number;chapter_name: string;}
 
-interface LearningObjectiveSummary {
-  lo_id: number;
-  lo_name: string;
-}
+interface LearningObjectiveSummary {lo_id: number;lo_name: string;}
 
 interface QuestionBankItem {
   question_id: number;
@@ -875,7 +903,6 @@ interface QuestionBankItem {
   created_at?: string | null;
   updated_at?: string | null;
 }
-```
 
 Adapt names to existing project conventions.
 
@@ -933,31 +960,52 @@ A module is done only when:
 
 For Teacher Question Bank, the module is done only when:
 
-1. Teacher authentication is enforced by the backend.
-2. Ownership is enforced by the backend.
-3. Question Bank returns approved questions only.
-4. Question Bank can include approved questions from multiple Teachers.
-5. Your Questions returns only the authenticated Teacher's questions.
-6. Teachers cannot modify Questions owned by another Teacher.
-7. Teachers cannot directly set a Question to approved.
-8. Pending questions are read-only.
-9. Subject data comes from the real database.
-10. Chapter data comes from `chapter_question`.
-11. Learning Objective data comes from `lo_question`.
-12. Chapter–LO validation uses `chapter_lo`.
-13. Question cards display summary information only.
-14. Question cards do not expose full options or correct answers.
-15. Authorized Teacher Question Detail can display full options and correct
-    answers.
-16. Draft may be saved without Subject or difficulty.
-17. Submit performs full validation.
-18. Approved-question edits create a revision.
-19. Approved-question edits change status to pending.
-20. Question, Options, Chapters, Learning Objectives, revision, and status are
-    updated atomically.
-21. Questions used by Exams cannot be deleted.
-22. Subject counts are calculated from real data.
-23. Backend tests were run.
-24. Frontend TypeScript checking or build was run.
-25. Frontend build was run successfully, or any remaining failure was reported
-    accurately.
+Teacher authentication is enforced by the backend.
+
+Ownership is enforced by the backend.
+
+Question Bank returns approved questions only.
+
+Question Bank can include approved questions from multiple Teachers.
+
+Your Questions returns only the authenticated Teacher's questions.
+
+Teachers cannot modify Questions owned by another Teacher.
+
+Teachers cannot directly set a Question to approved.
+
+Pending questions are read-only.
+
+Subject data comes from the real database.
+
+Chapter data comes from chapter_question.
+
+Learning Objective data comes from lo_question.
+
+Chapter–LO validation uses chapter_lo.
+
+Question cards display summary information only.
+
+Question cards do not expose full options or correct answers.
+
+Authorized Teacher Question Detail can display full options and correctanswers.
+
+Draft may be saved without Subject or difficulty.
+
+Submit performs full validation.
+
+Approved-question edits create a revision.
+
+Approved-question edits change status to pending.
+
+Question, Options, Chapters, Learning Objectives, revision, and status areupdated atomically.
+
+Questions used by Exams cannot be deleted.
+
+Subject counts are calculated from real data.
+
+Backend tests were run.
+
+Frontend TypeScript checking or build was run.
+
+Frontend build was run successfully, or any remaining failure was reportedaccurately.

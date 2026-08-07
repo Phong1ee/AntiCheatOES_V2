@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import { useState, useEffect, useRef } from 'react';
 import { Camera, CameraOff, Minimize2, Maximize2, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -12,6 +13,31 @@ export function WebcamMonitor() {
 
   useEffect(() => {
     let mounted = true;
+=======
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Camera, CameraOff, Mic, MicOff, Radio } from "lucide-react";
+
+type VisionStatus = "idle" | "loading" | "monitoring" | "unavailable";
+type AudioStatus = "idle" | "calibrating" | "monitoring" | "unavailable";
+type MonitoringStatus = "monitoring" | "starting" | "recovery" | "security-error";
+
+const visionLabel = (status: VisionStatus) => status === "monitoring" ? "VISION READY" : status === "unavailable" ? "VISION ERROR" : "VISION LOADING";
+const audioLabel = (status: AudioStatus) => status === "monitoring" ? "AUDIO READY" : status === "unavailable" ? "AUDIO ERROR" : "AUDIO CALIBRATING";
+const monitoringLabel: Record<MonitoringStatus, string> = { monitoring: "MONITORING", starting: "STARTING", recovery: "RECOVERY REQUIRED", "security-error": "SECURITY ERROR" };
+
+export function WebcamMonitor({ stream, cameraLive, microphoneLive, monitoringStatus, visionStatus, audioStatus }: { stream?: MediaStream; cameraLive: boolean; microphoneLive: boolean; monitoringStatus: MonitoringStatus; visionStatus: VisionStatus; audioStatus: AudioStatus }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const [position, setPosition] = useState(() => ({ x: 24, y: Math.max(112, window.innerHeight - 150) }));
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!videoRef.current) return;
+    videoRef.current.srcObject = stream ?? null;
+    void videoRef.current.play().catch(() => {
+      // Autoplay may wait for the browser after a stream replacement.
+    });
+  }, [cameraLive, stream]);
+>>>>>>> Stashed changes
 
     const startCamera = async () => {
       try {
@@ -61,6 +87,7 @@ export function WebcamMonitor() {
         isMinimized ? 'w-12 h-12' : 'w-56 h-40'
       }`}
     >
+<<<<<<< Updated upstream
       <div className="bg-white rounded-2xl shadow-2xl border-2 border-teal-500 overflow-hidden h-full flex flex-col">
         {/* Header */}
         <div className="bg-gradient-to-r from-teal-500 to-blue-600 px-3 py-2 flex items-center justify-between">
@@ -142,6 +169,19 @@ export function WebcamMonitor() {
             )}
           </div>
         )}
+=======
+      <div className="relative h-full overflow-hidden rounded-xl bg-slate-950 shadow-lg">
+        {cameraLive ? <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-slate-300"><CameraOff className="size-6" /></div>}
+        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 text-[10px] text-white">
+          <span className="flex items-center gap-1 rounded bg-black/55 px-1.5 py-1">{cameraLive ? <Camera className="size-3" /> : <CameraOff className="size-3" />}{cameraLive ? "CAM LIVE" : "CAM OFF"}</span>
+          <span className="flex items-center gap-1 rounded bg-black/55 px-1.5 py-1">{microphoneLive ? <Mic className="size-3" /> : <MicOff className="size-3" />}{microphoneLive ? "MIC LIVE" : "MIC OFF"}</span>
+          <span className={`flex items-center gap-1 rounded px-1.5 py-1 ${monitoringStatus === "monitoring" ? "bg-emerald-600/85" : monitoringStatus === "security-error" ? "bg-red-700/85" : "bg-amber-600/85"}`}><Radio className="size-3" />{monitoringLabel[monitoringStatus]}</span>
+        </div>
+        <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] gap-1 text-[9px] text-white">
+          <span className={`truncate rounded px-1.5 py-1 ${visionStatus === "unavailable" ? "bg-red-700/85" : "bg-black/55"}`}>{visionLabel(visionStatus)}</span>
+          <span className={`truncate rounded px-1.5 py-1 ${audioStatus === "unavailable" ? "bg-red-700/85" : "bg-black/55"}`}>{audioLabel(audioStatus)}</span>
+        </div>
+>>>>>>> Stashed changes
       </div>
 
       {/* Warning tooltip when minimized and camera error */}

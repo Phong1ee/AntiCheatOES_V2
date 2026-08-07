@@ -17,13 +17,33 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
+<<<<<<< Updated upstream
   const [viewingResultId, setViewingResultId] = useState<string | null>(null);
 
   const handleEnterExam = (examId: string) => {
+=======
+  const [examMediaStream, setExamMediaStream] = useState<MediaStream | null>(null);
+  const [examAudioContext, setExamAudioContext] = useState<AudioContext | null>(null);
+  const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
+  const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
+  const [accessExamId, setAccessExamId] = useState<string | null>(null);
+  const dashboardData = useStudentDashboardData();
+
+  const handleEnterExam = (examId: string, stream?: MediaStream, audioContext?: AudioContext) => {
+    setExamMediaStream(stream ?? null);
+    setExamAudioContext(audioContext ?? null);
+>>>>>>> Stashed changes
     setCurrentExamId(examId);
   };
 
   const handleExitExam = () => {
+<<<<<<< Updated upstream
+=======
+    examMediaStream?.getTracks().forEach((track) => track.stop());
+    void examAudioContext?.close();
+    setExamMediaStream(null);
+    setExamAudioContext(null);
+>>>>>>> Stashed changes
     setCurrentExamId(null);
   };
 
@@ -49,6 +69,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       <ExamInterface
         examId={currentExamId}
         onExit={handleExitExam}
+<<<<<<< Updated upstream
         settings={exam?.settings}
       />
     );
@@ -59,6 +80,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
       <ExamResultDetailsPage
         examId={viewingResultId}
         onBack={handleBackToResults}
+=======
+        mediaStream={examMediaStream ?? undefined}
+        audioContext={examAudioContext ?? undefined}
+>>>>>>> Stashed changes
       />
     );
   }

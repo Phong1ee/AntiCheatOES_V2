@@ -1,6 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Depends, Header
+import json
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from src.controller.teacherController.examController import ExamController
+from src.models.teacher.examModel import ALLOWED_CLIENT_EVENT_TYPES
 #from src.controller.authController import ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 from src.middleware.authMiddleware import verify_token, ADMIN_ONLY, STUDENT_ONLY, TEACHER_ONLY
 
@@ -20,6 +24,50 @@ class SubmitExamRequest(BaseModel):
     attemptId: int = Field(alias="attempt_id")
     answers: list[SubmitAnswerRequest]
     timeSpentSeconds: int | None = None
+
+
+class AutoSaveAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selectedOptionId: int | None = None
+    answerText: str | None = None
+
+
+class TerminateAttemptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+    violationType: str | None = None
+    answers: list[SubmitAnswerRequest] = []
+    timeSpentSeconds: int | None = None
+
+
+class AntiCheatEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    attemptId: int = Field(gt=0)
+    clientEventId: str = Field(min_length=1, max_length=64)
+    eventType: str = Field(min_length=1, max_length=50)
+    source: Literal["browser", "camera", "microphone"]
+    details: str | None = Field(default=None, max_length=1000)
+    metadata: dict[str, object] | None = None
+    answers: list[SubmitAnswerRequest] = Field(default_factory=list)
+
+    @field_validator("eventType")
+    @classmethod
+    def validate_client_event_type(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in ALLOWED_CLIENT_EVENT_TYPES:
+            raise ValueError("Unsupported or system-only anti-cheat event type")
+        return normalized
+
+    @model_validator(mode="after")
+    def bound_metadata(self):
+        if self.metadata is not None:
+            encoded = json.dumps(self.metadata, separators=(",", ":"))
+            if len(encoded.encode("utf-8")) > 4096:
+                raise ValueError("metadata must not exceed 4096 bytes")
+        return self
 
 
 @router.get("")

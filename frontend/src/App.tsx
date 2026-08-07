@@ -9,6 +9,7 @@ import { Toaster } from "./components/ui/sonner";
 import { UserRoleProvider } from "./contexts/UserRoleContext";
 import { authService } from "./services/auth.service";
 import { authStorage } from "./services/auth.storage";
+import { ProctoringRuntimeDiagnostics } from "./components/dev/ProctoringRuntimeDiagnostics";
 
 type Page =
   | "login"
@@ -24,6 +25,15 @@ const SESSION_DURATION = 2 * 60 * 60 * 1000; // 2 hours
 // const SESSION_DURATION = 10 * 1000; // 10 seconds for testing
 
 export default function App() {
+  const isDiagnosticsPath = window.location.pathname === "/dev/proctoring-runtime";
+  const diagnosticsEnabled = import.meta.env.DEV && import.meta.env.VITE_PROCTORING_DIAGNOSTICS === "true";
+
+  // Keep diagnostics outside authenticated application flows and omit it from production.
+  if (isDiagnosticsPath) {
+    return diagnosticsEnabled
+      ? <ProctoringRuntimeDiagnostics />
+      : <div className="min-h-screen flex items-center justify-center text-slate-700">Not Found</div>;
+  }
   const [currentPage, setCurrentPage] = useState<Page>("login");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(null);

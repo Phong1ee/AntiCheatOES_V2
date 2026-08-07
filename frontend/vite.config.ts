@@ -2,9 +2,35 @@
   import { defineConfig } from 'vite';
   import react from '@vitejs/plugin-react-swc';
   import path from 'path';
+  import { readFileSync } from 'fs';
+
+  const mediaPipeRuntimeDir = path.resolve(__dirname, './public/wasm/mediapipe');
+  const mediaPipeRuntimeFiles = new Set([
+    'audio_wasm_internal.js', 'audio_wasm_internal.wasm',
+    'audio_wasm_module_internal.js', 'audio_wasm_module_internal.wasm',
+    'audio_wasm_nosimd_internal.js', 'audio_wasm_nosimd_internal.wasm',
+    'vision_wasm_internal.js', 'vision_wasm_internal.wasm',
+    'vision_wasm_module_internal.js', 'vision_wasm_module_internal.wasm',
+    'vision_wasm_nosimd_internal.js', 'vision_wasm_nosimd_internal.wasm',
+  ]);
+
+  // MediaPipe dynamically imports its local loader files. Vite normally blocks
+  // module imports from public/, so serve this explicit runtime allowlist raw
+  // during development; production continues to copy public/ unchanged.
+  const mediaPipeDevRuntime = () => ({
+    name: 'local-mediapipe-dev-runtime',
+    configureServer(server: { middlewares: { use: (path: string, handler: (request: { url?: string }, response: { setHeader: (name: string, value: string) => void; end: (body: Buffer) => void }, next: () => void) => void) => void } }) {
+      server.middlewares.use('/wasm/mediapipe', (request, response, next) => {
+        const filename = path.basename((request.url ?? '').split('?')[0]);
+        if (!mediaPipeRuntimeFiles.has(filename)) return next();
+        response.setHeader('Content-Type', filename.endsWith('.wasm') ? 'application/wasm' : 'application/javascript');
+        response.end(readFileSync(path.join(mediaPipeRuntimeDir, filename)));
+      });
+    },
+  });
 
   export default defineConfig({
-    plugins: [react()],
+    plugins: [mediaPipeDevRuntime(), react(), tailwindcss()],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {

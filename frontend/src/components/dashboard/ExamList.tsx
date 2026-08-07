@@ -53,7 +53,7 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream, audioContext?: AudioContext) => void;
   onViewResults?: (examId: string) => void;
 }
 
@@ -125,15 +125,8 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
     onEnterExam?.(examId);
   };
 
-  const handleRequestCode = (exam: Exam) => {
-    setSelectedExam(exam);
-    setDetailsOpen(false);
-    setCodeOpen(true);
-  };
-
-  const handleCodeSubmit = async (code: string): Promise<boolean> => {
-    if (!selectedExam) return false;
-
+  const startExam = async (exam: Exam, code?: string, stream?: MediaStream, audioContext?: AudioContext) => {
+    setStartingExamId(exam.id);
     try {
       const token = localStorage.getItem("token");
 
@@ -166,12 +159,80 @@ export function ExamList({ onEnterExam, onViewResults }: ExamListProps) {
       );
 
       setCodeOpen(false);
-      handleEnterExam(selectedExam.id);
-      return true;
+      onEnterExam?.(exam.id, stream, audioContext);
+    } finally {
+      setStartingExamId(null);
+    }
+  };
+
+  const handleRequestCode = (exam: Exam) => {
+    setSelectedExam(exam);
+    setDetailsOpen(false);
+    if (!exam.requiresExamCode && !exam.antiCheatEnabled) {
+      setFetchedLoadError(null);
+      void startExam(exam).catch((error: unknown) => {
+        console.error(error);
+        setFetchedLoadError(error instanceof Error ? error.message : "Unable to start the exam.");
+      });
+    } else if (exam.antiCheatEnabled && !exam.requiresExamCode) {
+      setSecurityCode(undefined); setSecurityResume(false); setSecurityOpen(true);
+    } else {
+      setCodeOpen(true);
+    }
+  };
+  useEffect(() => {
+    const exam = exams.find((item) => item.id === autoOpenCodeExamId && item.status === "open");
+    if (exam) handleRequestCode(exam);
+  }, [autoOpenCodeExamId, exams]);
+
+  const handleCodeVerify = async (code: string) => {
+    if (!selectedExam) throw new Error("No exam selected");
+    return studentExamService.verifyCode(selectedExam.id, code);
+  };
+
+  const handleCodeStart = async (code: string) => {
+    if (!selectedExam) throw new Error("No exam selected");
+    try {
+      if (selectedExam.antiCheatEnabled) {
+        setSecurityCode(code || undefined); setSecurityResume(false); setCodeOpen(false); setSecurityOpen(true);
+      } else await startExam(selectedExam, code || undefined);
     } catch (err) {
       console.error(err);
       throw err;
     }
+  };
+
+  const handleResume = async (exam: Exam) => {
+    if (!exam.openAttemptId) return;
+    setFetchedLoadError(null);
+    if (exam.antiCheatEnabled) {
+      setSelectedExam(exam); setSecurityCode(undefined); setSecurityResume(true); setSecurityOpen(true);
+      return;
+    }
+    try {
+      const resumed = await studentExamService.resume(exam.id, exam.openAttemptId, "normal_resume");
+      if (Boolean(resumed.terminated)) {
+        setFetchedLoadError("This attempt has already ended and cannot be resumed.");
+        return;
+      }
+      localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
+      onEnterExam?.(exam.id);
+    } catch (error) {
+      setFetchedLoadError(error instanceof Error ? error.message : "Unable to resume this exam.");
+    }
+  };
+
+  const handleSecurityReady = async (stream: MediaStream, audioContext: AudioContext) => {
+    if (!selectedExam) throw new Error("No exam selected");
+    if (securityResume) {
+      if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
+      const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
+      if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
+      localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
+      onEnterExam?.(selectedExam.id, stream, audioContext);
+      return;
+    }
+    await startExam(selectedExam, securityCode, stream, audioContext);
   };
 
   if (loading) {

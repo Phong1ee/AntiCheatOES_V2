@@ -9,6 +9,7 @@ import {
 } from '../ui/alert-dialog';
 import { AlertTriangle, XCircle } from 'lucide-react';
 
+<<<<<<< Updated upstream
 interface ViolationWarningDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -134,4 +135,23 @@ export function ViolationWarningDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
+=======
+const EVENT_MESSAGES: Record<string, string> = {
+  CAMERA_PERMISSION_DENIED: "Camera permission was denied during recovery.", CAMERA_NOT_AVAILABLE: "Camera device is not available.", CAMERA_TRACK_MUTED: "Camera track remained muted for 3 seconds.", CAMERA_TRACK_ENDED: "Camera track ended.",
+  MIC_PERMISSION_DENIED: "Microphone permission was denied during recovery.", MIC_NOT_AVAILABLE: "Microphone device is not available.", MIC_TRACK_MUTED: "Microphone track remained muted for 3 seconds.", MIC_TRACK_ENDED: "Microphone track ended.",
+  NO_FACE_DETECTED: "No face was detected continuously for the required duration.", FACE_QUALITY_LOW: "Camera image quality remained below the required threshold.", FACE_POSITION_INVALID: "Face position remained outside the required camera framing.", UPPER_BODY_NOT_VISIBLE: "Required shoulder landmarks were not visible.", MULTIPLE_FACES_DETECTED: "More than one face was detected.", PHONE_DETECTED: "A phone-like object was detected.",
+  GAZE_AWAY_SUSTAINED: "A sustained screen-facing orientation signal was observed.", HEAD_POSE_OUT_OF_RANGE: "Head orientation remained outside the configured range.", REPEATED_HEAD_MOVEMENT: "Repeated head movement was observed.",
+  AUDIO_ACTIVITY_DETECTED: "Sustained audio above the calibrated background level was observed.", SPEECH_ACTIVITY_DETECTED: "Sustained speech-like audio was observed.", AUDIO_SIGNAL_DEGRADED: "Microphone signal quality was degraded.",
+};
+
+export function ViolationWarningDialog({ open, onOpenChange, eventType, violationCount, violationLimit, remainingViolations, terminated, countsTowardLimit = true, onReturnToFullscreen, onTerminatedExit }: {
+  open: boolean; onOpenChange: (open: boolean) => void; eventType?: string; violationCount: number; violationLimit: number; remainingViolations: number | null; terminated: boolean; countsTowardLimit?: boolean; onReturnToFullscreen?: () => void; onTerminatedExit?: () => void;
+}) {
+  const reviewOnly = !countsTowardLimit;
+  const label = eventType?.replaceAll("_", " ").toLowerCase() || "Anti-cheat event";
+  const observation = EVENT_MESSAGES[eventType ?? ""] ?? `${label.charAt(0).toUpperCase()}${label.slice(1)} recorded.`;
+  const finalWarning = !terminated && violationCount === violationLimit - 1;
+  const message = terminated ? `${observation} Violation limit reached. This attempt was ended and scored 0.` : reviewOnly ? `${observation} It does not change your violation count.` : `${observation} Violations: ${violationCount}/${violationLimit}.${finalWarning ? " This is the last warning." : remainingViolations !== null ? ` ${remainingViolations} remaining.` : ""}`;
+  return <AlertDialog open={open} onOpenChange={onOpenChange}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle className="flex items-center gap-2">{terminated ? <XCircle className="text-red-600" /> : <AlertTriangle className="text-amber-600" />}{terminated ? "Attempt Terminated" : reviewOnly ? "Monitoring Notice" : finalWarning ? "Final Warning" : "Violation Recorded"}</AlertDialogTitle><AlertDialogDescription>{message}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter>{onReturnToFullscreen && !terminated ? <Button onClick={onReturnToFullscreen}>Return to Fullscreen</Button> : <AlertDialogAction onClick={() => { onOpenChange(false); if (terminated) onTerminatedExit?.(); }}>{terminated ? "Back to Dashboard" : "Continue"}</AlertDialogAction>}</AlertDialogFooter></AlertDialogContent></AlertDialog>;
+>>>>>>> Stashed changes
 }

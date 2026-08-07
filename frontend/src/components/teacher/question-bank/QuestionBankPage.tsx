@@ -30,7 +30,11 @@ function useDebouncedValue(value: string, delayMs: number) {
   return debounced;
 }
 
-export function QuestionBankPage() {
+interface QuestionBankPageProps {
+  initialSubjectId?: string | null;
+}
+
+export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPageProps) {
   const [activeTab, setActiveTab] = useState<QuestionBankTab>("bank");
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, 350);
@@ -62,6 +66,15 @@ export function QuestionBankPage() {
   const [detail, setDetail] = useState<QuestionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialSubjectId) return;
+    setActiveTab("bank");
+    setSelectedSubject(initialSubjectId);
+    setFilters({});
+    setPage(1);
+    setQuestions([]);
+  }, [initialSubjectId]);
 
   const queryParams = useMemo(() => {
     const { chapter_id, lo_id, ...questionFilters } = filters;

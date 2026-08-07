@@ -13,6 +13,7 @@ from src.a_db_config import (
     Chapter,
     ChapterLO,
     ChapterQuestion,
+    ExamPoolQuestion,
     ExamQuestion,
     LO,
     LOQuestion,
@@ -552,6 +553,7 @@ def get_question_edit_payload(
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
     revision_id: int | None = Query(default=None, ge=1),
+    source: Literal["active"] | None = Query(default=None),
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
@@ -572,13 +574,15 @@ def get_question_edit_payload(
         return _serialize_edit_revision(revision, _revision_status(revision) == "pending")
     if question_status == "pending":
         return _serialize_edit_question(question)
-    if question_status == "approved":
+    if question_status == "approved" and source != "active":
+        # Only an outstanding proposal may replace the active approved data in
+        # the editor. An older rejected revision must not win over a newer
+        # revision that Admin has already approved and applied to Question.
         latest_revision = db.query(QuestionRevision).filter(
             QuestionRevision.question_id == question_id,
             QuestionRevision.edited_by == teacher.school_id,
-            QuestionRevision.question_status.in_(["pending", "rejected"]),
         ).order_by(QuestionRevision.version_number.desc(), QuestionRevision.revision_id.desc()).first()
-        if latest_revision:
+        if latest_revision and _revision_status(latest_revision) in {"pending", "rejected"}:
             _require_subject_permission(db, teacher, latest_revision.subject_id)
             return _serialize_edit_revision(latest_revision, _revision_status(latest_revision) == "pending")
     return _serialize_edit_question(question)
@@ -694,6 +698,8 @@ def _ensure_question_can_be_deleted(db: Session, question: Question) -> None:
         raise HTTPException(status_code=409, detail="Question is used by an exam and cannot be deleted")
     if db.query(AttemptQuestion.question_id).filter(AttemptQuestion.question_id == question.question_id).first():
         raise HTTPException(status_code=409, detail="Question is referenced by an attempt and cannot be deleted")
+    if db.query(ExamPoolQuestion.question_id).filter(ExamPoolQuestion.question_id == question.question_id).first():
+        raise HTTPException(status_code=409, detail="Question is used by an exam pool and cannot be deleted")
 
 
 @router.delete("/{question_id}", status_code=status.HTTP_204_NO_CONTENT)

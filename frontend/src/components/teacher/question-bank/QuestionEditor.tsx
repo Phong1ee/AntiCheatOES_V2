@@ -42,7 +42,27 @@ interface QuestionEditorProps {
   questionId: number | null;
   onClose: () => void;
   onSaved: (nextStatus?: QuestionStatus) => void;
+  dataSource?: QuestionEditorDataSource;
+  directSave?: boolean;
 }
+
+export interface QuestionEditorDataSource {
+  listSubjects: () => Promise<SubjectCount[]>;
+  listChapters: (subjectId: string) => Promise<ChapterSummary[]>;
+  listLearningObjectives: (chapterId: number) => Promise<LearningObjectiveSummary[]>;
+  getEditPayload: (questionId: number, source?: "active") => Promise<QuestionEditPayload>;
+  create: (payload: QuestionPayload) => Promise<{ question_id: number }>;
+  update: (questionId: number, payload: QuestionPayload) => Promise<unknown>;
+}
+
+const teacherEditorDataSource: QuestionEditorDataSource = {
+  listSubjects: async () => (await teacherQuestionBankService.listSubjectCounts("mine")).subjects,
+  listChapters: teacherQuestionBankService.listChapters,
+  listLearningObjectives: teacherQuestionBankService.listLearningObjectives,
+  getEditPayload: teacherQuestionBankService.getEditPayload,
+  create: teacherQuestionBankService.create,
+  update: teacherQuestionBankService.update,
+};
 
 const defaultOptions: QuestionOptionPayload[] = [
   {
@@ -68,6 +88,8 @@ export function QuestionEditor({
   questionId,
   onClose,
   onSaved,
+  dataSource = teacherEditorDataSource,
+  directSave = false,
 }: QuestionEditorProps) {
   const [detail, setDetail] = useState<QuestionEditPayload | null>(null);
 
@@ -102,10 +124,12 @@ export function QuestionEditor({
     useState<QuestionOptionPayload[]>(defaultOptions);
 
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [activeSourceQuestionId, setActiveSourceQuestionId] = useState<number | null>(null);
 
   const isApprovedEdit = detail?.question_status === "approved";
 
   const isPending = detail?.question_status === "pending";
+  const isRejectedRevision = detail?.revision_id !== null && detail?.question_status === "rejected";
 
   useEffect(() => {
     if (!open) {
@@ -120,9 +144,12 @@ export function QuestionEditor({
 
       try {
         const [subjectMeta, questionDetail] = await Promise.all([
-          teacherQuestionBankService.listSubjectCounts("mine"),
+          dataSource.listSubjects(),
           questionId
-            ? teacherQuestionBankService.getEditPayload(questionId)
+            ? dataSource.getEditPayload(
+                questionId,
+                activeSourceQuestionId === questionId ? "active" : undefined,
+              )
             : Promise.resolve(null),
         ]);
 
@@ -130,7 +157,7 @@ export function QuestionEditor({
           return;
         }
 
-        setSubjects(subjectMeta.subjects);
+        setSubjects(subjectMeta);
         setDetail(questionDetail);
 
         setQuestionText(questionDetail?.question_text ?? "");
@@ -176,7 +203,7 @@ export function QuestionEditor({
     return () => {
       cancelled = true;
     };
-  }, [open, questionId]);
+  }, [activeSourceQuestionId, dataSource, open, questionId]);
 
   useEffect(() => {
     if (!open || subjectId === subjectPlaceholder) {
@@ -186,7 +213,7 @@ export function QuestionEditor({
 
     let cancelled = false;
 
-    teacherQuestionBankService
+    dataSource
       .listChapters(subjectId)
       .then((items) => {
         if (cancelled) {
@@ -210,7 +237,7 @@ export function QuestionEditor({
     return () => {
       cancelled = true;
     };
-  }, [open, subjectId]);
+  }, [dataSource, open, subjectId]);
 
   useEffect(() => {
     if (!open || chapterIds.length === 0) {
@@ -223,7 +250,7 @@ export function QuestionEditor({
 
     Promise.all(
       chapterIds.map((chapterId) =>
-        teacherQuestionBankService.listLearningObjectives(chapterId),
+        dataSource.listLearningObjectives(chapterId),
       ),
     )
       .then((groups) => {
@@ -252,7 +279,7 @@ export function QuestionEditor({
     return () => {
       cancelled = true;
     };
-  }, [open, chapterIds]);
+  }, [chapterIds, dataSource, open]);
 
   const hasSubject = subjectId !== subjectPlaceholder;
 
@@ -357,9 +384,9 @@ export function QuestionEditor({
 
     try {
       if (questionId) {
-        await teacherQuestionBankService.update(questionId, payload());
+        await dataSource.update(questionId, payload());
       } else {
-        await teacherQuestionBankService.create(payload());
+        await dataSource.create(payload());
       }
 
       toast.success("Draft saved.");
@@ -382,19 +409,30 @@ export function QuestionEditor({
     setError(null);
 
     try {
+      if (directSave) {
+        if (questionId) {
+          await dataSource.update(questionId, payload());
+        } else {
+          await dataSource.create(payload());
+        }
+        toast.success(questionId ? "Question updated successfully." : "Question created successfully.");
+        closeAfterSave("approved");
+        return;
+      }
+
       if (questionId) {
         /*
          * Pending đi vào nhánh này và chỉ gọi update().
          * statusNeedsSubmit("pending") trả về false,
          * vì vậy không submit thêm lần nữa.
          */
-        await teacherQuestionBankService.update(questionId, payload());
+        await dataSource.update(questionId, payload());
 
         if (statusNeedsSubmit(detail?.question_status) && detail?.revision_id === null) {
           await teacherQuestionBankService.submit(questionId);
         }
       } else {
-        const created = await teacherQuestionBankService.create(payload());
+        const created = await dataSource.create(payload());
 
         await teacherQuestionBankService.submit(created.question_id);
       }
@@ -568,7 +606,9 @@ export function QuestionEditor({
             </h2>
 
             <p className="mt-0.5 text-sm text-slate-500">
-              Save a reusable draft or submit it for admin review.
+              {directSave
+                ? "Update the central question library."
+                : "Save a reusable draft or submit it for admin review."}
             </p>
           </div>
 
@@ -595,7 +635,7 @@ export function QuestionEditor({
             </div>
           )}
 
-          {isApprovedEdit && (
+          {!directSave && isApprovedEdit && (
             <Alert className="rounded-xl border-amber-200 bg-amber-50">
               <AlertCircle className="size-4 text-amber-700" />
 
@@ -611,8 +651,33 @@ export function QuestionEditor({
               <AlertCircle className="size-4 text-amber-700" />
 
               <AlertDescription className="text-amber-800">
-                This question is awaiting admin review. You may update its
-                content while it remains pending.
+                You are editing your pending proposal. The Question Detail
+                view continues to show the currently approved version until
+                this proposal is approved.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {isRejectedRevision && (
+            <Alert className="rounded-xl border-red-200 bg-red-50">
+              <AlertCircle className="size-4 text-red-700" />
+
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-3 text-red-800">
+                <span>
+                  You are editing your rejected proposal. The Question Detail view shows the currently approved version.
+                </span>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (questionId) setActiveSourceQuestionId(questionId);
+                  }}
+                  className="border-red-200 bg-white text-red-700 hover:bg-red-100"
+                >
+                  Start from approved version
+                </Button>
               </AlertDescription>
             </Alert>
           )}
@@ -1026,7 +1091,7 @@ export function QuestionEditor({
           </Button>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {!isApprovedEdit && !isPending && (
+            {!directSave && !isApprovedEdit && !isPending && (
               <Button
                 variant="outline"
                 onClick={saveDraft}
@@ -1049,13 +1114,15 @@ export function QuestionEditor({
             >
               {saving ? (
                 <Loader2 className="size-4 animate-spin" />
-              ) : isPending ? (
+              ) : directSave || isPending ? (
                 <Save className="size-4" />
               ) : (
                 <Send className="size-4" />
               )}
 
-              {isPending
+              {directSave
+                ? "Save Changes"
+                : isPending
                 ? "Save Changes"
                 : isApprovedEdit
                   ? "Save Changes & Submit for Approval"

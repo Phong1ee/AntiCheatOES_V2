@@ -15,6 +15,8 @@ from src.a_db_config import (
     Chapter,
     ChapterLO,
     ChapterQuestion,
+    ExamPoolQuestion,
+    ExamQuestion,
     LO,
     LOQuestion,
     MCQAnswer,
@@ -121,10 +123,13 @@ def _serialize_question(question: Question, include_options: bool = True) -> dic
         "question_status": _question_status(question),
         "subject": _subject_summary(question.subject),
         "teacher": _user_summary(question.creator),
+        "creator": _user_summary(question.creator),
         "chapters": _question_chapters(question),
         "learning_objectives": _question_los(question),
         "created_at": getattr(question, "created_at", None).isoformat() if getattr(question, "created_at", None) else None,
         "updated_at": getattr(question, "updated_at", None).isoformat() if getattr(question, "updated_at", None) else None,
+        "usage_count": len(question.exam_questions),
+        "option_count": len([option for option in question.options if option.options_text.strip()]),
     }
     if include_options:
         data["options"] = _question_options(question)
@@ -181,6 +186,7 @@ def _question_query(db: Session):
         selectinload(Question.subject),
         selectinload(Question.creator),
         selectinload(Question.options),
+        selectinload(Question.exam_questions),
         selectinload(Question.chapter_questions).selectinload(ChapterQuestion.chapter),
         selectinload(Question.lo_questions).selectinload(LOQuestion.lo),
     )
@@ -364,6 +370,42 @@ def _apply_snapshot(question: Question, payload: RevisionSnapshotPayload) -> Non
     question.subject_id = payload.subject_id.strip() if payload.subject_id else None
 
 
+def _apply_question_filters(query, subject_id, chapter_id, lo_id, search, question_type, difficulty):
+    query = query.outerjoin(Subject, Question.subject_id == Subject.subject_id)
+    if subject_id:
+        query = query.filter(Question.subject_id == subject_id)
+    if chapter_id is not None:
+        query = query.join(ChapterQuestion, Question.question_id == ChapterQuestion.question_id).filter(
+            ChapterQuestion.chapter_id == chapter_id
+        )
+    if lo_id is not None:
+        query = query.join(LOQuestion, Question.question_id == LOQuestion.question_id).filter(
+            LOQuestion.lo_id == lo_id
+        )
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.filter(or_(Question.question_text.ilike(pattern), Subject.subject_name.ilike(pattern)))
+    if question_type:
+        query = query.filter(Question.question_type == question_type)
+    if difficulty:
+        query = query.filter(Question.question_difficulties == difficulty)
+    return query
+
+
+def _ensure_question_can_be_deleted(db: Session, question: Question) -> None:
+    question_id = question.question_id
+    if db.query(ExamQuestion.question_id).filter(ExamQuestion.question_id == question_id).first():
+        raise HTTPException(status_code=409, detail="Question is used by an exam and cannot be deleted")
+    if db.query(AttemptQuestion.question_id).filter(AttemptQuestion.question_id == question_id).first():
+        raise HTTPException(status_code=409, detail="Question is referenced by an attempt and cannot be deleted")
+    if db.query(ExamPoolQuestion.question_id).filter(ExamPoolQuestion.question_id == question_id).first():
+        raise HTTPException(status_code=409, detail="Question is used by an exam pool and cannot be deleted")
+    if db.query(QuestionRevision.revision_id).filter(QuestionRevision.question_id == question_id).first():
+        raise HTTPException(status_code=409, detail="Question has revision history and cannot be deleted")
+    if db.query(Question.question_id).filter(Question.source_question_id == question_id).first():
+        raise HTTPException(status_code=409, detail="Question has derived copies and cannot be deleted")
+
+
 def _next_version(db: Session, question_id: int) -> int:
     return (db.query(func.max(QuestionRevision.version_number)).filter(QuestionRevision.question_id == question_id).scalar() or 0) + 1
 
@@ -388,6 +430,215 @@ def _create_snapshot_revision(
         rejection_reason=rejection_reason,
         **_snapshot_from_question(question),
     )
+
+
+@router.get("/question-bank")
+def list_central_question_bank(
+    subject_id: str | None = None,
+    chapter_id: int | None = None,
+    lo_id: int | None = None,
+    search: str | None = None,
+    question_type: QuestionTypeLiteral | None = None,
+    difficulty: QuestionDifficultyLiteral | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    query = _question_query(db).filter(Question.question_status == QuestionStatus.approved)
+    query = _apply_question_filters(query, subject_id, chapter_id, lo_id, search, question_type, difficulty)
+    total = query.with_entities(func.count(func.distinct(Question.question_id))).scalar() or 0
+    questions = (
+        query.group_by(Question.question_id)
+        .order_by(Question.question_id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_serialize_question(question, include_options=False) for question in questions],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/question-bank/subjects")
+def list_central_question_bank_subjects(
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    rows = (
+        db.query(
+            Subject.subject_id,
+            Subject.subject_name,
+            Subject.subject_description,
+            func.count(Question.question_id).label("approved_question_count"),
+        )
+        .outerjoin(
+            Question,
+            (Subject.subject_id == Question.subject_id)
+            & (Question.question_status == QuestionStatus.approved),
+        )
+        .group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description)
+        .order_by(Subject.subject_name)
+        .all()
+    )
+    return [
+        {
+            "subject_id": row.subject_id,
+            "subject_name": row.subject_name,
+            "subject_description": row.subject_description,
+            "approved_question_count": row.approved_question_count,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/question-bank/subjects/{subject_id}/chapters")
+def list_central_question_bank_chapters(
+    subject_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    if not db.query(Subject.subject_id).filter(Subject.subject_id == subject_id).first():
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return [
+        {"chapter_id": chapter.chapter_id, "chapter_name": chapter.chapter_name}
+        for chapter in db.query(Chapter).filter(Chapter.subject_id == subject_id).order_by(Chapter.chapter_name).all()
+    ]
+
+
+@router.get("/question-bank/chapters/{chapter_id}/learning-objectives")
+def list_central_question_bank_learning_objectives(
+    chapter_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    if not db.query(Chapter.chapter_id).filter(Chapter.chapter_id == chapter_id).first():
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return [
+        {"lo_id": lo.lo_id, "lo_name": lo.lo_name}
+        for lo in db.query(LO).join(ChapterLO, LO.lo_id == ChapterLO.lo_id).filter(
+            ChapterLO.chapter_id == chapter_id
+        ).order_by(LO.lo_name).all()
+    ]
+
+
+@router.get("/question-bank/{question_id}")
+def get_central_question_detail(
+    question_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    question = _question_query(db).filter(
+        Question.question_id == question_id,
+        Question.question_status == QuestionStatus.approved,
+    ).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Approved question not found")
+    return _serialize_question(question)
+
+
+@router.post("/question-bank", status_code=status.HTTP_201_CREATED)
+def create_central_question(
+    payload: RevisionSnapshotPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _admin(db, current_user["school_id"])
+        chapters, los = _validate_snapshot(db, payload)
+        question = Question(
+            question_text=payload.question_text,
+            question_type=payload.question_type,
+            question_difficulties=payload.question_difficulties,
+            subject_id=payload.subject_id,
+            created_by=admin.school_id,
+            question_status=QuestionStatus.approved,
+        )
+        db.add(question)
+        db.flush()
+        _replace_taxonomy(db, question, chapters, los)
+        _replace_options(db, question, payload)
+        db.commit()
+        return _serialize_question(_question_query(db).filter(Question.question_id == question.question_id).one())
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Question could not be created") from exc
+
+
+@router.put("/question-bank/{question_id}")
+def update_central_question(
+    question_id: int,
+    payload: RevisionSnapshotPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _admin(db, current_user["school_id"])
+        question = _locked_question(db, question_id)
+        if _question_status(question) != "approved":
+            raise HTTPException(status_code=409, detail="Only approved central questions can be edited")
+        chapters, los = _validate_snapshot(db, payload)
+        _replace_options(db, question, payload)
+        _apply_snapshot(question, payload)
+        _replace_taxonomy(db, question, chapters, los)
+        db.commit()
+        db.expire_all()
+        return _serialize_question(_question_query(db).filter(Question.question_id == question_id).one())
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Question could not be updated because referenced data is in use") from exc
+
+
+@router.delete("/question-bank/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_central_question(
+    question_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _admin(db, current_user["school_id"])
+        question = _locked_question(db, question_id)
+        if _question_status(question) != "approved":
+            raise HTTPException(status_code=409, detail="Only approved central questions can be deleted")
+        _ensure_question_can_be_deleted(db, question)
+        db.delete(question)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Question is referenced and cannot be deleted") from exc
 
 
 @router.get("/questions/pending")

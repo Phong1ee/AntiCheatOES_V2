@@ -204,7 +204,7 @@ class Subject(Base):
 class Chapter(Base):
     __tablename__ = "chapter"
 
-    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chapter_name: Mapped[str] = mapped_column(String(100), nullable=False)
     chapter_description: Mapped[str] = mapped_column(String(255), nullable=False)
     subject_id: Mapped[Optional[str]] = mapped_column(
@@ -224,7 +224,7 @@ class Chapter(Base):
 class LO(Base):
     __tablename__ = "lo"
 
-    lo_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lo_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lo_name: Mapped[str] = mapped_column(String(100), nullable=False)
     lo_description: Mapped[str] = mapped_column(String(255), nullable=False)
 

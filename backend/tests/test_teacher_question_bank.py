@@ -76,12 +76,14 @@ class TeacherQuestionBankTests(unittest.TestCase):
                 LO(lo_id=10, lo_name="Analyze normal forms", lo_description="LO"),
                 LO(lo_id=11, lo_name="Explain ACID", lo_description="LO"),
                 LO(lo_id=12, lo_name="Use semantic tags", lo_description="LO"),
+                LO(lo_id=13, lo_name="Identify normal forms", lo_description="LO"),
             ]
         )
         self.db.flush()
         self.db.add_all(
             [
                 ChapterLO(chapter_id=1, lo_id=10),
+                ChapterLO(chapter_id=1, lo_id=13),
                 ChapterLO(chapter_id=2, lo_id=11),
                 ChapterLO(chapter_id=3, lo_id=12),
                 Exam(manage_by="T1", title="Midterm", examcode="MID", max_attempt=1, duration_minutes=60, subject_id="DB"),
@@ -139,6 +141,23 @@ class TeacherQuestionBankTests(unittest.TestCase):
         self.assertEqual([link.lo_id for link in question.lo_questions], [11])
         self.assertEqual(sorted(item.options_text for item in question.options), ["ACID", "CAP"])
         self.assertEqual(self.db.query(QuestionRevision).count(), 0)
+
+    def test_create_and_update_preserve_all_selected_learning_objectives(self):
+        created = self._create(self._payload(lo_ids=[10, 13]))
+        question = self.db.get(Question, created["question_id"])
+        self.assertEqual(question.created_by, self.teacher_one.school_id)
+        self.assertEqual(sorted(link.lo_id for link in question.lo_questions), [10, 13])
+
+        update_question(created["question_id"], self._payload(lo_ids=[10]), self._current(), {}, self.db)
+        self.assertEqual([link.lo_id for link in self.db.get(Question, created["question_id"]).lo_questions], [10])
+
+        update_question(created["question_id"], self._payload(lo_ids=[10, 13]), self._current(), {}, self.db)
+        self.assertEqual(sorted(link.lo_id for link in self.db.get(Question, created["question_id"]).lo_questions), [10, 13])
+
+        with self.assertRaises(HTTPException) as raised:
+            update_question(created["question_id"], self._payload(lo_ids=[12]), self._current(), {}, self.db)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(sorted(link.lo_id for link in self.db.get(Question, created["question_id"]).lo_questions), [10, 13])
 
     def test_submit_and_pending_owner_permissions_allow_edit_delete(self):
         created = self._pending()
@@ -355,12 +374,30 @@ class TeacherQuestionBankTests(unittest.TestCase):
         rejected_view = list_my_questions(status_filter="rejected", current_user=self._current(), role_check={}, db=self.db)
         approved_view = list_my_questions(status_filter="approved", current_user=self._current(), role_check={}, db=self.db)
         edit_payload = get_question_edit_payload(created["question_id"], self._current(), {}, self.db)
+        active_payload = get_question_edit_payload(
+            created["question_id"], self._current(), {}, self.db, source="active"
+        )
 
         self.assertEqual([item["question_id"] for item in rejected_view["items"]], [created["question_id"]])
         self.assertEqual(rejected_view["items"][0]["revision_rejection_reason"], "Needs clarity")
         self.assertEqual(approved_view["items"], [])
         self.assertEqual(edit_payload["revision_id"], rejected.revision_id)
         self.assertEqual(edit_payload["question_status"], "rejected")
+        self.assertIsNone(active_payload["revision_id"])
+        self.assertEqual(active_payload["question_text"], "What is normalization?")
+
+        approved = QuestionRevision(
+            question_id=created["question_id"], version_number=2, question_text="Approved proposal", question_type="MCQ",
+            question_difficulties="medium", subject_id="DB", question_status="approved", options_snapshot=[],
+            chapter_ids_snapshot=[], lo_ids_snapshot=[], edited_by=self.teacher_one.school_id, approved_by=self.admin.school_id,
+        )
+        self.db.add(approved)
+        self.db.commit()
+
+        # A historical rejection must not override the latest approved version.
+        latest_payload = get_question_edit_payload(created["question_id"], self._current(), {}, self.db)
+        self.assertIsNone(latest_payload["revision_id"])
+        self.assertEqual(latest_payload["question_text"], "What is normalization?")
 
     def test_question_bank_still_returns_active_approved_question(self):
         created = self._approved()

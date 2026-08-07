@@ -8,6 +8,16 @@ import {
   type AdminRevisionReviewItem,
 } from '../../services/admin-question-approval.service';
 import {
+  adminQuestionBankService,
+  type AdminQuestionSubject,
+} from '../../services/admin-question-bank.service';
+import type { QuestionBankItem, QuestionDetail } from '../../types/question-bank';
+import type { QuestionEditPayload, QuestionPayload, SubjectCount } from '../../types/question-bank';
+import {
+  QuestionEditor,
+  type QuestionEditorDataSource,
+} from '../teacher/question-bank/QuestionEditor';
+import {
   Database,
   Library,
   ClipboardCheck,
@@ -17,7 +27,6 @@ import {
   Edit,
   Trash2,
   Eye,
-  Copy,
   MoreVertical,
   ChevronRight,
   ArrowLeft,
@@ -63,6 +72,7 @@ interface QuestionSnapshot {
 
 interface BankQuestion {
   id: string;
+  questionId?: number;
   type: QType;
   text: string;
   subject: string;
@@ -71,6 +81,7 @@ interface BankQuestion {
   learningObjectives?: string[];
   difficulty: Difficulty;
   options?: string[];
+  answers?: Answer[];
   correctAnswer?: string;
   createdBy: string;
   createdAt: string;
@@ -94,12 +105,92 @@ interface PendingQuestion {
 }
 
 interface SubjectMeta {
+  subjectId: string;
   name: string;
   code: string;
+  questionCount: number;
   color: string;
   iconColor: string;
   dept: string;
 }
+
+const SUBJECT_CARD_STYLES = [
+  { color: 'bg-blue-500/10', iconColor: 'text-blue-500' },
+  { color: 'bg-emerald-500/10', iconColor: 'text-emerald-500' },
+  { color: 'bg-violet-500/10', iconColor: 'text-violet-500' },
+  { color: 'bg-amber-500/10', iconColor: 'text-amber-500' },
+  { color: 'bg-rose-500/10', iconColor: 'text-rose-500' },
+  { color: 'bg-teal-500/10', iconColor: 'text-teal-500' },
+];
+
+function toSubjectMeta(subject: AdminQuestionSubject, index: number): SubjectMeta {
+  const style = SUBJECT_CARD_STYLES[index % SUBJECT_CARD_STYLES.length];
+  return {
+    subjectId: subject.subject_id,
+    name: subject.subject_name,
+    code: subject.subject_id,
+    questionCount: subject.approved_question_count,
+    color: style.color,
+    iconColor: style.iconColor,
+    // The database taxonomy does not provide departments for this API.
+    dept: 'Subjects',
+  };
+}
+
+function toBankQuestion(question: QuestionBankItem | QuestionDetail): BankQuestion {
+  const options = 'options' in question ? question.options : undefined;
+  const creator = 'creator' in question ? question.creator?.full_name : undefined;
+  return {
+    id: String(question.question_id),
+    questionId: question.question_id,
+    type: toUiType(question.question_type),
+    text: question.question_text,
+    subject: question.subject?.subject_name ?? 'No subject',
+    department: 'Subjects',
+    chapter: question.chapters.map((chapter) => chapter.chapter_name).join(', ') || 'No chapter',
+    learningObjectives: question.learning_objectives.map((lo) => lo.lo_name),
+    difficulty: toUiDifficulty(question.question_difficulties),
+    options: options?.map((option) => option.options_text),
+    answers: options?.map((option) => ({ text: option.options_text, isCorrect: option.is_correct })),
+    correctAnswer: options?.find((option) => option.is_correct)?.options_text,
+    createdBy: creator ?? question.created_by_name ?? question.created_by ?? 'Unknown',
+    createdAt: question.created_at ?? '',
+    usageCount: question.usage_count ?? 0,
+  };
+}
+
+const adminQuestionEditorDataSource: QuestionEditorDataSource = {
+  listSubjects: async (): Promise<SubjectCount[]> => (await adminQuestionBankService.listSubjects()).map((subject) => ({
+    subject_id: subject.subject_id,
+    subject_name: subject.subject_name,
+    subject_description: subject.subject_description,
+    question_count: subject.approved_question_count,
+  })),
+  listChapters: adminQuestionBankService.listChapters,
+  listLearningObjectives: adminQuestionBankService.listLearningObjectives,
+  getEditPayload: async (questionId): Promise<QuestionEditPayload> => {
+    const question = await adminQuestionBankService.getQuestion(questionId);
+    return {
+      question_id: question.question_id,
+      revision_id: null,
+      version_number: null,
+      question_status: question.question_status,
+      question_text: question.question_text,
+      question_type: question.question_type,
+      question_difficulties: question.question_difficulties,
+      subject_id: question.subject?.subject_id ?? null,
+      options: question.options,
+      chapter_ids: question.chapters.map((chapter) => chapter.chapter_id),
+      lo_ids: question.learning_objectives.map((lo) => lo.lo_id),
+      has_pending_revision: false,
+      rejection_reason: null,
+      created_at: question.created_at ?? null,
+      updated_at: question.updated_at ?? null,
+    };
+  },
+  create: adminQuestionBankService.create,
+  update: adminQuestionBankService.update,
+};
 
 function toUiType(type: AdminQuestionReviewItem['question_type']): QType {
   if (type === 'MCQ') return 'mcq';
@@ -158,32 +249,8 @@ function formatReviewDate(value: string) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
 
-const SUBJECTS: SubjectMeta[] = [
-  { name: 'Database Systems', code: 'IT3120', color: 'bg-blue-500/10', iconColor: 'text-blue-500', dept: 'Computer Science' },
-  { name: 'Data Structures', code: 'IT2000', color: 'bg-emerald-500/10', iconColor: 'text-emerald-500', dept: 'Computer Science' },
-  { name: 'Algorithms', code: 'IT2030', color: 'bg-violet-500/10', iconColor: 'text-violet-500', dept: 'Computer Science' },
-  { name: 'Web Development', code: 'IT4409', color: 'bg-amber-500/10', iconColor: 'text-amber-500', dept: 'Computer Science' },
-  { name: 'Operating Systems', code: 'IT3070', color: 'bg-rose-500/10', iconColor: 'text-rose-500', dept: 'Computer Science' },
-  { name: 'Network Security', code: 'IT4360', color: 'bg-teal-500/10', iconColor: 'text-teal-500', dept: 'Information Technology' },
-  { name: 'Cloud Computing', code: 'IT4520', color: 'bg-sky-500/10', iconColor: 'text-sky-500', dept: 'Information Technology' },
-  { name: 'Mobile Development', code: 'IT4735', color: 'bg-orange-500/10', iconColor: 'text-orange-500', dept: 'Information Technology' },
-  { name: 'Calculus', code: 'MA1001', color: 'bg-indigo-500/10', iconColor: 'text-indigo-500', dept: 'Mathematics' },
-  { name: 'Linear Algebra', code: 'MA1002', color: 'bg-pink-500/10', iconColor: 'text-pink-500', dept: 'Mathematics' },
-  { name: 'Statistics', code: 'MA3010', color: 'bg-cyan-500/10', iconColor: 'text-cyan-500', dept: 'Mathematics' },
-];
 
-const MOCK_BANK: BankQuestion[] = [
-  { id: 'b1', type: 'mcq', text: 'What is the primary key in a relational database?', subject: 'Database Systems', department: 'Computer Science', chapter: 'Introduction to Databases', difficulty: 'easy', options: ['A column that contains duplicate values', 'A unique identifier for each row in a table', 'A foreign key reference', 'An index for faster searches'], correctAnswer: 'A unique identifier for each row in a table', createdBy: 'Dr. Smith', createdAt: '2024-09-15', usageCount: 15 },
-  { id: 'b2', type: 'mcq', text: 'Which normal form eliminates partial dependencies?', subject: 'Database Systems', department: 'Computer Science', chapter: 'Normalization', difficulty: 'medium', options: ['1NF', '2NF', '3NF', 'BCNF'], correctAnswer: '2NF', createdBy: 'Dr. Smith', createdAt: '2024-09-20', usageCount: 12 },
-  { id: 'b3', type: 'essay', text: 'Explain the difference between INNER JOIN and LEFT JOIN with examples.', subject: 'Database Systems', department: 'Computer Science', chapter: 'SQL Joins', difficulty: 'hard', createdBy: 'Dr. Smith', createdAt: '2024-09-22', usageCount: 8 },
-  { id: 'b4', type: 'true-false', text: 'A primary key can contain NULL values.', subject: 'Database Systems', department: 'Computer Science', chapter: 'SQL Basics', difficulty: 'easy', correctAnswer: 'False', createdBy: 'Dr. Smith', createdAt: '2024-10-01', usageCount: 20 },
-  { id: 'b5', type: 'mcq', text: 'What is the time complexity of binary search?', subject: 'Data Structures', department: 'Computer Science', chapter: 'Searching Algorithms', difficulty: 'medium', options: ['O(n)', 'O(log n)', 'O(n²)', 'O(1)'], correctAnswer: 'O(log n)', createdBy: 'Dr. Williams', createdAt: '2024-10-10', usageCount: 18 },
-  { id: 'b6', type: 'true-false', text: 'A stack follows FIFO principle.', subject: 'Data Structures', department: 'Computer Science', chapter: 'Stacks & Queues', difficulty: 'easy', correctAnswer: 'False', createdBy: 'Dr. Williams', createdAt: '2024-10-12', usageCount: 25 },
-  { id: 'b7', type: 'mcq', text: 'Which HTML tag is used to define a hyperlink?', subject: 'Web Development', department: 'Computer Science', chapter: 'HTML Basics', difficulty: 'easy', options: ['<a>', '<link>', '<href>', '<url>'], correctAnswer: '<a>', createdBy: 'Prof. Johnson', createdAt: '2024-11-01', usageCount: 30 },
-  { id: 'b8', type: 'essay', text: 'Explain the box model in CSS.', subject: 'Web Development', department: 'Computer Science', chapter: 'CSS Basics', difficulty: 'medium', createdBy: 'Prof. Johnson', createdAt: '2024-11-05', usageCount: 6 },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -661,13 +728,13 @@ function AdminQuestionDetailModal({
   const typeInfo = TYPE_CFG[question.type];
   const difficultyInfo = DIFF_CFG[question.difficulty];
 
-  const displayOptions = useMemo(() => {
+  const displayOptions = useMemo<Answer[]>(() => {
+    if (question.answers?.length) return question.answers;
     if (question.type === 'true-false') {
-      return ['True', 'False'];
+      return ['True', 'False'].map((text) => ({ text, isCorrect: text === question.correctAnswer }));
     }
-
-    return question.options ?? [];
-  }, [question.options, question.type]);
+    return (question.options ?? []).map((text) => ({ text, isCorrect: text === question.correctAnswer }));
+  }, [question.answers, question.correctAnswer, question.options, question.type]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -815,11 +882,11 @@ function AdminQuestionDetailModal({
 
                 <div className="space-y-2">
                   {displayOptions.map((option, index) => {
-                    const isCorrect = option === question.correctAnswer;
+                    const isCorrect = option.isCorrect;
 
                     return (
                       <div
-                        key={`${option}-${index}`}
+                        key={`${option.text}-${index}`}
                         className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition ${
                           isCorrect
                             ? 'question-detail-option-row-correct'
@@ -843,7 +910,7 @@ function AdminQuestionDetailModal({
                               : 'text-slate-700'
                           }`}
                         >
-                          {option}
+                          {option.text}
                         </span>
 
                         {isCorrect && (
@@ -882,17 +949,7 @@ function AdminQuestionDetailModal({
               </section>
             )}
 
-            <section className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-5 md:grid-cols-2">
-              <div>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Department
-                </p>
-
-                <p className="text-sm font-medium text-slate-900">
-                  {question.department}
-                </p>
-              </div>
-
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
               <div>
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Created At
@@ -1532,20 +1589,75 @@ function AdminQuestionEditorModal({
 
 // ─── Bank question card ───────────────────────────────────────────────────────
 
+function AdminDeleteErrorModal({ message, onClose }: { message: string; onClose: () => void }) {
+  return createPortal(
+    <div className="oes-dialog-overlay flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Question cannot be deleted</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 rounded-full bg-teal-600 px-4 text-sm font-medium text-white transition hover:bg-teal-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function AdminDeleteConfirmModal({ question, onCancel, onConfirm }: {
+  question: BankQuestion;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return createPortal(
+    <div className="oes-dialog-overlay flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-600" />
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Delete question?</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              This will permanently delete “{question.text}”. Questions used by an exam or attempt cannot be deleted.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onCancel} className="h-10 rounded-full border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} className="h-10 rounded-full bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700">
+            Delete Question
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function BankCard({
   q,
   index,
   onView,
   onEdit,
   onDelete,
-  onDuplicate,
 }: {
   q: BankQuestion;
   index: number;
   onView: (question: BankQuestion) => void;
   onEdit: (question: BankQuestion) => void;
-  onDelete: (id: string) => void;
-  onDuplicate: (question: BankQuestion) => void;
+  onDelete: (question: BankQuestion) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const typeInfo = TYPE_CFG[q.type];
@@ -1650,21 +1762,7 @@ function BankCard({
                   <button
                     type="button"
                     onClick={() => {
-                      onDuplicate(q);
-                      setMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Copy className="size-3.5" />
-                    Duplicate
-                  </button>
-
-                  <div className="my-1 border-t border-gray-100" />
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDelete(q.id);
+                      onDelete(q);
                       setMenuOpen(false);
                     }}
                     className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -1686,11 +1784,18 @@ function BankCard({
 
 export function AdminQuestionBankPage() {
   const [mainTab, setMainTab] = useState<'bank' | 'approvals'>('bank');
-  const [bankQuestions, setBankQuestions] = useState<BankQuestion[]>(MOCK_BANK);
+  const [subjects, setSubjects] = useState<SubjectMeta[]>([]);
+  const [bankQuestions, setBankQuestions] = useState<BankQuestion[]>([]);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [bankSearch, setBankSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [diffFilter, setDiffFilter] = useState('');
+  const [bankTotal, setBankTotal] = useState(0);
+  const [bankRefresh, setBankRefresh] = useState(0);
+  const [subjectRefresh, setSubjectRefresh] = useState(0);
+  const [isLoadingSubjects, setIsLoadingSubjects] = useState(true);
+  const [isLoadingBank, setIsLoadingBank] = useState(false);
+  const [bankError, setBankError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingQuestion[]>([]);
   const [isLoadingPending, setIsLoadingPending] = useState(true);
   const [isReviewActionPending, setIsReviewActionPending] = useState(false);
@@ -1703,6 +1808,10 @@ export function AdminQuestionBankPage() {
 
   const [editingQuestion, setEditingQuestion] =
   useState<BankQuestion | null>(null);
+  const [adminEditorQuestionId, setAdminEditorQuestionId] = useState<number | null>(null);
+  const [adminEditorOpen, setAdminEditorOpen] = useState(false);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<BankQuestion | null>(null);
 
   const loadPendingRequests = async () => {
     setIsLoadingPending(true);
@@ -1728,15 +1837,72 @@ export function AdminQuestionBankPage() {
     void loadPendingRequests();
   }, []);
 
-  const subjectMeta = SUBJECTS.find((s) => s.name === selectedSubject);
-  const subjectQuestions = bankQuestions.filter((q) => q.subject === selectedSubject);
+  useEffect(() => {
+    let cancelled = false;
 
-  const filteredBank = subjectQuestions.filter((q) => {
-    if (bankSearch && !q.text.toLowerCase().includes(bankSearch.toLowerCase()) && !q.chapter.toLowerCase().includes(bankSearch.toLowerCase())) return false;
-    if (typeFilter && q.type !== typeFilter) return false;
-    if (diffFilter && q.difficulty !== diffFilter) return false;
-    return true;
-  });
+    const loadSubjects = async () => {
+      setIsLoadingSubjects(true);
+      try {
+        const response = await adminQuestionBankService.listSubjects();
+        if (!cancelled) setSubjects(response.map(toSubjectMeta));
+      } catch (error) {
+        if (!cancelled) {
+          setBankError(error instanceof Error ? error.message : 'Unable to load subjects.');
+          setSubjects([]);
+        }
+      } finally {
+        if (!cancelled) setIsLoadingSubjects(false);
+      }
+    };
+
+    void loadSubjects();
+    return () => { cancelled = true; };
+  }, [subjectRefresh]);
+
+  useEffect(() => {
+    if (!selectedSubject) {
+      setBankQuestions([]);
+      setBankTotal(0);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsLoadingBank(true);
+      setBankError(null);
+      try {
+        const response = await adminQuestionBankService.listQuestions({
+          subject_id: selectedSubject,
+          search: bankSearch,
+          question_type: typeFilter ? (typeFilter === 'mcq' ? 'MCQ' : typeFilter as 'true-false' | 'essay') : undefined,
+          difficulty: diffFilter ? diffFilter as Difficulty : undefined,
+          page: 1,
+          page_size: 100,
+        });
+        if (!cancelled) {
+          setBankQuestions(response.items.map(toBankQuestion));
+          setBankTotal(response.total);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBankError(error instanceof Error ? error.message : 'Unable to load questions.');
+          setBankQuestions([]);
+          setBankTotal(0);
+        }
+      } finally {
+        if (!cancelled) setIsLoadingBank(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectedSubject, bankSearch, typeFilter, diffFilter, bankRefresh]);
+
+  const subjectMeta = subjects.find((s) => s.subjectId === selectedSubject);
+  const subjectQuestions = bankQuestions;
+  const filteredBank = bankQuestions;
 
   const filteredPending = pending.filter((q) => {
     if (approvalSearch && !q.text.toLowerCase().includes(approvalSearch.toLowerCase()) && !q.subject.toLowerCase().includes(approvalSearch.toLowerCase())) return false;
@@ -1819,17 +1985,27 @@ export function AdminQuestionBankPage() {
     }
   };
 
-  const handleDeleteBank = (id: string) => {
-    setBankQuestions((q) => q.filter((x) => x.id !== id));
-    toast.success('Question deleted.');
+  const handleDeleteBank = async (question: BankQuestion) => {
+    if (!question.questionId) return;
+    try {
+      await adminQuestionBankService.deleteQuestion(question.questionId);
+      toast.success('Question deleted.');
+      setDeleteCandidate(null);
+      setBankRefresh((value) => value + 1);
+      setSubjectRefresh((value) => value + 1);
+    } catch (error) {
+      setDeleteCandidate(null);
+      setDeleteErrorMessage(error instanceof Error ? error.message : 'Unable to delete this question.');
+    }
   };
 
-  const handleDuplicate = (q: BankQuestion) => {
-    setBankQuestions((prev) => [
-      { ...q, id: Date.now().toString(), text: q.text + ' (Copy)', usageCount: 0, createdAt: new Date().toISOString().slice(0, 10) },
-      ...prev,
-    ]);
-    toast.success('Question duplicated.');
+  const openBankQuestion = async (question: BankQuestion) => {
+    if (!question.questionId) return;
+    try {
+      setViewQuestion(toBankQuestion(await adminQuestionBankService.getQuestion(question.questionId)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load question details.');
+    }
   };
 
   const handleSaveBankQuestion = (updatedQuestion: BankQuestion) => {
@@ -1845,7 +2021,7 @@ export function AdminQuestionBankPage() {
   toast.success('Question updated successfully.');
 };
 
-  const departments = Array.from(new Set(SUBJECTS.map((s) => s.dept)));
+  const departments = Array.from(new Set(subjects.map((s) => s.dept)));
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-gray-50">
@@ -1881,9 +2057,11 @@ export function AdminQuestionBankPage() {
           {!selectedSubject && (
             <div className="p-6">
               <p className="text-sm text-gray-500 mb-6">Select a subject to browse and manage questions.</p>
+              {isLoadingSubjects && <p className="py-8 text-center text-sm text-gray-400">Loading subjects...</p>}
+              {bankError && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{bankError}</p>}
               <div className="space-y-6">
                 {departments.map((dept) => {
-                  const deptSubjects = SUBJECTS.filter((s) => s.dept === dept);
+                  const deptSubjects = subjects.filter((s) => s.dept === dept);
                   return (
                     <div key={dept}>
                       <div className="flex items-center gap-2 mb-3">
@@ -1893,9 +2071,9 @@ export function AdminQuestionBankPage() {
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {deptSubjects.map((subj) => {
-                          const count = bankQuestions.filter((q) => q.subject === subj.name).length;
+                          const count = subjects.find((subject) => subject.subjectId === subj.subjectId)?.questionCount ?? 0;
                           return (
-                            <button key={subj.code} onClick={() => setSelectedSubject(subj.name)}
+                            <button key={subj.subjectId} onClick={() => setSelectedSubject(subj.subjectId)}
                               className="group bg-white rounded-2xl border border-gray-100 p-4 text-left hover:shadow-md hover:border-teal-200 transition-all">
                               <div className="flex items-start justify-between mb-3">
                                 <div className={`flex items-center justify-center w-8 h-8 rounded-lg ${subj.color}`}>
@@ -1913,6 +2091,9 @@ export function AdminQuestionBankPage() {
                   );
                 })}
               </div>
+              {!isLoadingSubjects && !bankError && subjects.length === 0 && (
+                <div className="py-16 text-center text-sm text-gray-400">No subjects are available.</div>
+              )}
             </div>
           )}
 
@@ -1925,7 +2106,7 @@ export function AdminQuestionBankPage() {
                   </button>
                   <div className="flex items-center gap-1.5 text-xs text-gray-400">
                     <span>{subjectMeta?.dept}</span><ChevronRight className="size-3" />
-                    <span className="text-gray-700 font-medium">{selectedSubject}</span>
+                    <span className="text-gray-700 font-medium">{subjectMeta?.name}</span>
                   </div>
                   <span className="ml-auto text-xs text-gray-400">{subjectMeta?.code}</span>
                 </div>
@@ -1972,7 +2153,14 @@ export function AdminQuestionBankPage() {
                     <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
                       <Upload className="size-3.5" />Import
                     </button>
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdminEditorQuestionId(null);
+                        setAdminEditorOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700"
+                    >
                       <Plus className="size-4" />Add Question
                     </button>
                   </div>
@@ -1980,7 +2168,9 @@ export function AdminQuestionBankPage() {
               </div>
               <div className="flex-1 overflow-y-auto px-6 py-5">
                 <div className="max-w-4xl mx-auto space-y-2">
-                  <p className="text-sm text-gray-400 mb-4"><span className="font-semibold text-gray-700">{filteredBank.length}</span> question{filteredBank.length !== 1 ? 's' : ''}</p>
+                  <p className="text-sm text-gray-400 mb-4"><span className="font-semibold text-gray-700">{bankTotal}</span> question{bankTotal !== 1 ? 's' : ''}</p>
+                  {isLoadingBank && <p className="py-8 text-center text-sm text-gray-400">Loading questions...</p>}
+                  {bankError && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{bankError}</p>}
                   {filteredBank.map((question, index) => (
   <BankCard
     key={question.id}
@@ -1988,17 +2178,19 @@ export function AdminQuestionBankPage() {
     index={index}
     onView={(selectedQuestion) => {
       setEditingQuestion(null);
-      setViewQuestion(selectedQuestion);
+      void openBankQuestion(selectedQuestion);
     }}
     onEdit={(selectedQuestion) => {
       setViewQuestion(null);
-      setEditingQuestion(selectedQuestion);
+      if (selectedQuestion.questionId) {
+        setAdminEditorQuestionId(selectedQuestion.questionId);
+        setAdminEditorOpen(true);
+      }
     }}
-    onDelete={handleDeleteBank}
-    onDuplicate={handleDuplicate}
+    onDelete={setDeleteCandidate}
   />
 ))}
-                  {filteredBank.length === 0 && (
+                  {!isLoadingBank && !bankError && filteredBank.length === 0 && (
                     <div className="text-center py-16">
                       <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gray-100 mb-4">
                         <BookOpen className="size-6 text-gray-400" />
@@ -2094,17 +2286,37 @@ export function AdminQuestionBankPage() {
     onEdit={() => {
       const questionToEdit = viewQuestion;
       setViewQuestion(null);
-      setEditingQuestion(questionToEdit);
+      if (questionToEdit.questionId) {
+        setAdminEditorQuestionId(questionToEdit.questionId);
+        setAdminEditorOpen(true);
+      }
     }}
   />
 )}
 
-{editingQuestion && (
-  <AdminQuestionEditorModal
-    question={editingQuestion}
-    subjects={SUBJECTS}
-    onClose={() => setEditingQuestion(null)}
-    onSave={handleSaveBankQuestion}
+<QuestionEditor
+  open={adminEditorOpen}
+  questionId={adminEditorQuestionId}
+  dataSource={adminQuestionEditorDataSource}
+  directSave
+  onClose={() => setAdminEditorOpen(false)}
+  onSaved={() => {
+    setAdminEditorOpen(false);
+    setBankRefresh((value) => value + 1);
+    setSubjectRefresh((value) => value + 1);
+  }}
+/>
+{deleteErrorMessage && (
+  <AdminDeleteErrorModal
+    message={deleteErrorMessage}
+    onClose={() => setDeleteErrorMessage(null)}
+  />
+)}
+{deleteCandidate && (
+  <AdminDeleteConfirmModal
+    question={deleteCandidate}
+    onCancel={() => setDeleteCandidate(null)}
+    onConfirm={() => { void handleDeleteBank(deleteCandidate); }}
   />
 )}
     </div>

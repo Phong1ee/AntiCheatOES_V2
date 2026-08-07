@@ -20,6 +20,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
   const [examManagerTab, setExamManagerTab] = useState<'general' | 'settings'>('general');
   const [resultsExamId, setResultsExamId] = useState<string | null>(null);
+  const [questionBankSubjectId, setQuestionBankSubjectId] = useState<string | null>(null);
   const { setUser } = useUserRole();
 
   // Set user role on mount
@@ -54,6 +55,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     setActiveTab('results');
   };
 
+  const handleNavigateToQuestionBank = (subjectId: string) => {
+    setQuestionBankSubjectId(subjectId);
+    setActiveTab('questions');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
       <TeacherHeader
@@ -68,7 +74,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
           initialTab={examManagerTab}
         />
       ) : activeTab === 'questions' ? (
-        <QuestionBankPage />
+        <QuestionBankPage initialSubjectId={questionBankSubjectId} />
       ) : activeTab === 'results' ? (
         <ExamResultsPage initialExamId={resultsExamId} />
       ) : activeTab === 'anticheat' ? (
@@ -82,11 +88,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
           <Preferences />
         </main>
       ) : (
-        <main className="h-[calc(100vh-80px)] overflow-hidden container mx-auto max-w-7xl px-4 py-8">
+        <main className="flex-1 container mx-auto max-w-7xl px-4 py-8">
           {activeTab === 'dashboard' && (
-            <div className="grid h-full grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Main Content - Exam List */}
-              <div className="lg:col-span-2 h-full overflow-hidden">
+              <div className="lg:col-span-2">
                 <TeacherExamList
                   onExamClick={handleNavigateToExam}
                   onNavigateToSettings={handleNavigateToSettings}
@@ -95,8 +101,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
               </div>
 
               {/* Sidebar */}
-              <div className="lg:col-span-1 h-full overflow-y-auto pr-1">
-                <TeacherInfoSidebar onExamClick={handleNavigateToExam} />
+              <div className="lg:col-span-1">
+                <TeacherInfoSidebar
+                  onExamClick={handleNavigateToExam}
+                  onQuestionBankClick={handleNavigateToQuestionBank}
+                />
               </div>
             </div>
           )}

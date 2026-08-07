@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { LoadingState } from './common/LoadingState';
+import { teacherQuestionBankService } from '../../services/teacher-question-bank.service';
+import type { SubjectCount } from '../../types/question-bank';
 import {
   BookOpen,
   Users,
@@ -9,6 +11,8 @@ import {
   Clock,
   Calendar,
   ChevronRight,
+  Database,
+  FileQuestion,
 } from 'lucide-react';
 
 interface UpcomingExam {
@@ -27,9 +31,10 @@ interface QuickStat {
 
 interface TeacherInfoSidebarProps {
   onExamClick?: (examId: string) => void;
+  onQuestionBankClick?: (subjectId: string) => void;
 }
 
-export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
+export function TeacherInfoSidebar({ onExamClick, onQuestionBankClick }: TeacherInfoSidebarProps) {
   const [timeToNextExam, setTimeToNextExam] = useState({
     days: 6,
     hours: 14,
@@ -39,6 +44,9 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
   const [upcomingExams, setUpcomingExams] = useState<UpcomingExam[]>([]);
   const [totalStudentsCount, setTotalStudentsCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [questionBanks, setQuestionBanks] = useState<SubjectCount[]>([]);
+  const [questionBanksLoading, setQuestionBanksLoading] = useState(true);
+  const [questionBanksError, setQuestionBanksError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchExamData = async () => {
@@ -77,6 +85,29 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
     };
 
     fetchExamData();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    teacherQuestionBankService
+      .listSubjectCounts('bank')
+      .then((data) => {
+        if (!cancelled) setQuestionBanks(data.subjects);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setQuestionBanks([]);
+          setQuestionBanksError(error instanceof Error ? error.message : 'Unable to load question banks.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setQuestionBanksLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -196,6 +227,48 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
                 </div>
               );
             })
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-lg rounded-2xl border-0">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-gray-800">
+            <Database className="size-5 text-teal-600" />
+            Question Banks
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {questionBanksLoading ? (
+            <LoadingState variant="inline" label="Loading question banks..." />
+          ) : questionBanksError ? (
+            <p className="text-sm text-rose-600">{questionBanksError}</p>
+          ) : questionBanks.length === 0 ? (
+            <p className="text-sm text-gray-500">No approved questions are available.</p>
+          ) : (
+            questionBanks.map((bank) => (
+              <button
+                key={bank.subject_id}
+                type="button"
+                onClick={() => onQuestionBankClick?.(bank.subject_id)}
+                className="w-full rounded-xl bg-gray-50 p-3 text-left transition-colors hover:bg-gray-100"
+              >
+                <span className="flex items-start justify-between gap-2">
+                  <span className="flex min-w-0 items-start gap-2">
+                    <FileQuestion className="mt-0.5 size-4 shrink-0 text-teal-600" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-gray-800">{bank.subject_name}</span>
+                      {bank.subject_description && (
+                        <span className="block truncate text-xs text-gray-500">{bank.subject_description}</span>
+                      )}
+                    </span>
+                  </span>
+                  <Badge variant="outline" className="shrink-0 bg-white text-xs">
+                    {bank.question_count}
+                  </Badge>
+                </span>
+              </button>
+            ))
           )}
         </CardContent>
       </Card>

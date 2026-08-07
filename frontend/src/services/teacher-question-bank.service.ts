@@ -57,9 +57,10 @@ export const teacherQuestionBankService = {
     return data;
   },
 
-  async getEditPayload(questionId: number): Promise<QuestionEditPayload> {
+  async getEditPayload(questionId: number, source?: "active"): Promise<QuestionEditPayload> {
     const { data } = await apiClient.get<QuestionEditPayload>(
       `/api/teacher/question-bank/${questionId}/edit`,
+      { params: source ? { source } : undefined },
     );
     return data;
   },

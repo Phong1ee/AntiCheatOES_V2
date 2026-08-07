@@ -81,10 +81,11 @@ class AdminQuestionApprovalTests(unittest.TestCase):
                 LO(lo_id=10, lo_name="Analyze normal forms", lo_description="LO"),
                 LO(lo_id=11, lo_name="Explain ACID", lo_description="LO"),
                 LO(lo_id=12, lo_name="Use semantic tags", lo_description="LO"),
+                LO(lo_id=13, lo_name="Identify normal forms", lo_description="LO"),
             ]
         )
         self.db.flush()
-        self.db.add_all([ChapterLO(chapter_id=1, lo_id=10), ChapterLO(chapter_id=2, lo_id=11), ChapterLO(chapter_id=3, lo_id=12)])
+        self.db.add_all([ChapterLO(chapter_id=1, lo_id=10), ChapterLO(chapter_id=1, lo_id=13), ChapterLO(chapter_id=2, lo_id=11), ChapterLO(chapter_id=3, lo_id=12)])
         self.db.commit()
 
     def tearDown(self):
@@ -262,6 +263,13 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(applied.approved_by, self.admin.school_id)
         self.assertIsNotNone(applied.approved_at)
         self.assertEqual(result["active_question"]["question_status"], "approved")
+
+    def test_approve_pending_revision_preserves_all_learning_objective_mappings(self):
+        question = self._question(QuestionStatus.approved)
+        revision = self._pending_revision(question, chapter_ids_snapshot=[1], lo_ids_snapshot=[10, 13])
+        self._approve_revision(revision.revision_id)
+        active = self.db.get(Question, question.question_id)
+        self.assertEqual(sorted(link.lo_id for link in active.lo_questions), [10, 13])
 
     def test_reject_pending_revision_keeps_active_question_options_and_taxonomy_unchanged(self):
         question = self._question(QuestionStatus.approved)

@@ -14,15 +14,17 @@ interface ExamInterfaceProps {
   examId: string;
   onExit: () => void;
   mediaStream?: MediaStream;
+  refreshViolationRecorded?: boolean;
 }
 
 const attemptKey = "current_exam_attempt";
 const draftKey = (attemptId: number) => `exam_attempt_draft_${attemptId}`;
+const markedQuestionsKey = (attemptId: number) => `exam_attempt_marked_questions_${attemptId}`;
 
 const isAnswered = (answer: StudentAnswer | undefined) =>
   Boolean(answer && ("selectedOptionId" in answer || answer.answerText.trim()));
 
-export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProps) {
+export function ExamInterface({ examId, onExit, mediaStream, refreshViolationRecorded = false }: ExamInterfaceProps) {
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<StudentAnswers>({});
   const [attemptId, setAttemptId] = useState<number | null>(null);
@@ -49,6 +51,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const [fullscreenLocked, setFullscreenLocked] = useState(false);
   const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, antiCheatEnabled: false, violationLimit: 5 });
   const [isSavingNext, setIsSavingNext] = useState(false);
+  const [markedQuestionIds, setMarkedQuestionIds] = useState<number[]>([]);
 
   const answersRef = useRef<StudentAnswers>({});
   const persistedAnsweredRef = useRef(new Set<number>());
@@ -64,6 +67,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   const intentionalFullscreenExitRef = useRef(false);
   const nextInFlightRef = useRef(false);
   const terminatedRedirectRef = useRef<number | null>(null);
+  const refreshWarningShownRef = useRef(false);
 
   const exitFullscreenIntentionally = useCallback(async () => {
     if (!document.fullscreenElement) return;
@@ -157,6 +161,7 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
       const result = await studentExamService.submit(examId, attemptId, answersRef.current);
       localStorage.removeItem(attemptKey);
       localStorage.removeItem(draftKey(attemptId));
+      localStorage.removeItem(markedQuestionsKey(attemptId));
       setAttemptStatus("submitted");
       stopAutoSave();
       setShowEssayGradingNote(result.resultVisibility !== "hidden" && result.essayPending);
@@ -186,6 +191,15 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
         const local = localStorage.getItem(draftKey(restored.attempt.attemptId));
         const draft = local ? JSON.parse(local) as StudentAnswers : {};
         answersRef.current = { ...saved, ...draft }; setAnswers(answersRef.current);
+        const storedMarks = localStorage.getItem(markedQuestionsKey(restored.attempt.attemptId));
+        const questionIds = new Set(restored.questions.map((question) => question.id));
+        let markedIds: number[] = [];
+        try {
+          markedIds = storedMarks ? (JSON.parse(storedMarks) as unknown[]).filter((id): id is number => typeof id === "number" && questionIds.has(id)) : [];
+        } catch {
+          localStorage.removeItem(markedQuestionsKey(restored.attempt.attemptId));
+        }
+        setMarkedQuestionIds(markedIds);
         setSettings(restored.settings); setAntiCheatEnabled(restored.antiCheatEnabled); setViolationCount(restored.violationCount); setViolationLimit(restored.violationLimit); setRemainingViolations(restored.antiCheatEnabled ? Math.max(restored.violationLimit - restored.violationCount, 0) : null);
         if (restored.settings.sequentialNavigation) {
           const firstUnanswered = restored.questions.findIndex((question) => !isAnswered(saved[question.id]));
@@ -208,6 +222,13 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
       load().catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Failed to restore attempt")).finally(() => setLoading(false));
     } catch { setLoadError("Invalid active attempt. Resume it from My Exams."); setLoading(false); }
   }, [examId, stopAutoSave]);
+
+  useEffect(() => {
+    if (!refreshViolationRecorded || refreshWarningShownRef.current || loading || !antiCheatEnabled) return;
+    refreshWarningShownRef.current = true;
+    setViolationType("PAGE_REFRESH");
+    setShowViolationWarning(true);
+  }, [antiCheatEnabled, loading, refreshViolationRecorded]);
 
   useEffect(() => {
     if (!timerReady || loading || attemptId === null || attemptStatus !== "in_progress" || !serverOffsetInitializedRef.current || !Number.isFinite(expiresAtRef.current) || expiresAtRef.current <= 0) return;
@@ -275,6 +296,17 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
     nextInFlightRef.current = false;
   }, [currentQuestion, questions, saveQuestion, settings.sequentialNavigation]);
 
+  const toggleMarkedQuestion = useCallback((questionId: number) => {
+    if (!attemptId) return;
+    setMarkedQuestionIds((currentMarks) => {
+      const nextMarks = currentMarks.includes(questionId)
+        ? currentMarks.filter((id) => id !== questionId)
+        : [...currentMarks, questionId];
+      localStorage.setItem(markedQuestionsKey(attemptId), JSON.stringify(nextMarks));
+      return nextMarks;
+    });
+  }, [attemptId]);
+
   const returnToFullscreen = async () => {
     setSubmitError(null);
     try {
@@ -296,7 +328,10 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
       if (event.terminated) {
         setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave();
         localStorage.removeItem(attemptKey);
-        if (attemptId) localStorage.removeItem(draftKey(attemptId));
+        if (attemptId) {
+          localStorage.removeItem(draftKey(attemptId));
+          localStorage.removeItem(markedQuestionsKey(attemptId));
+        }
         mediaStream?.getTracks().forEach((track) => track.stop());
         terminatedRedirectRef.current = window.setTimeout(exitAfterTermination, 2_500);
       }
@@ -316,8 +351,8 @@ export function ExamInterface({ examId, onExit, mediaStream }: ExamInterfaceProp
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} violationLimit={violationLimit} />
     {mediaStream && <WebcamMonitor stream={mediaStream} />}
-    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} /></div>
-      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} /></div>
+    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} isMarked={markedQuestionIds.includes(current.id)} onToggleMark={() => toggleMarkedQuestion(current.id)} /></div>
+      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
     <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={violationType === "FULLSCREEN_EXIT" && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} />

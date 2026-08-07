@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
-import type { MonitorAttempt, MonitorDetail, MonitorExam, MonitorSubject } from '../../../types/teacher-anti-cheat';
+import type { MonitorAttempt, MonitorAttemptPage, MonitorDetail, MonitorExam, MonitorStudent, MonitorSubject } from '../../../types/teacher-anti-cheat';
 import {
   Shield,
   RefreshCw,
@@ -11,6 +11,7 @@ import {
   User,
   Search,
   X,
+  ChevronLeft,
   ChevronRight,
   Zap,
   Info,
@@ -451,6 +452,11 @@ export function AntiCheatMonitor() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
+  const [assignedStudents, setAssignedStudents] = useState<MonitorStudent[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<MonitorStudent | null>(null);
+  const [attemptPage, setAttemptPage] = useState<MonitorAttemptPage | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [monitorError, setMonitorError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [attemptStatusFilter, setAttemptStatusFilter] = useState('all');
   const [antiCheatFilter, setAntiCheatFilter] = useState('all');
@@ -460,8 +466,12 @@ export function AntiCheatMonitor() {
   const selectedExam = selectedSubject?.exams.find((e) => e.id === selectedExamId) ?? null;
 
   const handleSubjectChange = (id: string) => {
+    setMonitorError(null);
     setSelectedSubjectId(id);
     setSelectedExamId(null);
+    setAssignedStudents([]);
+    setSelectedStudent(null);
+    setAttemptPage(null);
     setSearch('');
     setAttemptStatusFilter('all');
     setAntiCheatFilter('all');
@@ -469,15 +479,47 @@ export function AntiCheatMonitor() {
   };
 
   const handleExamChange = (id: string) => {
+    setMonitorError(null);
     setSelectedExamId(id);
+    setSelectedStudent(null);
+    setAttemptPage(null);
+    setAssignedStudents([]);
     setSearch('');
     setAttemptStatusFilter('all');
     setAntiCheatFilter('all');
     if (!selectedSubjectId) return;
-    teacherAntiCheatService.attempts(id).then((items: MonitorAttempt[]) => {
-      const mapped = items.map(mapAttempt);
-      setSubjects((current) => current.map((subject) => subject.id !== selectedSubjectId ? subject : { ...subject, exams: subject.exams.map((exam) => exam.id === id ? { ...exam, attempts: mapped } : exam) }));
-    });
+    teacherAntiCheatService.students(id).then(setAssignedStudents);
+  };
+
+  const loadStudentAttempts = async (student: MonitorStudent, page: number) => {
+    if (!selectedExamId || !selectedSubjectId) return;
+    const result = await teacherAntiCheatService.studentAttempts(selectedExamId, student.studentId, page);
+    setAttemptPage(result);
+    const mapped = result.items.map(mapAttempt);
+    setSubjects((current) => current.map((subject) => subject.id !== selectedSubjectId ? subject : { ...subject, exams: subject.exams.map((exam) => exam.id === selectedExamId ? { ...exam, attempts: mapped } : exam) }));
+  };
+
+  const handleStudentSelect = (student: MonitorStudent) => {
+    setMonitorError(null);
+    setSelectedStudent(student);
+    setSearch('');
+    setAttemptStatusFilter('all');
+    setAntiCheatFilter('all');
+    void loadStudentAttempts(student, 1).catch(() => setMonitorError('Unable to load this student\'s attempts.'));
+  };
+
+  const refreshSelectedData = async () => {
+    if (!selectedExamId) return;
+    setMonitorError(null);
+    setIsRefreshing(true);
+    try {
+      if (selectedStudent) await loadStudentAttempts(selectedStudent, attemptPage?.page ?? 1);
+      else setAssignedStudents(await teacherAntiCheatService.students(selectedExamId));
+    } catch {
+      setMonitorError('Unable to refresh monitor data. Please try again.');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => { teacherAntiCheatService.subjects().then((items: MonitorSubject[]) => setSubjects(items.map((item) => ({ id: item.subjectId, code: item.code, name: item.name, exams: [] })))); }, []);
@@ -556,10 +598,11 @@ export function AntiCheatMonitor() {
               variant="outline"
               size="sm"
               className="bg-white shadow-sm"
-              disabled={!selectedExamId}
+              disabled={!selectedExamId || isRefreshing}
+              onClick={() => void refreshSelectedData()}
             >
-              <RefreshCw className="size-4 mr-1.5" />
-              Refresh
+              <RefreshCw className={`size-4 mr-1.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
             </Button>
           </div>
         </div>
@@ -577,9 +620,32 @@ export function AntiCheatMonitor() {
           />
         )}
 
-        {/* Monitor content */}
-        {selectedExamId && selectedExam && (
+        {monitorError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{monitorError}</div>}
+
+        {/* Assigned students */}
+        {selectedExamId && selectedExam && !selectedStudent && (
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100">
+              <div><h2 className="text-lg font-semibold text-gray-800">Assigned Students</h2><p className="mt-1 text-sm text-gray-500">Select a student to view that student's attempts.</p></div>
+              <Badge variant="outline" className="text-teal-700 border-teal-200">{assignedStudents.length} assigned</Badge>
+            </div>
+            <Table>
+              <TableHeader><TableRow className="bg-gray-50 border-b border-gray-100"><TableHead className="text-xs font-medium text-gray-500">Student</TableHead><TableHead className="text-xs font-medium text-gray-500 text-center">Attempts</TableHead><TableHead /></TableRow></TableHeader>
+              <TableBody>
+                {assignedStudents.map((student) => <TableRow key={student.studentId} className="hover:bg-gray-50"><TableCell><p className="text-sm text-gray-800">{student.studentName}</p><p className="text-xs text-gray-400">{student.studentId}</p></TableCell><TableCell className="text-center"><Badge variant="outline" className="text-xs">{student.attemptCount}</Badge></TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => handleStudentSelect(student)} className="text-teal-600 hover:bg-teal-50 hover:text-teal-700 text-xs">View Attempts<ChevronRight className="ml-1 size-3" /></Button></TableCell></TableRow>)}
+                {assignedStudents.length === 0 && <TableRow><TableCell colSpan={3} className="py-12 text-center text-sm text-gray-400">No students are assigned to this exam.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {/* Selected student's attempts */}
+        {selectedExamId && selectedExam && selectedStudent && (
           <>
+            <div className="flex items-center justify-between gap-4">
+              <div><p className="text-sm text-gray-500">Attempts for</p><h2 className="text-lg font-semibold text-gray-800">{selectedStudent.studentName} <span className="text-sm font-normal text-gray-400">({selectedStudent.studentId})</span></h2></div>
+              <Button variant="outline" size="sm" onClick={() => { setSelectedStudent(null); setAttemptPage(null); }}><ChevronLeft className="mr-1.5 size-4" />Back to students</Button>
+            </div>
             {/* Overview cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <OverviewCard icon={Zap}           value={counts.active}     label="Active Attempts"  color="bg-blue-500" />
@@ -739,6 +805,12 @@ export function AntiCheatMonitor() {
                 </TableBody>
               </Table>
             </div>
+            {attemptPage && (
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-white px-5 py-3 shadow-sm">
+                <p className="text-sm text-gray-500">Page {attemptPage.page} of {Math.max(attemptPage.totalPages, 1)} · {attemptPage.total} attempt(s)</p>
+                <div className="flex gap-2"><Button variant="outline" size="sm" disabled={attemptPage.page <= 1} onClick={() => loadStudentAttempts(selectedStudent, attemptPage.page - 1)}><ChevronLeft className="mr-1 size-4" />Previous</Button><Button variant="outline" size="sm" disabled={attemptPage.page >= attemptPage.totalPages} onClick={() => loadStudentAttempts(selectedStudent, attemptPage.page + 1)}>Next<ChevronRight className="ml-1 size-4" /></Button></div>
+              </div>
+            )}
           </>
         )}
       </div>

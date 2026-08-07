@@ -110,6 +110,17 @@ export interface AntiCheatEventResult {
   warningMessage?: string | null;
 }
 
+export interface ResumeAttemptResult {
+  antiCheatEnabled: boolean;
+  attemptId: number;
+  attemptStatus: string;
+  refreshViolationRecorded: boolean;
+  remainingViolations: number | null;
+  terminated: boolean;
+  violationCount: number;
+  violationLimit: number;
+}
+
 export interface RestoreAttemptResult {
   exam: { examId: number; title: string; durationMinutes: number };
   attempt: StudentExamAttempt;
@@ -215,7 +226,7 @@ export const studentExamService = {
   },
 
 
-  async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string) {
+  async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string): Promise<ResumeAttemptResult> {
     const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
     const pendingRefreshId = resumeCause === "normal_resume" && navigation?.type === "reload" ? attemptSessionStorage.getPendingRefresh(attemptId) : null;
     const actualCause = pendingRefreshId ? "page_refresh" : resumeCause;
@@ -227,7 +238,20 @@ export const studentExamService = {
     if (!sessionToken) throw new Error("Server did not rotate the attempt session.");
     attemptSessionStorage.setSessionToken(attemptId, sessionToken);
     if (actualCause === "page_refresh" && actualEventId) attemptSessionStorage.clearPendingRefresh(attemptId);
-    return data;
+    const antiCheatEnabled = Boolean(data.antiCheatEnabled);
+    const violationCount = Number(data.violationCount ?? 0);
+    const violationLimit = Number(data.violationLimit ?? 5);
+    return {
+      antiCheatEnabled,
+      attemptId: Number(data.attemptId ?? attemptId),
+      attemptStatus: String(data.attemptStatus ?? "in_progress"),
+      // This only controls the warning UI; the server remains authoritative for the event and count.
+      refreshViolationRecorded: actualCause === "page_refresh" && antiCheatEnabled,
+      remainingViolations: antiCheatEnabled ? Math.max(violationLimit - violationCount, 0) : null,
+      terminated: Boolean(data.terminated),
+      violationCount,
+      violationLimit,
+    };
   },
 
   async recordAntiCheatEvent(examId: string | number, attemptId: number, eventType: string, source: "browser" | "camera" | "microphone", details?: string): Promise<AntiCheatEventResult> {

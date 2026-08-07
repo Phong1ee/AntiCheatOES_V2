@@ -19,19 +19,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
   const [examMediaStream, setExamMediaStream] = useState<MediaStream | null>(null);
+  const [refreshViolationRecorded, setRefreshViolationRecorded] = useState(false);
   const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
   const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
   const [accessExamId, setAccessExamId] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
 
-  const handleEnterExam = (examId: string, stream?: MediaStream) => {
+  const handleEnterExam = (examId: string, stream?: MediaStream, didRecordRefreshViolation = false) => {
     setExamMediaStream(stream ?? null);
+    setRefreshViolationRecorded(didRecordRefreshViolation);
     setCurrentExamId(examId);
   };
 
   const handleExitExam = () => {
     examMediaStream?.getTracks().forEach((track) => track.stop());
     setExamMediaStream(null);
+    setRefreshViolationRecorded(false);
     setCurrentExamId(null);
     // The attempt may have been submitted or terminated while the exam view
     // was open. Reload before showing My Exams so stale Resume buttons vanish.
@@ -63,6 +66,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         examId={currentExamId}
         onExit={handleExitExam}
         mediaStream={examMediaStream ?? undefined}
+        refreshViolationRecorded={refreshViolationRecorded}
       />
     );
   }

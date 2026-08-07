@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle, Lock } from 'lucide-react';
+import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle, Lock, Flag } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { StudentAnswers, StudentQuestion } from '../../types/student-exam';
 
@@ -14,6 +14,7 @@ interface QuestionPanelProps {
   answeredCount: number;
   unansweredQuestions: number[];
   sequentialNavigation: boolean;
+  markedQuestionIds: number[];
 }
 
 export function QuestionPanel({
@@ -26,6 +27,7 @@ export function QuestionPanel({
   answeredCount,
   unansweredQuestions,
   sequentialNavigation,
+  markedQuestionIds,
 }: QuestionPanelProps) {
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
@@ -83,6 +85,7 @@ export function QuestionPanel({
             const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
             const isCurrent = index === currentQuestion;
             const isLocked = sequentialNavigation && !isCurrent && !isAnswered;
+            const isMarked = markedQuestionIds.includes(question.id);
 
             return (
               <button
@@ -91,9 +94,13 @@ export function QuestionPanel({
                   if (!sequentialNavigation) onQuestionSelect(index);
                 }}
                 disabled={sequentialNavigation}
-                className={`aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${
+                className={`relative aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${
                   isCurrent
-                    ? 'bg-teal-600 text-white ring-2 ring-teal-300'
+                    ? isMarked
+                      ? 'bg-teal-600 text-white ring-2 ring-amber-400'
+                      : 'bg-teal-600 text-white ring-2 ring-teal-300'
+                    : isMarked
+                    ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-400 hover:bg-amber-200'
                     : isAnswered
                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
                     : isLocked
@@ -102,6 +109,7 @@ export function QuestionPanel({
                 }`}
               >
                 {isLocked ? <Lock className="size-3.5" /> : index + 1}
+                {isMarked && <Flag className={`absolute right-1 top-1 size-3 ${isCurrent ? 'fill-amber-300 text-amber-200' : 'fill-amber-500 text-amber-600'}`} />}
               </button>
             );
           })}
@@ -120,6 +128,10 @@ export function QuestionPanel({
           <div className="flex items-center gap-2 text-sm">
             <div className="size-4 rounded bg-teal-600"></div>
             <span className="text-gray-600">Current</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <div className="flex size-4 items-center justify-center rounded bg-amber-100 ring-1 ring-amber-400"><Flag className="size-2.5 fill-amber-500 text-amber-600" /></div>
+            <span className="text-gray-600">Marked for review</span>
           </div>
         </div>
 

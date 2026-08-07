@@ -43,7 +43,7 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string, stream?: MediaStream) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean) => void;
   onViewResults?: (examId: string) => void;
   exams?: StudentExamListItem[];
   loading?: boolean;
@@ -200,7 +200,7 @@ export function ExamList({
       const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
       if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
       localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
-      onEnterExam?.(selectedExam.id, stream);
+      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded);
       return;
     }
     await startExam(selectedExam, securityCode, stream);

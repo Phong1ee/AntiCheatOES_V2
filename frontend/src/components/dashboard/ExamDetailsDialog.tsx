@@ -9,7 +9,6 @@ import { Badge } from '../ui/badge';
 import {
   Calendar,
   FileText,
-  User,
   BookOpen,
   AlertCircle,
 } from 'lucide-react';
@@ -34,14 +33,13 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
   if (!exam) return null;
 
   const canEnterExam = exam.status === 'open';
-  const startDate = exam.startTime ? new Date(exam.startTime) : null;
-  const hasStartDate = startDate && !Number.isNaN(startDate.getTime());
-  const displayDate = hasStartDate ? startDate.toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-  }) : 'Date unavailable';
-  const displayTime = hasStartDate ? startDate.toLocaleTimeString('en-US', {
-    hour: '2-digit', minute: '2-digit',
-  }) : 'Time unavailable';
+  const formatDateTime = (value?: string) => {
+    if (!value) return 'Not scheduled';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Not scheduled' : date.toLocaleString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -75,12 +73,12 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
                 <span className="text-gray-800">
-                  Date: {displayDate}
+                  Starts: {formatDateTime(exam.startTime)}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Time: {displayTime}</span>
+                <span className="text-gray-800">Ends: {formatDateTime(exam.endTime)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-teal-600">+</span>
@@ -89,129 +87,41 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
             </div>
           </div>
 
-          <div className="border-t pt-6">
-            <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
-              <AlertCircle className="size-5 text-teal-600" />
-              Technical Requirements
-            </h3>
-            <div className="ml-7 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Camera Required (Must be enabled during exam)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Microphone Required (For proctoring purposes)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Fullscreen Mode (Mandatory throughout the exam)</span>
+          {exam.antiCheatEnabled && <>
+            <div className="border-t pt-6">
+              <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
+                <AlertCircle className="size-5 text-teal-600" />
+                Technical Requirements
+              </h3>
+              <div className="ml-7 space-y-2.5">
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Camera Required (Must be enabled during exam)</span></div>
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Microphone Required (For proctoring purposes)</span></div>
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Fullscreen Mode (Mandatory throughout the exam)</span></div>
               </div>
             </div>
-          </div>
 
-          <div className="border-t pt-6">
-            <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
-              <User className="size-5 text-teal-600" />
-              Participation Requirements
-            </h3>
-            <div className="ml-7 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Valid Student ID (Must be verified before starting)</span>
-              </div>
-              {exam.examCode !== null && (
-                <div className="flex items-center gap-2">
-                  <span className="text-teal-600">+</span>
-                  <span className="text-gray-800">Exam Code (Provided by your instructor)</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="border-t pt-6">
-            <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
-              <FileText className="size-5 text-teal-600" />
-              Pre-Exam Checklist
-            </h3>
-            <div className="ml-7 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Check camera (Ensure it's working)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Test microphone (Check audio quality)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Stable internet (Minimum 5 Mbps)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Close other apps (Avoid distractions)</span>
+            <div className="border-t pt-6">
+              <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2"><FileText className="size-5 text-teal-600" />Pre-Exam Checklist</h3>
+              <div className="ml-7 space-y-2.5">
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Check camera (Ensure it's working)</span></div>
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Test microphone (Check audio quality)</span></div>
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Stable internet (Minimum 5 Mbps)</span></div>
+                <div className="flex items-center gap-2"><span className="text-teal-600">+</span><span className="text-gray-800">Close other apps (Avoid distractions)</span></div>
               </div>
             </div>
-          </div>
-
-          <div className="border-t pt-6">
-            <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
-              <BookOpen className="size-5 text-teal-600" />
-              Quick Instructions
-            </h3>
-            <div className="ml-7 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Do not refresh the page during exam</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Stay in fullscreen mode</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Answers are auto-saved every 30 seconds</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-600">+</span>
-                <span className="text-gray-800">Submit before time runs out</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t pt-6">
-            <h3 className="text-lg text-gray-800 mb-4 flex items-center gap-2">
-              <AlertCircle className="size-5 text-amber-600" />
-              Instructor Notes
-            </h3>
-            <div className="ml-7">
-              <p className="text-gray-700 leading-relaxed">
-                Please ensure you have reviewed all chapter materials (1-5) before the exam. 
-                The exam will focus on SQL queries, database normalization, and ER diagrams. 
-                Make sure to arrive 10 minutes early to complete the system check.
-              </p>
-            </div>
-          </div>
+          </>}
 
           {/* Action Buttons */}
-          <div className="border-t pt-6 flex gap-3">
-            <Button 
-              variant="outline" 
-              className="flex-1"
-              onClick={() => alert('System check started (Demo)')}
-            >
-              System Check
-            </Button>
-            
-            {canEnterExam && (
+          {canEnterExam && (
+            <div className="border-t pt-6">
               <Button
-                className="flex-1 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 shadow-lg"
+                className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 shadow-lg"
                 onClick={onRequestCode || onEnterExam}
               >
                 Enter Exam
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

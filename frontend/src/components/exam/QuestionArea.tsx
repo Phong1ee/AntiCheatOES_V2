@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Flag } from 'lucide-react';
 import type { StudentAnswer, StudentQuestion } from '../../types/student-exam';
 
 interface QuestionAreaProps {
@@ -15,6 +15,8 @@ interface QuestionAreaProps {
   sequentialNavigation: boolean;
   currentAnswerIsValid: boolean;
   isSavingNext: boolean;
+  isMarked: boolean;
+  onToggleMark: () => void;
 }
 
 export function QuestionArea({
@@ -28,14 +30,26 @@ export function QuestionArea({
   sequentialNavigation,
   currentAnswerIsValid,
   isSavingNext,
+  isMarked,
+  onToggleMark,
 }: QuestionAreaProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <Card className="shadow-xl rounded-2xl border-0">
-        <CardHeader className="border-b bg-gradient-to-r from-teal-50 to-blue-50">
+        <CardHeader className="flex-row items-center justify-between border-b bg-gradient-to-r from-teal-50 to-blue-50">
           <CardTitle className="text-lg text-gray-700">
             Question {currentQuestion + 1} of {totalQuestions}
           </CardTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onToggleMark}
+            className={isMarked ? 'border-amber-400 bg-amber-100 text-amber-900 hover:bg-amber-200' : 'border-gray-300 text-gray-700 hover:border-amber-300 hover:bg-amber-50'}
+          >
+            <Flag className={`mr-2 size-4 ${isMarked ? 'fill-amber-500 text-amber-600' : ''}`} />
+            {isMarked ? 'Marked for review' : 'Mark for review'}
+          </Button>
         </CardHeader>
         <CardContent className="pt-6">
           <div className="mb-6">

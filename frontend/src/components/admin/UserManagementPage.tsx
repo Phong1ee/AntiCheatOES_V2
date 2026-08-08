@@ -33,11 +33,13 @@ import {
   EyeOff,
   X,
   Save,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminUserService } from '../../services/admin-user.service';
 import type { AdminManagedUser, AdminManagedUserRole } from '../../types/admin-user';
 import { ConfirmUserActionDialog, type PendingUserAction } from './ConfirmUserActionDialog';
+import { AdminUserImportModal } from './AdminUserImportModal';
 
 interface StoredCurrentUser {
   id: number;
@@ -65,6 +67,7 @@ export function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState<AdminManagedUserRole | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'locked'>('all');
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<AdminManagedUser | null>(null);
   const [currentUser] = useState<StoredCurrentUser | null>(getStoredCurrentUser);
@@ -78,6 +81,7 @@ export function UserManagementPage() {
   const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formDateOfBirth, setFormDateOfBirth] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -112,7 +116,15 @@ export function UserManagementPage() {
   const handleAddUser = async () => {
     setIsSubmitting(true);
     try {
-      await adminUserService.create({ school_id: formSchoolId, full_name: formName, email: formEmail, password: formPassword, role: formRole });
+      await adminUserService.create({
+        school_id: formSchoolId,
+        full_name: formName,
+        email: formEmail,
+        password: formPassword,
+        role: formRole,
+        phone: formPhone.trim() || null,
+        date_of_birth: formDateOfBirth || null,
+      });
       setShowAddDialog(false);
       resetForm();
       toast.success('User added successfully');
@@ -234,6 +246,7 @@ export function UserManagementPage() {
     setFormEmail('');
     setFormPassword('');
     setFormPhone('');
+    setFormDateOfBirth('');
     setCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
@@ -342,6 +355,11 @@ export function UserManagementPage() {
                 <SelectItem value="locked">Locked</SelectItem>
               </SelectContent>
             </Select>
+
+            <Button variant="outline" onClick={() => setShowImportDialog(true)}>
+              <FileSpreadsheet className="size-4 mr-2" />
+              Import Users
+            </Button>
 
             {/* Add User Button */}
             <Button
@@ -509,6 +527,18 @@ export function UserManagementPage() {
                     </button>
                   </div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Phone</label>
+                    <input type="tel" placeholder="Optional phone number" value={formPhone} onChange={(e) => setFormPhone(e.target.value)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300 placeholder:text-gray-400" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-gray-700">Date of Birth</label>
+                    <input type="date" value={formDateOfBirth} onChange={(e) => setFormDateOfBirth(e.target.value)}
+                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-300" />
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-gray-700">Role</label>
@@ -624,6 +654,11 @@ export function UserManagementPage() {
         error={actionError}
         onConfirm={confirmPendingAction}
         onCancel={closePendingAction}
+      />
+      <AdminUserImportModal
+        open={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        onImported={loadUsers}
       />
     </div>
   );

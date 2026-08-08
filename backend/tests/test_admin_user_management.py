@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -15,6 +16,7 @@ from src.route.adminRoute import (
     ChangeOwnPasswordPayload,
     UpdateAdminUserPayload,
     create_user,
+    build_new_user,
     change_own_password,
     delete_user,
     _ensure_not_last_active_admin,
@@ -90,6 +92,8 @@ class AdminUserManagementTests(unittest.TestCase):
                 email="new.student@example.edu",
                 password="password123",
                 role="student",
+                phone="0123456789",
+                date_of_birth=date(2000, 1, 2),
             ),
             current_user=self.current_admin,
             role_check=None,
@@ -97,6 +101,8 @@ class AdminUserManagementTests(unittest.TestCase):
         )
         stored = self.db.query(User).filter(User.id == created["id"]).one()
         self.assertTrue(check_password_hash(stored.password_hash, "password123"))
+        self.assertEqual(stored.phone, "0123456789")
+        self.assertEqual(stored.date_of_birth, date(2000, 1, 2))
         self.assertNotIn("password_hash", created)
         detail = get_user_detail(created["id"], False, self.current_admin, None, self.db)
         self.assertEqual(detail["email"], "new.student@example.edu")
@@ -115,6 +121,25 @@ class AdminUserManagementTests(unittest.TestCase):
                 self.db,
             ),
         )
+
+    def test_build_new_user_normalizes_without_committing(self):
+        user = build_new_user(
+            self.db,
+            school_id=" S000003 ",
+            full_name=" New Student ",
+            email=" NEW.STUDENT@EXAMPLE.EDU ",
+            initial_password="password123",
+            role="student",
+            phone=" 0123456789 ",
+            date_of_birth=date(2000, 1, 2),
+        )
+        self.assertEqual(user.school_id, "S000003")
+        self.assertEqual(user.full_name, "New Student")
+        self.assertEqual(user.email, "new.student@example.edu")
+        self.assertEqual(user.phone, "0123456789")
+        self.assertEqual(user.date_of_birth, date(2000, 1, 2))
+        self.assertTrue(check_password_hash(user.password_hash, "password123"))
+        self.assertEqual(self.db.query(User).filter(User.school_id == "S000003").count(), 0)
 
     def test_edit_deactivates_teacher_permissions_when_role_changes(self):
         subject = Subject(subject_id="MATH", subject_name="Math", subject_description="Math subject")

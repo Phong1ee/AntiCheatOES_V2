@@ -3,6 +3,8 @@ import type {
   AdminManagedUser,
   AdminManagedUserRole,
   AdminUserListResponse,
+  AdminUserImportPreviewResponse,
+  AdminUserImportResult,
   ChangeOwnAdminPasswordRequest,
   CreateAdminUserRequest,
   UpdateAdminUserRequest,
@@ -31,6 +33,28 @@ export const adminUserService = {
 
   async create(payload: CreateAdminUserRequest): Promise<AdminManagedUser> {
     const { data } = await apiClient.post<AdminManagedUser>("/api/admin/users", payload);
+    return data;
+  },
+
+  async previewImport(file: File): Promise<AdminUserImportPreviewResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await apiClient.post<AdminUserImportPreviewResponse>(
+      "/api/admin/users/import/preview",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return data;
+  },
+
+  async importUsers(file: File): Promise<AdminUserImportResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await apiClient.post<AdminUserImportResult>(
+      "/api/admin/users/import",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
     return data;
   },
 

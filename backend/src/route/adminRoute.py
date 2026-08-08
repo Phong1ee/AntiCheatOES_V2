@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import tempfile
@@ -37,6 +38,7 @@ from src.service.question_bank_import_parser import (
     QuestionBankParseError,
     parse_question_bank_document,
 )
+from src.service.user_import_service import ParsedUserImportRow, UserImportParseError, parse_user_import_xlsx
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -1454,6 +1456,8 @@ def _valid_email(value: str) -> str:
     email = value.strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(status_code=400, detail="A valid email address is required")
+    if len(email) > 100:
+        raise HTTPException(status_code=400, detail="Email must be at most 100 characters")
     return email
 
 
@@ -1464,9 +1468,18 @@ def _valid_text(value: str, field_name: str) -> str:
     return cleaned
 
 
+def _valid_limited_text(value: str, field_name: str, max_length: int) -> str:
+    cleaned = _valid_text(value, field_name)
+    if len(cleaned) > max_length:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be at most {max_length} characters")
+    return cleaned
+
+
 def _valid_password(value: str) -> str:
     if len(value) < 8 or not value.strip():
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if len(value) > 128:
+        raise HTTPException(status_code=400, detail="Password must be at most 128 characters")
     return value
 
 
@@ -1477,6 +1490,85 @@ def _valid_phone(value: str | None) -> str | None:
     if not re.fullmatch(r"[0-9+()\-\s]{7,20}", phone):
         raise HTTPException(status_code=400, detail="Phone number format is invalid")
     return phone
+
+
+def _valid_user_role(value: str | UserRole) -> UserRole:
+    try:
+        return UserRole(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Role must be student, teacher, or admin") from exc
+
+
+@dataclass(frozen=True)
+class ValidatedAdminUserInput:
+    school_id: str
+    full_name: str
+    email: str
+    password: str
+    role: UserRole
+    phone: str | None
+    date_of_birth: date | None
+
+
+def validate_admin_user_input(
+    db: Session,
+    *,
+    school_id: str,
+    full_name: str,
+    email: str,
+    initial_password: str,
+    role: str | UserRole,
+    phone: str | None = None,
+    date_of_birth: date | None = None,
+) -> ValidatedAdminUserInput:
+    """Normalize and validate account data without committing a transaction."""
+    normalized = ValidatedAdminUserInput(
+        school_id=_valid_limited_text(school_id, "School ID", 30),
+        full_name=_valid_limited_text(full_name, "Full name", 100),
+        email=_valid_email(email),
+        password=_valid_password(initial_password),
+        role=_valid_user_role(role),
+        phone=_valid_phone(phone),
+        date_of_birth=date_of_birth,
+    )
+    if db.query(User.id).filter(User.school_id == normalized.school_id).first():
+        raise HTTPException(status_code=409, detail="School ID already exists")
+    if db.query(User.id).filter(User.email == normalized.email).first():
+        raise HTTPException(status_code=409, detail="Email already exists")
+    return normalized
+
+
+def build_new_user(
+    db: Session,
+    *,
+    school_id: str,
+    full_name: str,
+    email: str,
+    initial_password: str,
+    role: str | UserRole,
+    phone: str | None = None,
+    date_of_birth: date | None = None,
+) -> User:
+    """Build an uncommitted User so future imports can use one transaction."""
+    validated = validate_admin_user_input(
+        db,
+        school_id=school_id,
+        full_name=full_name,
+        email=email,
+        initial_password=initial_password,
+        role=role,
+        phone=phone,
+        date_of_birth=date_of_birth,
+    )
+    return User(
+        school_id=validated.school_id,
+        full_name=validated.full_name,
+        email=validated.email,
+        password_hash=generate_password_hash(validated.password),
+        role=validated.role,
+        phone=validated.phone,
+        date_of_birth=validated.date_of_birth,
+    )
 
 
 def _serialize_admin_user(user: User) -> dict:
@@ -1567,6 +1659,135 @@ def list_users(
     return {"items": [_serialize_admin_user(user) for user in users], "total": total, "page": page, "page_size": page_size}
 
 
+def build_user_import_preview(rows: list[ParsedUserImportRow], db: Session) -> dict:
+    """Validate parsed rows against current users without mutating the session."""
+    school_rows: dict[str, list[ParsedUserImportRow]] = {}
+    email_rows: dict[str, list[ParsedUserImportRow]] = {}
+    for row in rows:
+        school = str(row.values["school_id"] or "").strip()
+        email = str(row.values["email"] or "").strip().lower()
+        if school:
+            school_rows.setdefault(school, []).append(row)
+        if email:
+            email_rows.setdefault(email, []).append(row)
+    for grouped, label in ((school_rows, "School ID"), (email_rows, "Email")):
+        for value, duplicates in grouped.items():
+            if len(duplicates) > 1:
+                for row in duplicates:
+                    row.errors.append(f"{label} is duplicated in the uploaded file")
+
+    existing_school_ids = {
+        value[0] for value in db.query(User.school_id).filter(User.school_id.in_(school_rows)).all()
+    } if school_rows else set()
+    existing_emails = {
+        value[0].lower() for value in db.query(User.email).filter(User.email.in_(email_rows)).all()
+    } if email_rows else set()
+
+    result_rows = []
+    for row in rows:
+        values = row.values
+        school_id = str(values["school_id"] or "").strip()
+        email = str(values["email"] or "").strip().lower()
+        if school_id in existing_school_ids:
+            row.errors.append("School ID already exists")
+        if email in existing_emails:
+            row.errors.append("Email already exists")
+        try:
+            validate_admin_user_input(
+                db, school_id=str(values["school_id"] or ""), full_name=str(values["full_name"] or ""),
+                email=str(values["email"] or ""), initial_password=str(values["initial_password"] or ""),
+                role=str(values["role"] or "").strip().lower(), phone=None if values["phone"] is None else str(values["phone"]),
+                date_of_birth=values["date_of_birth"],
+            )
+        except HTTPException as exc:
+            row.errors.append(str(exc.detail))
+        row.errors = list(dict.fromkeys(row.errors))
+        role = str(values["role"] or "").strip().lower()
+        warnings = ["This row will create an administrator account."] if role == "admin" else []
+        status_value = "invalid" if row.errors else "valid"
+        result_rows.append({
+            "row_number": row.row_number, "school_id": str(values["school_id"] or "").strip(),
+            "full_name": str(values["full_name"] or "").strip(), "email": str(values["email"] or "").strip().lower(),
+            "role": role, "phone": None if values["phone"] is None else str(values["phone"]).strip(),
+            "date_of_birth": values["date_of_birth"].isoformat() if isinstance(values["date_of_birth"], date) else None,
+            "status": status_value, "errors": row.errors, "warnings": warnings,
+        })
+    return {"total_rows": len(result_rows), "valid_count": sum(row["status"] == "valid" for row in result_rows),
+            "warning_count": sum(len(row["warnings"]) for row in result_rows),
+            "error_count": sum(row["status"] == "invalid" for row in result_rows), "rows": result_rows}
+
+
+@router.post("/users/import/preview")
+async def preview_user_import(
+    file: UploadFile = File(...), current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    if not file.filename or not file.filename.casefold().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="The uploaded file must not exceed 5 MB")
+    try:
+        preview = build_user_import_preview(parse_user_import_xlsx(content), db)
+    except UserImportParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"file_name": file.filename, **preview}
+
+
+def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session) -> dict:
+    """Persist an already reparsed batch in one transaction after strict validation."""
+    preview = build_user_import_preview(rows, db)
+    if preview["error_count"]:
+        raise HTTPException(status_code=400, detail={"message": "Import validation failed", "preview": preview})
+    try:
+        users = []
+        # Validation queries must not autoflush earlier rows; all inserts flush together below.
+        with db.no_autoflush:
+            for row in rows:
+                values = row.values
+                user = build_new_user(
+                    db,
+                    school_id=str(values["school_id"] or ""), full_name=str(values["full_name"] or ""),
+                    email=str(values["email"] or ""), initial_password=str(values["initial_password"] or ""),
+                    role=str(values["role"] or "").strip().lower(),
+                    phone=None if values["phone"] is None else str(values["phone"]),
+                    date_of_birth=values["date_of_birth"],
+                )
+                db.add(user)
+                users.append(user)
+        db.flush()
+        role_counts = {role: sum(_user_role(user) == role for user in users) for role in ("student", "teacher", "admin")}
+        db.commit()
+        return {"success": True, "imported_count": len(users), "role_counts": role_counts}
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Import conflicts with an existing school ID or email") from exc
+
+
+@router.post("/users/import")
+async def import_users(
+    file: UploadFile = File(...), current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    if not file.filename or not file.filename.casefold().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="The uploaded file must not exceed 5 MB")
+    try:
+        rows = parse_user_import_xlsx(content)
+    except UserImportParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return import_users_from_rows(rows, db)
+
+
 @router.get("/users/{user_id}")
 def get_user_detail(
     user_id: int,
@@ -1596,21 +1817,14 @@ def create_user(
     del role_check
     try:
         _management_admin(db, current_user)
-        school_id = _valid_text(payload.school_id, "School ID")
-        full_name = _valid_text(payload.full_name, "Full name")
-        email = _valid_email(payload.email)
-        password = _valid_password(payload.password)
-        if db.query(User.id).filter(User.school_id == school_id).first():
-            raise HTTPException(status_code=409, detail="School ID already exists")
-        if db.query(User.id).filter(User.email == email).first():
-            raise HTTPException(status_code=409, detail="Email already exists")
-        user = User(
-            school_id=school_id,
-            full_name=full_name,
-            email=email,
-            password_hash=generate_password_hash(password),
-            role=UserRole(payload.role),
-            phone=_valid_phone(payload.phone),
+        user = build_new_user(
+            db,
+            school_id=payload.school_id,
+            full_name=payload.full_name,
+            email=payload.email,
+            initial_password=payload.password,
+            role=payload.role,
+            phone=payload.phone,
             date_of_birth=payload.date_of_birth,
         )
         db.add(user)

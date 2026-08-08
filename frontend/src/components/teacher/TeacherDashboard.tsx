@@ -55,11 +55,6 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     setActiveTab('results');
   };
 
-  const handleNavigateToQuestionBank = (subjectId: string) => {
-    setQuestionBankSubjectId(subjectId);
-    setActiveTab('questions');
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
       <TeacherHeader
@@ -104,7 +99,6 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
               <div className="lg:col-span-1">
                 <TeacherInfoSidebar
                   onExamClick={handleNavigateToExam}
-                  onQuestionBankClick={handleNavigateToQuestionBank}
                 />
               </div>
             </div>

@@ -17,6 +17,7 @@ import {
   QuestionEditor,
   type QuestionEditorDataSource,
 } from '../teacher/question-bank/QuestionEditor';
+import { AdminQuestionImportModal } from './AdminQuestionImportModal';
 import {
   Database,
   Library,
@@ -1812,6 +1813,8 @@ export function AdminQuestionBankPage() {
   const [adminEditorOpen, setAdminEditorOpen] = useState(false);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<BankQuestion | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isNewSubjectImportOpen, setIsNewSubjectImportOpen] = useState(false);
 
   const loadPendingRequests = async () => {
     setIsLoadingPending(true);
@@ -2056,7 +2059,16 @@ export function AdminQuestionBankPage() {
         <div className="flex-1 overflow-y-auto">
           {!selectedSubject && (
             <div className="p-6">
-              <p className="text-sm text-gray-500 mb-6">Select a subject to browse and manage questions.</p>
+              <div className="mb-6 flex items-center justify-between gap-3">
+                <p className="text-sm text-gray-500">Select a subject to browse and manage questions.</p>
+                <button
+                  type="button"
+                  onClick={() => setIsNewSubjectImportOpen(true)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-100"
+                >
+                  <Upload className="size-3.5" />Import New Subject
+                </button>
+              </div>
               {isLoadingSubjects && <p className="py-8 text-center text-sm text-gray-400">Loading subjects...</p>}
               {bankError && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{bankError}</p>}
               <div className="space-y-6">
@@ -2150,7 +2162,7 @@ export function AdminQuestionBankPage() {
                     })}
                   </div>
                   <div className="ml-auto flex items-center gap-2">
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
+                    <button type="button" onClick={() => setIsImportOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
                       <Upload className="size-3.5" />Import
                     </button>
                     <button
@@ -2304,6 +2316,30 @@ export function AdminQuestionBankPage() {
     setAdminEditorOpen(false);
     setBankRefresh((value) => value + 1);
     setSubjectRefresh((value) => value + 1);
+  }}
+/>
+{subjectMeta && (
+  <AdminQuestionImportModal
+    open={isImportOpen}
+    subject={{ subjectId: subjectMeta.subjectId, subjectName: subjectMeta.name }}
+    onClose={() => setIsImportOpen(false)}
+    onImported={(result) => {
+      toast.success(`${result.imported_count} question${result.imported_count === 1 ? '' : 's'} imported. ${result.duplicate_skipped_count} duplicate${result.duplicate_skipped_count === 1 ? '' : 's'} skipped.`);
+      setBankRefresh((value) => value + 1);
+      setSubjectRefresh((value) => value + 1);
+    }}
+  />
+)}
+<AdminQuestionImportModal
+  open={isNewSubjectImportOpen}
+  mode="new-subject"
+  onClose={() => setIsNewSubjectImportOpen(false)}
+  onImported={(result) => {
+    if (!('subject' in result)) return;
+    toast.success(`${result.subject.subject_name} was created with ${result.imported_count} imported question${result.imported_count === 1 ? '' : 's'}.`);
+    setSubjectRefresh((value) => value + 1);
+    setBankRefresh((value) => value + 1);
+    setSelectedSubject(result.subject.subject_id);
   }}
 />
 {deleteErrorMessage && (

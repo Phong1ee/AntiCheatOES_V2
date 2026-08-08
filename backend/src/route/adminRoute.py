@@ -1,8 +1,10 @@
 from datetime import date, datetime
+from pathlib import Path
 import re
+import tempfile
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +32,11 @@ from src.a_db_config import (
     UserRole,
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token
+from src.service.question_bank_import_parser import (
+    ParsedQuestionBank,
+    QuestionBankParseError,
+    parse_question_bank_document,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -61,6 +68,10 @@ class RevisionSnapshotPayload(BaseModel):
 
 def _value(item):
     return item.value if hasattr(item, "value") else item
+
+
+def _normalized_import_name(value: str) -> str:
+    return " ".join(value.split()).casefold()
 
 
 def _question_status(question: Question) -> str | None:
@@ -429,6 +440,518 @@ def _create_snapshot_revision(
         approved_at=approved_at,
         rejection_reason=rejection_reason,
         **_snapshot_from_question(question),
+    )
+
+
+def build_question_bank_import_preview(
+    parsed: ParsedQuestionBank,
+    subject_id: str,
+    current_user: dict,
+    db: Session,
+) -> dict:
+    """Resolve an import document against the taxonomy without changing it."""
+
+    _admin(db, current_user["school_id"])
+    selected_subject_id = subject_id.strip()
+    subject = db.query(Subject).filter(Subject.subject_id == selected_subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Selected subject was not found")
+    if parsed.subject.subject_id != selected_subject_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The uploaded file belongs to subject {parsed.subject.subject_id}, "
+                f"but the selected subject is {selected_subject_id}."
+            ),
+        )
+
+    subject_warnings: list[str] = []
+    if _normalized_import_name(parsed.subject.subject_name) != _normalized_import_name(subject.subject_name):
+        subject_warnings.append(
+            f"Uploaded Subject Name '{parsed.subject.subject_name}' differs from database Subject Name '{subject.subject_name}'."
+        )
+
+    existing_chapters = db.query(Chapter).filter(Chapter.subject_id == selected_subject_id).all()
+    chapters_by_name: dict[str, list[Chapter]] = {}
+    for chapter in existing_chapters:
+        chapters_by_name.setdefault(_normalized_import_name(chapter.chapter_name), []).append(chapter)
+
+    chapter_entries: list[dict] = []
+    chapter_resolutions: dict[str, tuple[str, Chapter | None, str]] = {}
+    for question in parsed.questions:
+        key = _normalized_import_name(question.chapter_name)
+        if key in chapter_resolutions:
+            continue
+        matches = chapters_by_name.get(key, [])
+        if len(matches) == 1:
+            action, chapter = "reuse", matches[0]
+        elif not matches:
+            action, chapter = "create", None
+        else:
+            action, chapter = "conflict", None
+        chapter_resolutions[key] = (action, chapter, question.chapter_name)
+        entry = {"chapter_name": question.chapter_name, "action": action}
+        if chapter is not None:
+            entry["chapter_id"] = chapter.chapter_id
+        chapter_entries.append(entry)
+
+    lo_entries: list[dict] = []
+    lo_resolutions: dict[tuple[str, str], tuple[str, LO | None, str, str]] = {}
+    for question in parsed.questions:
+        chapter_key = _normalized_import_name(question.chapter_name)
+        chapter_action, chapter, chapter_name = chapter_resolutions[chapter_key]
+        for lo_name in question.learning_objective_names:
+            lo_key = (chapter_key, _normalized_import_name(lo_name))
+            if lo_key in lo_resolutions:
+                continue
+            if chapter_action == "conflict":
+                action, lo = "conflict", None
+            elif chapter is None:
+                # The parent Chapter will be created by the later import step,
+                # so its not-yet-persisted LOs are also unambiguous creates.
+                action, lo = "create", None
+            else:
+                matches = (
+                    db.query(LO)
+                    .join(ChapterLO, ChapterLO.lo_id == LO.lo_id)
+                    .filter(ChapterLO.chapter_id == chapter.chapter_id)
+                    .all()
+                )
+                named_matches = [item for item in matches if _normalized_import_name(item.lo_name) == lo_key[1]]
+                if len(named_matches) == 1:
+                    action, lo = "reuse", named_matches[0]
+                elif not named_matches:
+                    action, lo = "create", None
+                else:
+                    action, lo = "conflict", None
+            lo_resolutions[lo_key] = (action, lo, chapter_name, lo_name)
+            entry = {"chapter_name": chapter_name, "lo_name": lo_name, "action": action}
+            if lo is not None:
+                entry["lo_id"] = lo.lo_id
+            lo_entries.append(entry)
+
+    existing_questions = db.query(Question).filter(Question.subject_id == selected_subject_id).all()
+    existing_exact = {
+        (_normalized_import_name(question.question_text), _value(question.question_type))
+        for question in existing_questions
+    }
+    question_entries: list[dict] = []
+    for question in parsed.questions:
+        errors: list[str] = []
+        warnings: list[str] = []
+        chapter_key = _normalized_import_name(question.chapter_name)
+        chapter_action, _, _ = chapter_resolutions[chapter_key]
+        if chapter_action == "conflict":
+            errors.append(f"Chapter '{question.chapter_name}' is ambiguous in the selected subject.")
+        for lo_name in question.learning_objective_names:
+            lo_action, _, _, _ = lo_resolutions[(chapter_key, _normalized_import_name(lo_name))]
+            if lo_action == "conflict":
+                errors.append(f"Learning Objective '{lo_name}' is ambiguous for chapter '{question.chapter_name}'.")
+
+        is_duplicate = (_normalized_import_name(question.question_text), question.question_type) in existing_exact
+        if errors:
+            question_status = "error"
+        elif is_duplicate:
+            question_status = "duplicate"
+            warnings.append("This question already exists and will be skipped.")
+        else:
+            question_status = "valid"
+        question_entries.append(
+            {
+                "question_number": question.question_number,
+                "question_text": question.question_text,
+                "question_type": question.question_type,
+                "difficulty": question.difficulty,
+                "chapter_name": question.chapter_name,
+                "learning_objectives": question.learning_objective_names,
+                "status": question_status,
+                "errors": errors,
+                "warnings": warnings,
+            }
+        )
+
+    return {
+        "subject": {
+            "subject_id": subject.subject_id,
+            "subject_name": subject.subject_name,
+            "status": "valid",
+            "warnings": subject_warnings,
+        },
+        "chapters": chapter_entries,
+        "learning_objectives": lo_entries,
+        "questions": question_entries,
+        "summary": {
+            "total_questions": len(question_entries),
+            "valid_questions": sum(item["status"] == "valid" for item in question_entries),
+            "duplicate_questions": sum(item["status"] == "duplicate" for item in question_entries),
+            "error_questions": sum(item["status"] == "error" for item in question_entries),
+            "chapters_to_create": sum(item["action"] == "create" for item in chapter_entries),
+            "learning_objectives_to_create": sum(item["action"] == "create" for item in lo_entries),
+        },
+    }
+
+
+async def _parse_question_bank_upload(file: UploadFile) -> ParsedQuestionBank:
+    """Read one supported upload into parser data, deleting its temporary file."""
+
+    suffix = Path(file.filename or "").suffix.casefold()
+    if suffix not in {".docx", ".pdf"}:
+        raise HTTPException(status_code=400, detail="Only .docx and text-based .pdf files are supported")
+
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temporary_file:
+            temp_path = Path(temporary_file.name)
+            temporary_file.write(await file.read())
+        return parse_question_bank_document(temp_path)
+    except QuestionBankParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
+@router.post("/question-bank/import/preview")
+async def preview_question_bank_import(
+    file: UploadFile = File(...),
+    subject_id: str = Form(...),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Parse and preview an import file. This route never writes DB rows."""
+
+    del role_check
+    return build_question_bank_import_preview(await _parse_question_bank_upload(file), subject_id, current_user, db)
+
+
+def build_new_subject_import_preview(parsed: ParsedQuestionBank, current_user: dict, db: Session) -> dict:
+    """Preview a file that will create its Subject; this endpoint never writes."""
+
+    _admin(db, current_user["school_id"])
+    if db.query(Subject.subject_id).filter(Subject.subject_id == parsed.subject.subject_id).first():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Subject {parsed.subject.subject_id} already exists. "
+                "Select it and use Import Questions instead."
+            ),
+        )
+
+    chapters: list[dict] = []
+    learning_objectives: list[dict] = []
+    seen_chapters: set[str] = set()
+    seen_los: set[tuple[str, str]] = set()
+    questions: list[dict] = []
+    for question in parsed.questions:
+        chapter_key = _normalized_import_name(question.chapter_name)
+        if chapter_key not in seen_chapters:
+            seen_chapters.add(chapter_key)
+            chapters.append({"chapter_name": question.chapter_name, "action": "create"})
+        for lo_name in question.learning_objective_names:
+            lo_key = (chapter_key, _normalized_import_name(lo_name))
+            if lo_key not in seen_los:
+                seen_los.add(lo_key)
+                learning_objectives.append(
+                    {"chapter_name": question.chapter_name, "lo_name": lo_name, "action": "create"}
+                )
+        questions.append(
+            {
+                "question_number": question.question_number,
+                "question_text": question.question_text,
+                "question_type": question.question_type,
+                "difficulty": question.difficulty,
+                "chapter_name": question.chapter_name,
+                "learning_objectives": question.learning_objective_names,
+                "status": "valid",
+                "errors": [],
+                "warnings": [],
+            }
+        )
+
+    return {
+        "subject": {
+            "subject_id": parsed.subject.subject_id,
+            "subject_name": parsed.subject.subject_name,
+            "subject_description": parsed.subject.description,
+            "status": "new",
+            "warnings": ["A new Subject, Chapters, Learning Objectives, and approved Questions will be created."],
+        },
+        "chapters": chapters,
+        "learning_objectives": learning_objectives,
+        "questions": questions,
+        "summary": {
+            "total_questions": len(questions),
+            "valid_questions": len(questions),
+            "duplicate_questions": 0,
+            "error_questions": 0,
+            "chapters_to_create": len(chapters),
+            "learning_objectives_to_create": len(learning_objectives),
+        },
+    }
+
+
+@router.post("/question-bank/import/new-subject/preview")
+async def preview_new_subject_question_bank_import(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Preview a document whose Subject does not yet exist in the database."""
+
+    del role_check
+    return build_new_subject_import_preview(await _parse_question_bank_upload(file), current_user, db)
+
+
+def _persist_imported_question_bank(
+    parsed: ParsedQuestionBank,
+    subject_id: str,
+    current_user: dict,
+    db: Session,
+) -> dict:
+    """Create/reuse a Subject's taxonomy and Questions without committing."""
+
+    chapters_created = 0
+    learning_objectives_created = 0
+    imported_question_ids: list[int] = []
+    duplicate_skipped_count = 0
+    chapter_cache: dict[str, Chapter] = {}
+    lo_cache: dict[tuple[int, str], LO] = {}
+    existing_exact = {
+        (_normalized_import_name(question.question_text), _value(question.question_type))
+        for question in db.query(Question).filter(Question.subject_id == subject_id).all()
+    }
+
+    for imported_question in parsed.questions:
+        chapter_key = _normalized_import_name(imported_question.chapter_name)
+        chapter = chapter_cache.get(chapter_key)
+        if chapter is None:
+            chapter_matches = [
+                item
+                for item in db.query(Chapter).filter(Chapter.subject_id == subject_id).all()
+                if _normalized_import_name(item.chapter_name) == chapter_key
+            ]
+            if len(chapter_matches) > 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Chapter '{imported_question.chapter_name}' is ambiguous in the selected subject",
+                )
+            if chapter_matches:
+                chapter = chapter_matches[0]
+            else:
+                chapter = Chapter(
+                    chapter_name=imported_question.chapter_name,
+                    chapter_description=imported_question.chapter_name,
+                    subject_id=subject_id,
+                )
+                db.add(chapter)
+                db.flush()
+                chapters_created += 1
+            chapter_cache[chapter_key] = chapter
+
+        resolved_los: list[LO] = []
+        for imported_lo_name in imported_question.learning_objective_names:
+            lo_key = (chapter.chapter_id, _normalized_import_name(imported_lo_name))
+            lo = lo_cache.get(lo_key)
+            if lo is None:
+                lo_matches = [
+                    item
+                    for item in (
+                        db.query(LO)
+                        .join(ChapterLO, ChapterLO.lo_id == LO.lo_id)
+                        .filter(ChapterLO.chapter_id == chapter.chapter_id)
+                        .all()
+                    )
+                    if _normalized_import_name(item.lo_name) == lo_key[1]
+                ]
+                if len(lo_matches) > 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Learning Objective '{imported_lo_name}' is ambiguous "
+                            f"for chapter '{imported_question.chapter_name}'"
+                        ),
+                    )
+                if lo_matches:
+                    lo = lo_matches[0]
+                else:
+                    lo = LO(lo_name=imported_lo_name, lo_description=imported_lo_name)
+                    db.add(lo)
+                    db.flush()
+                    db.add(ChapterLO(chapter_id=chapter.chapter_id, lo_id=lo.lo_id))
+                    learning_objectives_created += 1
+                lo_cache[lo_key] = lo
+            resolved_los.append(lo)
+
+        duplicate_key = (_normalized_import_name(imported_question.question_text), imported_question.question_type)
+        if duplicate_key in existing_exact:
+            duplicate_skipped_count += 1
+            continue
+
+        question = Question(
+            question_text=imported_question.question_text,
+            question_type=imported_question.question_type,
+            question_difficulties=imported_question.difficulty,
+            subject_id=subject_id,
+            created_by=current_user["school_id"],
+            question_status=QuestionStatus.approved,
+        )
+        db.add(question)
+        db.flush()
+        db.add(ChapterQuestion(question_id=question.question_id, chapter_id=chapter.chapter_id))
+        db.add_all(LOQuestion(question_id=question.question_id, lo_id=lo.lo_id) for lo in resolved_los)
+        db.add_all(
+            Option(
+                question_id=question.question_id,
+                options_text=imported_option.option_text,
+                is_correct=imported_option.is_correct,
+            )
+            for imported_option in imported_question.options
+        )
+        existing_exact.add(duplicate_key)
+        imported_question_ids.append(question.question_id)
+
+    return {
+        "imported_count": len(imported_question_ids),
+        "duplicate_skipped_count": duplicate_skipped_count,
+        "chapters_created": chapters_created,
+        "learning_objectives_created": learning_objectives_created,
+        "question_ids": imported_question_ids,
+    }
+
+
+def import_question_bank_data(
+    parsed: ParsedQuestionBank,
+    subject_id: str,
+    current_user: dict,
+    db: Session,
+) -> dict:
+    """Persist one validated import in a single all-or-nothing transaction."""
+
+    _admin(db, current_user["school_id"])
+    selected_subject_id = subject_id.strip()
+
+    try:
+        # Serializing imports for the selected Subject prevents two administrators
+        # from independently creating the same normalized taxonomy at once.
+        subject = (
+            db.query(Subject)
+            .filter(Subject.subject_id == selected_subject_id)
+            .with_for_update()
+            .first()
+        )
+        if not subject:
+            raise HTTPException(status_code=404, detail="Selected subject was not found")
+        if parsed.subject.subject_id != selected_subject_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"The uploaded file belongs to subject {parsed.subject.subject_id}, "
+                    f"but the selected subject is {selected_subject_id}."
+                ),
+            )
+        result = _persist_imported_question_bank(parsed, selected_subject_id, current_user, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Import could not be completed because question bank data changed concurrently. No data was imported.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Import failed. No data was imported.") from exc
+
+    return {"subject_id": selected_subject_id, **result}
+
+
+def import_new_subject_question_bank_data(
+    parsed: ParsedQuestionBank,
+    confirmed: bool,
+    current_user: dict,
+    db: Session,
+) -> dict:
+    """Create a new Subject and its Question Bank in one transaction."""
+
+    _admin(db, current_user["school_id"])
+    if not confirmed:
+        raise HTTPException(status_code=400, detail="Creating a new Subject requires explicit confirmation")
+
+    try:
+        if db.query(Subject.subject_id).filter(Subject.subject_id == parsed.subject.subject_id).first():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Subject {parsed.subject.subject_id} already exists. "
+                    "Select it and use Import Questions instead."
+                ),
+            )
+        subject = Subject(
+            subject_id=parsed.subject.subject_id,
+            subject_name=parsed.subject.subject_name,
+            subject_description=parsed.subject.description,
+        )
+        db.add(subject)
+        db.flush()
+        result = _persist_imported_question_bank(parsed, subject.subject_id, current_user, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Subject {parsed.subject.subject_id} was created by another request. "
+                "Select it and use Import Questions instead."
+            ),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="New Subject import failed. No data was imported.") from exc
+
+    return {
+        "subject": {
+            "subject_id": subject.subject_id,
+            "subject_name": subject.subject_name,
+            "subject_description": subject.subject_description,
+        },
+        **result,
+    }
+
+
+@router.post("/question-bank/import", status_code=status.HTTP_201_CREATED)
+async def import_question_bank(
+    file: UploadFile = File(...),
+    subject_id: str = Form(...),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Parse, validate, resolve, and import a document in one transaction."""
+
+    del role_check
+    return import_question_bank_data(await _parse_question_bank_upload(file), subject_id, current_user, db)
+
+
+@router.post("/question-bank/import/new-subject", status_code=status.HTTP_201_CREATED)
+async def import_new_subject_question_bank(
+    file: UploadFile = File(...),
+    confirm: bool = Form(...),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Create the file's Subject and import its Question Bank after confirmation."""
+
+    del role_check
+    return import_new_subject_question_bank_data(
+        await _parse_question_bank_upload(file), confirm, current_user, db
     )
 
 

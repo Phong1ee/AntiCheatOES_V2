@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { normalizeSearchText } from '../../utils/search';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -169,9 +170,9 @@ export function AuditLogPage() {
 
   const filteredLogs = logs.filter((log) => {
     const matchesSearch =
-      log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.details.toLowerCase().includes(searchQuery.toLowerCase());
+      normalizeSearchText(log.user).includes(normalizeSearchText(searchQuery)) ||
+      normalizeSearchText(log.action).includes(normalizeSearchText(searchQuery)) ||
+      normalizeSearchText(log.details).includes(normalizeSearchText(searchQuery));
     const matchesCategory = categoryFilter === 'all' || log.category === categoryFilter;
     const matchesSeverity = severityFilter === 'all' || log.severity === severityFilter;
     const matchesStatus = statusFilter === 'all' || log.status === statusFilter;

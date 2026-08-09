@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Calendar, CheckCircle2, Clock, EyeOff, XCircle } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, EyeOff, ListChecks, RefreshCw, Target, XCircle, type LucideIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -19,6 +19,49 @@ function questionPoints(question: StudentResultQuestion): string {
   if (question.gradingStatus === "pending") return `Maximum: ${question.maxPoints} points`;
   return `Awarded: ${question.awardedPoints ?? 0} / ${question.maxPoints} points`;
 }
+
+interface StatAccent {
+  border: string;
+  iconBg: string;
+  iconText: string;
+}
+
+function StatTile({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string; accent: StatAccent }) {
+  return (
+    <div className={`flex min-w-[150px] flex-1 items-center gap-3 rounded-xl border ${accent.border} bg-white/70 p-3`}>
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${accent.iconBg} ${accent.iconText}`}>
+        <Icon className="size-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-gray-500">{label}</p>
+        <p className="text-sm font-medium text-gray-800 truncate">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+const RESULT_THEME = {
+  pending: {
+    card: "border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100",
+    score: "text-amber-700",
+    accent: { border: "border-amber-200", iconBg: "bg-amber-100", iconText: "text-amber-700" },
+  },
+  passed: {
+    card: "border-green-200 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-100",
+    score: "text-green-700",
+    accent: { border: "border-green-200", iconBg: "bg-green-100", iconText: "text-green-700" },
+  },
+  failed: {
+    card: "border-red-200 bg-gradient-to-br from-red-50 via-rose-50 to-orange-100",
+    score: "text-red-700",
+    accent: { border: "border-red-200", iconBg: "bg-red-100", iconText: "text-red-700" },
+  },
+  neutral: {
+    card: "border-slate-200 bg-gradient-to-br from-slate-50 via-gray-50 to-slate-100",
+    score: "text-slate-700",
+    accent: { border: "border-slate-200", iconBg: "bg-slate-100", iconText: "text-slate-700" },
+  },
+} as const;
 
 export function ExamResultDetailsPage({ attemptId, onBack }: ExamResultDetailsPageProps) {
   const [exam, setExam] = useState<StudentExamResult | null>(null);
@@ -55,21 +98,85 @@ export function ExamResultDetailsPage({ attemptId, onBack }: ExamResultDetailsPa
     ? exam.score >= exam.passingScore ? "Passed" : "Failed"
     : null;
   const hasAttemptNumber = typeof exam.attemptNumber === "number" && exam.attemptNumber > 0;
+  const theme = isPending
+    ? RESULT_THEME.pending
+    : resultLabel === "Passed"
+      ? RESULT_THEME.passed
+      : resultLabel === "Failed"
+        ? RESULT_THEME.failed
+        : RESULT_THEME.neutral;
 
   return (
     <div className="mx-auto max-w-5xl">
       <Button onClick={onBack} variant="outline" className="mb-6"><ArrowLeft className="size-4 mr-2" />Back to Attempts</Button>
-      <div className="mb-6"><h1 className="text-3xl text-gray-800 mb-2">{exam.examTitle}</h1><p className="text-gray-600">{exam.subject}</p></div>
       <div className="space-y-6">
-        <Card className="bg-gradient-to-r from-teal-50 to-blue-50 border-teal-200"><CardContent className="pt-6">
-          {isPending ? <p className="text-xl text-yellow-800">Awaiting essay grading</p> : canShowScore ? <div><p className="text-sm text-gray-600 mb-1">Score</p><p className="text-4xl text-teal-700">{exam.score?.toFixed(2)} / 100</p><p className="text-sm text-gray-600">{exam.rawEarnedScore} / {exam.rawPossibleScore} raw points</p></div> : <p className="text-xl text-gray-700">Result is hidden by Teacher</p>}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 mt-4 border-t border-teal-200">
-            {canShowScore && <><div><p className="text-sm text-gray-600">Passing Score</p><p className="text-lg text-gray-800">{exam.passingScore !== null ? `${exam.passingScore.toFixed(2)} / 100` : "Not available"}</p></div><div><p className="text-sm text-gray-600">Result</p><p className={`text-lg ${resultLabel === "Passed" ? "text-green-700" : resultLabel === "Failed" ? "text-red-700" : "text-gray-700"}`}>{resultLabel ?? (isPending ? "Awaiting grading" : "Not available")}</p></div><div><p className="text-sm text-gray-600">Answered</p><p className="text-lg text-gray-800">{exam.allowViewDetails && answeredCount !== null ? `${answeredCount} / ${exam.totalQuestions} questions` : "Not available"}</p></div></>}
-            <div><p className="text-sm text-gray-600">Time Taken</p><p className="text-lg text-gray-800 flex items-center gap-2"><Clock className="size-4" />{exam.timeTaken}</p></div>
-            {hasAttemptNumber && <div><p className="text-sm text-gray-600">Attempt</p><p className="text-lg text-gray-800">{exam.maxAttempts ? `${exam.attemptNumber} / ${exam.maxAttempts}` : `#${exam.attemptNumber}`}</p></div>}
-            <div><p className="text-sm text-gray-600">Exam Date</p><p className="text-lg text-gray-800 flex items-center gap-2"><Calendar className="size-4" />{displayDate}</p></div>
-          </div>
-        </CardContent></Card>
+        <Card className={theme.card}>
+          <CardContent className="space-y-5 pt-6">
+            <div className={`border-b pb-4 ${theme.accent.border}`}>
+              <h2 className="text-xl font-bold text-gray-900">{exam.examTitle}</h2>
+              <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-white/70 px-2.5 py-1 text-xs font-medium text-gray-700">
+                <BookOpen className="size-3.5" />
+                {exam.subject}
+              </span>
+            </div>
+            {isPending ? (
+              <p className="text-xl text-yellow-800">Awaiting essay grading</p>
+            ) : canShowScore ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Score</p>
+                  <p className={`text-4xl ${theme.score}`}>
+                    {exam.score?.toFixed(2)} <span className="text-2xl opacity-70">/ 100</span>
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">{exam.rawEarnedScore} / {exam.rawPossibleScore} raw points</p>
+                </div>
+                {resultLabel && (
+                  <Badge
+                    className={`w-fit gap-1.5 px-3 py-1.5 text-sm ${
+                      resultLabel === "Passed"
+                        ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100"
+                        : "bg-red-100 text-red-700 border-red-200 hover:bg-red-100"
+                    }`}
+                  >
+                    {resultLabel === "Passed" ? <CheckCircle2 className="size-4" /> : <XCircle className="size-4" />}
+                    {resultLabel}
+                  </Badge>
+                )}
+              </div>
+            ) : (
+              <p className="text-xl text-gray-700">Result is hidden by Teacher</p>
+            )}
+
+            <div className={`flex flex-wrap gap-3 border-t pt-4 ${theme.accent.border}`}>
+              {canShowScore && (
+                <>
+                  <StatTile
+                    icon={Target}
+                    label="Passing Score"
+                    value={exam.passingScore !== null ? `${exam.passingScore.toFixed(2)} / 100` : "Not available"}
+                    accent={theme.accent}
+                  />
+                  <StatTile
+                    icon={ListChecks}
+                    label="Answered"
+                    value={exam.allowViewDetails && answeredCount !== null ? `${answeredCount} / ${exam.totalQuestions} questions` : "Not available"}
+                    accent={theme.accent}
+                  />
+                </>
+              )}
+              <StatTile icon={Clock} label="Time Taken" value={exam.timeTaken} accent={theme.accent} />
+              {hasAttemptNumber && (
+                <StatTile
+                  icon={RefreshCw}
+                  label="Attempt"
+                  value={exam.maxAttempts ? `${exam.attemptNumber} / ${exam.maxAttempts}` : `#${exam.attemptNumber}`}
+                  accent={theme.accent}
+                />
+              )}
+              <StatTile icon={Calendar} label="Exam Date" value={displayDate} accent={theme.accent} />
+            </div>
+          </CardContent>
+        </Card>
         {exam.terminated && <Card className="border-orange-200 bg-orange-50"><CardContent className="py-4 text-orange-800">This attempt was terminated. Result visibility rules still apply.</CardContent></Card>}
         {exam.allowViewDetails && exam.questions?.length ? <Card><CardContent className="pt-6"><h2 className="text-lg text-gray-800 mb-4">Questions Review</h2><div className="space-y-4">
           {exam.questions.map((question, index) => {

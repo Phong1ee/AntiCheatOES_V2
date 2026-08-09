@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { normalizeSearchText } from '../../utils/search';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -164,9 +165,9 @@ export function ExamResultsModal({ exam, onClose }: ExamResultsModalProps) {
 
   // Filter students
   const filteredStudents = studentResults
-    .filter(student => 
-      student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      student.email.toLowerCase().includes(searchQuery.toLowerCase())
+    .filter(student =>
+      normalizeSearchText(student.name).includes(normalizeSearchText(searchQuery)) ||
+      normalizeSearchText(student.email).includes(normalizeSearchText(searchQuery))
     )
     .filter(student => filterGrade === 'all' || student.grade === filterGrade);
 

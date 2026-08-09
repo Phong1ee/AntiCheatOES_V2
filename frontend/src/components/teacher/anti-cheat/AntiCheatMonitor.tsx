@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
 import type { MonitorAttempt, MonitorAttemptPage, MonitorDetail, MonitorExam, MonitorStudent, MonitorSubject } from '../../../types/teacher-anti-cheat';
 import { eventCategory, eventLabel, formatEventDetails } from '../../../anti-cheat/event-presentation';
+import { normalizeSearchText } from '../../../utils/search';
 import {
   Shield,
   RefreshCw,
@@ -593,8 +594,8 @@ export function AntiCheatMonitor() {
 
   const filtered = attempts.filter((a) => {
     const matchSearch =
-      a.studentName.toLowerCase().includes(search.toLowerCase()) ||
-      a.studentId.toLowerCase().includes(search.toLowerCase());
+      normalizeSearchText(a.studentName).includes(normalizeSearchText(search)) ||
+      normalizeSearchText(a.studentId).includes(normalizeSearchText(search));
     const matchAttempt = attemptStatusFilter === 'all' || a.attemptStatus === attemptStatusFilter;
     const matchAC = antiCheatFilter === 'all' || a.antiCheatStatus === antiCheatFilter;
     return matchSearch && matchAttempt && matchAC;

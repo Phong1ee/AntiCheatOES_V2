@@ -16,7 +16,7 @@ export class SpeechTemporalFilter {
       this.lastPositiveAt = now;
       const durationMs = now - this.speechStartedAt;
       const coolingDown = this.lastIncidentAt !== null && now - this.lastIncidentAt < MICROPHONE_AI_CONFIG.cooldownMs;
-      if (durationMs >= MICROPHONE_AI_CONFIG.minimumSpeechDurationMs && !coolingDown) {
+      if (durationMs >= MICROPHONE_AI_CONFIG.singleSpeechViolationDurationMs && !coolingDown) {
         this.lastIncidentAt = now;
         this.speechStartedAt = now;
         return { durationMs, speechProbability };

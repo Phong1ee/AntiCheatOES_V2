@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Camera, Maximize, Mic, ShieldCheck } from "lucide-react";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
+import { MICROPHONE_CAPTURE_PROFILE } from "../../anti-cheat/microphone-ai.config";
 
 interface PreExamSecurityDialogProps {
   open: boolean;
@@ -9,6 +10,17 @@ interface PreExamSecurityDialogProps {
   violationLimit: number;
   onOpenChange: (open: boolean) => void;
   onReady: (stream: MediaStream) => Promise<void>;
+}
+
+const securityAssetPaths = [
+  `${import.meta.env.BASE_URL}models/camera/face_landmarker.task`,
+  `${import.meta.env.BASE_URL}vad/silero_vad_v5.onnx`,
+  `${import.meta.env.BASE_URL}models/audio/pyannote-segmentation-3.0-int8.onnx`,
+];
+
+async function preloadSecurityAssets(): Promise<void> {
+  const responses = await Promise.all(securityAssetPaths.map((path) => fetch(path, { cache: "force-cache" })));
+  if (responses.some((response) => !response.ok)) throw new Error("Security models could not be prepared. Please retry.");
 }
 
 export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenChange, onReady }: PreExamSecurityDialogProps) {
@@ -36,6 +48,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
 
   const requestMedia = async () => {
     setError(null); setWorking(true);
+    let nextStream: MediaStream | null = null;
     try {
       const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
       const videoConstraints: MediaTrackConstraints = {};
@@ -43,17 +56,40 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
       // Let each camera provide its native frame; do not force a mode that can crop it.
       if (supportedConstraints.facingMode) videoConstraints.facingMode = { ideal: "user" };
       if (supportedConstraints.resizeMode) videoConstraints.resizeMode = { ideal: "none" };
+      if (supportedConstraints.width) videoConstraints.width = { ideal: 640 };
+      if (supportedConstraints.height) videoConstraints.height = { ideal: 480 };
+      if (supportedConstraints.frameRate) videoConstraints.frameRate = { ideal: 15 };
 
-      const nextStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
+      const audioConstraints: MediaTrackConstraints = {};
+      // Preserve background speech for overlap analysis. The echo-only fallback
+      // remains opt-in in microphone-ai.config.ts after hardware verification.
+      if (supportedConstraints.echoCancellation) audioConstraints.echoCancellation = MICROPHONE_CAPTURE_PROFILE.echoCancellation;
+      if (supportedConstraints.noiseSuppression) audioConstraints.noiseSuppression = MICROPHONE_CAPTURE_PROFILE.noiseSuppression;
+      if (supportedConstraints.autoGainControl) audioConstraints.autoGainControl = MICROPHONE_CAPTURE_PROFILE.autoGainControl;
+      nextStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: audioConstraints });
       const cameraReady = nextStream.getVideoTracks().some((track) => track.readyState === "live");
       const microphoneReady = nextStream.getAudioTracks().some((track) => track.readyState === "live");
       if (!cameraReady || !microphoneReady) {
         nextStream.getTracks().forEach((track) => track.stop());
         throw new Error("A live camera and microphone are both required.");
       }
+      if (import.meta.env.DEV) {
+        const settings = nextStream.getAudioTracks()[0]?.getSettings();
+        console.debug('[AntiCheat microphone]', {
+          echoCancellation: settings?.echoCancellation,
+          noiseSuppression: settings?.noiseSuppression,
+          autoGainControl: settings?.autoGainControl,
+          sampleRate: settings?.sampleRate,
+          channelCount: settings?.channelCount,
+        });
+      }
+      // Preload local model files while this dialog is still visible so the
+      // fullscreen readiness gate does not have to wait for asset downloads.
+      await preloadSecurityAssets();
       ownedStreamRef.current = nextStream;
       setStream(nextStream);
     } catch (cause) {
+      nextStream?.getTracks().forEach((track) => track.stop());
       setError(cause instanceof Error ? cause.message : "Camera and microphone permission is required.");
     } finally { setWorking(false); }
   };

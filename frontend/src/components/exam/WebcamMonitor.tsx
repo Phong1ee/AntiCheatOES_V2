@@ -7,7 +7,10 @@ const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
 export function WebcamMonitor({ stream }: { stream: MediaStream }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
-  const [position, setPosition] = useState(() => ({ x: 24, y: Math.max(112, window.innerHeight - 150) }));
+  const [position, setPosition] = useState(() => ({
+    x: 24,
+    y: Math.max(8, window.innerHeight - Math.round(CAMERA_PREVIEW_WIDTH / DEFAULT_CAMERA_ASPECT_RATIO) - 24),
+  }));
   const [dragging, setDragging] = useState(false);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(DEFAULT_CAMERA_ASPECT_RATIO);
   const cameraLive = stream.getVideoTracks().some((track) => track.readyState === "live");
@@ -18,7 +21,13 @@ export function WebcamMonitor({ stream }: { stream: MediaStream }) {
     if (videoRef.current) videoRef.current.srcObject = stream;
     const settings = stream.getVideoTracks()[0]?.getSettings();
     const aspectRatio = settings?.aspectRatio ?? (settings?.width && settings?.height ? settings.width / settings.height : undefined);
-    setCameraAspectRatio(aspectRatio && Number.isFinite(aspectRatio) ? aspectRatio : DEFAULT_CAMERA_ASPECT_RATIO);
+    const nextAspectRatio = aspectRatio && Number.isFinite(aspectRatio) ? aspectRatio : DEFAULT_CAMERA_ASPECT_RATIO;
+    const nextHeight = Math.round(CAMERA_PREVIEW_WIDTH / nextAspectRatio);
+    setCameraAspectRatio(nextAspectRatio);
+    setPosition((current) => ({
+      x: Math.max(8, Math.min(window.innerWidth - CAMERA_PREVIEW_WIDTH - 8, current.x)),
+      y: Math.max(8, Math.min(window.innerHeight - nextHeight - 24, current.y)),
+    }));
   }, [stream]);
 
   const beginDrag = (event: PointerEvent<HTMLDivElement>) => {

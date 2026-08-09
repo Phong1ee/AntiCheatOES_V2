@@ -18,4 +18,5 @@ export interface FaceObservation {
   gazeAway: boolean;
   yaw: number;
   pitch: number;
+  gazeOffset: number | null;
 }

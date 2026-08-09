@@ -30,7 +30,7 @@ function eyeOffset(iris: Landmark | null, firstCorner: Landmark | null, secondCo
 }
 
 export function analyzeFaceLandmarks(faces: Landmark[][]): FaceObservation {
-  if (faces.length !== 1) return { faceCount: faces.length, headAway: false, gazeAway: false, yaw: 0, pitch: 0 };
+  if (faces.length !== 1) return { faceCount: faces.length, headAway: false, gazeAway: false, yaw: 0, pitch: 0, gazeOffset: null };
 
   const landmarks = faces[0];
   const nose = point(landmarks, NOSE_TIP);
@@ -39,7 +39,7 @@ export function analyzeFaceLandmarks(faces: Landmark[][]): FaceObservation {
   const leftEye = point(landmarks, LEFT_EYE_OUTER);
   const rightEye = point(landmarks, RIGHT_EYE_OUTER);
   if (!nose || !leftEdge || !rightEdge || !leftEye || !rightEye) {
-    return { faceCount: 1, headAway: false, gazeAway: false, yaw: 0, pitch: 0 };
+    return { faceCount: 1, headAway: false, gazeAway: false, yaw: 0, pitch: 0, gazeOffset: null };
   }
 
   const faceCenterX = (leftEdge.x + rightEdge.x) / 2;
@@ -55,5 +55,5 @@ export function analyzeFaceLandmarks(faces: Landmark[][]): FaceObservation {
   const gazeOffset = leftOffset !== null && rightOffset !== null ? (leftOffset + rightOffset) / 2 : null;
   // Iris absence (blink, low light) is neutral; it never becomes a gaze violation.
   const gazeAway = !headAway && gazeOffset !== null && Math.abs(gazeOffset) >= CAMERA_AI_CONFIG.gazeOffset;
-  return { faceCount: 1, headAway, gazeAway, yaw, pitch };
+  return { faceCount: 1, headAway, gazeAway, yaw, pitch, gazeOffset };
 }

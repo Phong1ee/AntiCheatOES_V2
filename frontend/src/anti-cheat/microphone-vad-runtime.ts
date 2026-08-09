@@ -14,8 +14,16 @@ export class MicrophoneVadRuntime {
   private vad: MicVAD | null = null;
   private stopped = false;
   private readonly filter = new SpeechTemporalFilter();
+  private speechStartedAt: number | null = null;
+  private realSpeechConfirmedAt: number | null = null;
+  private lastDiagnosticsAt = 0;
 
-  constructor(private readonly stream: MediaStream, private readonly onIncident: (incident: SpeechIncident) => void) {}
+  constructor(
+    private readonly stream: MediaStream,
+    private readonly onIncident: (incident: SpeechIncident) => void,
+    private readonly onSpeechFrame?: (probability: number, frame: Float32Array) => void,
+    private readonly onSpeechConfirmed?: () => void,
+  ) {}
 
   async start(): Promise<void> {
     const audioTrack = this.stream.getAudioTracks()[0];
@@ -30,7 +38,7 @@ export class MicrophoneVadRuntime {
       positiveSpeechThreshold: MICROPHONE_AI_CONFIG.positiveSpeechThreshold,
       negativeSpeechThreshold: MICROPHONE_AI_CONFIG.negativeSpeechThreshold,
       redemptionMs: MICROPHONE_AI_CONFIG.silenceRedemptionMs,
-      minSpeechMs: MICROPHONE_AI_CONFIG.minimumSpeechDurationMs,
+      minSpeechMs: MICROPHONE_AI_CONFIG.realSpeechActivationMs,
       submitUserSpeechOnPause: false,
       startOnLoad: false,
       getStream: async () => this.stream,
@@ -41,13 +49,30 @@ export class MicrophoneVadRuntime {
         ort.env.wasm.numThreads = 1;
         ort.env.wasm.proxy = false;
       },
-      onFrameProcessed: ({ isSpeech }) => {
+      onFrameProcessed: ({ isSpeech }, frame) => {
         if (this.stopped) return;
-        const incident = this.filter.observe(isSpeech, performance.now());
-        if (incident) this.onIncident(incident);
+        const now = performance.now();
+        if (isSpeech >= MICROPHONE_AI_CONFIG.positiveSpeechThreshold && this.speechStartedAt === null) this.speechStartedAt = now;
+        this.onSpeechFrame?.(isSpeech, frame);
+        const incident = this.filter.observe(isSpeech, now);
+        if (incident) {
+          this.logDiagnostics('single speech confirmed', { finalSpeechDurationMs: incident.durationMs });
+          this.onIncident(incident);
+        }
+        this.logDiagnostics('frame', { speechProbability: isSpeech });
+      },
+      onSpeechRealStart: () => {
+        this.realSpeechConfirmedAt = performance.now();
+        this.logDiagnostics('real speech confirmed');
+        this.onSpeechConfirmed?.();
       },
       // Segments supplied by the library are intentionally ignored and never persisted.
-      onSpeechEnd: () => this.filter.reset(),
+      onSpeechEnd: () => {
+        this.logDiagnostics('speech ended');
+        this.speechStartedAt = null;
+        this.realSpeechConfirmedAt = null;
+        this.filter.reset();
+      },
     });
     if (this.stopped) {
       await this.vad.destroy();
@@ -63,5 +88,18 @@ export class MicrophoneVadRuntime {
     const vad = this.vad;
     this.vad = null;
     if (vad) void vad.destroy();
+  }
+
+  private logDiagnostics(event: string, details: Record<string, number> = {}): void {
+    if (!import.meta.env.DEV) return;
+    const now = performance.now();
+    if (event === 'frame' && now - this.lastDiagnosticsAt < 1_000) return;
+    this.lastDiagnosticsAt = now;
+    console.debug('[AntiCheat VAD]', {
+      event,
+      speechStartedAt: this.speechStartedAt,
+      realSpeechConfirmedAt: this.realSpeechConfirmedAt,
+      ...details,
+    });
   }
 }

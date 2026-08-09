@@ -1,0 +1,12 @@
+export const OVERLAP_DETECTOR_CONFIG = {
+  modelUrl: `${import.meta.env.BASE_URL}models/audio/pyannote-segmentation-3.0-int8.onnx`,
+  modelName: 'pyannote-segmentation-3.0-int8',
+  sampleRate: 16_000,
+  windowSamples: 160_000,
+  recentSpeechGraceMs: 2_000,
+  inferenceIntervalMs: 1_000,
+  overlapProbabilityThreshold: 0.55,
+  sustainedOverlapMs: 1_200,
+  cooldownMs: 10_000,
+  speechDecisionDelayMs: 750,
+} as const;

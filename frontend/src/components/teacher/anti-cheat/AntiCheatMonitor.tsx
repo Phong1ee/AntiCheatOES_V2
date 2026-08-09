@@ -46,7 +46,7 @@ type AntiCheatStatus = 'clean' | 'warning' | 'flagged' | 'terminated';
 type EventType = 'violation' | 'ai-flag' | 'system';
 
 interface AiFlag {
-  type: 'no-face' | 'multiple-faces' | 'gaze-away' | 'head-away' | 'phone' | 'speech';
+  type: 'no-face' | 'multiple-faces' | 'gaze-away' | 'head-away' | 'speech';
   label: string;
   detectedAt: string;
 }
@@ -90,8 +90,8 @@ function mapAiFlag(eventType: string, detectedAt: string): AiFlag | null {
     MULTIPLE_FACES_DETECTED: 'multiple-faces',
     GAZE_AWAY_SUSTAINED: 'gaze-away',
     HEAD_AWAY_SUSTAINED: 'head-away',
-    PHONE_DETECTED: 'phone',
     SPEECH_ACTIVITY_DETECTED: 'speech',
+    MULTIPLE_VOICES_DETECTED: 'speech',
   };
   const type = flags[eventType];
   return type ? { type, label: eventType.replaceAll('_', ' ').toLowerCase(), detectedAt } : null;
@@ -475,6 +475,7 @@ export function AntiCheatMonitor() {
   const [antiCheatFilter, setAntiCheatFilter] = useState('all');
   const [drawerAttempt, setDrawerAttempt] = useState<Attempt | null>(null);
   const pollingInFlight = useRef(false);
+  const detailPollingInFlight = useRef(false);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
   const selectedExam = selectedSubject?.exams.find((e) => e.id === selectedExamId) ?? null;
@@ -566,6 +567,27 @@ export function AntiCheatMonitor() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => { disposed = true; window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, [attemptPage?.page, selectedExamId, selectedStudent, selectedSubjectId]);
+
+  useEffect(() => {
+    if (!drawerAttempt || drawerAttempt.attemptStatus !== 'in-progress') return;
+    let disposed = false;
+    const attemptId = Number(drawerAttempt.id);
+    const pollDetail = async () => {
+      if (disposed || document.hidden || detailPollingInFlight.current) return;
+      detailPollingInFlight.current = true;
+      try {
+        const detail = await teacherAntiCheatService.detail(attemptId);
+        if (!disposed) setDrawerAttempt(mapDetail(detail));
+      } catch {
+        if (!disposed) setMonitorError('Live attempt detail update failed. Retrying shortly.');
+      } finally {
+        detailPollingInFlight.current = false;
+      }
+    };
+    void pollDetail();
+    const interval = window.setInterval(() => void pollDetail(), 4_000);
+    return () => { disposed = true; window.clearInterval(interval); };
+  }, [drawerAttempt?.id, drawerAttempt?.attemptStatus]);
 
   const attempts = selectedExam?.attempts ?? [];
 

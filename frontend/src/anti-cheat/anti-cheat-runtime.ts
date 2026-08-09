@@ -1,10 +1,10 @@
 import { CameraFaceRuntime } from './camera/camera-face-runtime';
-import { MicrophoneVadRuntime } from './microphone-vad-runtime';
+import { AudioAntiCheatRuntime } from './audio/audio-anti-cheat-runtime';
 import type { AntiCheatIncident } from './incident-reporter';
 
 export class AntiCheatRuntime {
   private readonly camera: CameraFaceRuntime;
-  private readonly microphone: MicrophoneVadRuntime;
+  private readonly microphone: AudioAntiCheatRuntime;
   private stopped = false;
 
   constructor(stream: MediaStream, onIncident: (incident: AntiCheatIncident) => void) {
@@ -12,12 +12,7 @@ export class AntiCheatRuntime {
       ...incident,
       source: 'camera',
     }));
-    this.microphone = new MicrophoneVadRuntime(stream, (incident) => onIncident({
-      eventType: 'SPEECH_ACTIVITY_DETECTED',
-      source: 'microphone',
-      details: 'sustained human speech confirmed',
-      metadata: incident,
-    }));
+    this.microphone = new AudioAntiCheatRuntime(stream, onIncident);
   }
 
   async start(): Promise<void> {

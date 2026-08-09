@@ -4,20 +4,22 @@ from src.middleware.authMiddleware import verify_token
 
 router = APIRouter(prefix="/anti-cheat")
 
-CAMERA_AI_EVENT_TYPES = "'NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','GAZE_AWAY_SUSTAINED','HEAD_AWAY_SUSTAINED','PHONE_DETECTED'"
-AUDIO_EVENT_TYPES = "'SPEECH_ACTIVITY_DETECTED','MIC_TRACK_MUTED','MIC_TRACK_ENDED'"
+CAMERA_AI_EVENT_TYPES = "'NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','GAZE_AWAY_SUSTAINED','HEAD_AWAY_SUSTAINED'"
+AUDIO_EVENT_TYPES = "'SPEECH_ACTIVITY_DETECTED','MULTIPLE_VOICES_DETECTED','MIC_TRACK_MUTED','MIC_TRACK_ENDED'"
 AI_EVENT_TYPES = f"{CAMERA_AI_EVENT_TYPES},{AUDIO_EVENT_TYPES}"
 
 ATTEMPT_EVENT_SUMMARY_JOIN = f"""
 LEFT JOIN (
-    SELECT attempt_id,
+    SELECT ee.attempt_id,
         MAX(CASE WHEN is_violation=1 THEN event_timestamp END) lastViolationAt,
         SUM(CASE WHEN event_type IN ({CAMERA_AI_EVENT_TYPES}) THEN 1 ELSE 0 END) cameraFlagCount,
         SUM(CASE WHEN event_type IN ({AUDIO_EVENT_TYPES}) THEN 1 ELSE 0 END) audioFlagCount,
         SUM(CASE WHEN source='browser' AND is_violation=1 THEN 1 ELSE 0 END) browserViolationCount,
         SUM(CASE WHEN event_type IN ({AI_EVENT_TYPES}) THEN 1 ELSE 0 END) aiFlagCount
-    FROM exam_event
-    GROUP BY attempt_id
+    FROM exam_event ee
+    JOIN attempt summary_attempt ON summary_attempt.attempt_id=ee.attempt_id
+    WHERE summary_attempt.exam_id=%s
+    GROUP BY ee.attempt_id
 ) event_summary ON event_summary.attempt_id=a.attempt_id
 LEFT JOIN exam_event latest_event ON latest_event.event_id=(
     SELECT ee.event_id FROM exam_event ee
@@ -75,7 +77,7 @@ def attempts(exam_id:int, search:str="", status:str="", limit:int=Query(50,ge=1,
     COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
     {ATTEMPT_EVENT_SUMMARY_JOIN}
-    WHERE a.exam_id=%s AND (%s='' OR u.full_name LIKE CONCAT('%%',%s,'%%') OR a.student_id LIKE CONCAT('%%',%s,'%%')) AND (%s='' OR a.status=%s) ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""",(exam_id,search,search,search,status,status,limit,offset))
+    WHERE a.exam_id=%s AND (%s='' OR u.full_name LIKE CONCAT('%%',%s,'%%') OR a.student_id LIKE CONCAT('%%',%s,'%%')) AND (%s='' OR a.status=%s) ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""",(exam_id,exam_id,search,search,search,status,status,limit,offset))
 
 @router.get("/exams/{exam_id}/students")
 def students(exam_id: int, user=Depends(teacher)):
@@ -102,7 +104,7 @@ def student_attempts(exam_id: int, student_id: str, page: int = Query(1, ge=1), 
     COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
     {ATTEMPT_EVENT_SUMMARY_JOIN}
-    WHERE a.exam_id=%s AND a.student_id=%s ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""", (exam_id, student_id, page_size, offset))
+    WHERE a.exam_id=%s AND a.student_id=%s ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""", (exam_id, exam_id, student_id, page_size, offset))
     return {"items": items, "page": page, "pageSize": page_size, "total": total, "totalPages": (total + page_size - 1) // page_size}
 
 @router.get("/attempts/{attempt_id}")

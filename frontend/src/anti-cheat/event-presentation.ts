@@ -1,7 +1,7 @@
 const CAMERA_EVENTS = new Set([
-  'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED', 'HEAD_AWAY_SUSTAINED', 'GAZE_AWAY_SUSTAINED', 'PHONE_DETECTED',
+  'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED', 'HEAD_AWAY_SUSTAINED', 'GAZE_AWAY_SUSTAINED',
 ]);
-const AUDIO_EVENTS = new Set(['SPEECH_ACTIVITY_DETECTED', 'MIC_TRACK_MUTED', 'MIC_TRACK_ENDED']);
+const AUDIO_EVENTS = new Set(['SPEECH_ACTIVITY_DETECTED', 'MULTIPLE_VOICES_DETECTED', 'MIC_TRACK_MUTED', 'MIC_TRACK_ENDED']);
 
 export type MonitorEventCategory = 'camera' | 'microphone' | 'browser' | 'system';
 
@@ -23,6 +23,7 @@ export function formatEventDetails(details?: string | null, metadata?: unknown):
   const formatted = [
     typeof fields.confidence === 'number' ? `Confidence ${Math.round(fields.confidence * 100)}%` : null,
     typeof fields.durationMs === 'number' ? `Duration ${(fields.durationMs / 1_000).toFixed(1)} s` : null,
+    typeof fields.overlapProbability === 'number' ? `Overlap ${Math.round(fields.overlapProbability * 100)}%` : null,
     typeof fields.faceCount === 'number' ? `${fields.faceCount} face(s)` : null,
   ].filter((value): value is string => Boolean(value));
   return formatted.length ? formatted.join(' · ') : details || 'No additional details';

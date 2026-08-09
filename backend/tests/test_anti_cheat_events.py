@@ -129,10 +129,15 @@ class AntiCheatEventTests(unittest.TestCase):
 
     def test_camera_ai_events_increment_the_shared_counter(self):
         cursor = _EventCursor(limit=5)
-        gaze = self._record(cursor, event("GAZE_AWAY_SUSTAINED", "gaze-1", source="camera"))
-        head = self._record(cursor, event("HEAD_AWAY_SUSTAINED", "head-1", source="camera"))
-        self.assertEqual((gaze["violationCount"], head["violationCount"]), (1, 2))
-        self.assertEqual([row["source"] for row in cursor.event_rows], ["camera", "camera"])
+        results = [
+            self._record(cursor, event(event_type, f"camera-{index}", source="camera"))
+            for index, event_type in enumerate((
+                "NO_FACE_DETECTED", "MULTIPLE_FACES_DETECTED",
+                "GAZE_AWAY_SUSTAINED", "HEAD_AWAY_SUSTAINED",
+            ), start=1)
+        ]
+        self.assertEqual([result["violationCount"] for result in results], [1, 2, 3, 4])
+        self.assertEqual([row["source"] for row in cursor.event_rows], ["camera"] * 4)
 
     def test_metadata_is_persisted_and_source_is_server_mapped(self):
         cursor = _EventCursor()
@@ -140,6 +145,26 @@ class AntiCheatEventTests(unittest.TestCase):
         self._record(cursor, event("SPEECH_ACTIVITY_DETECTED", "speech-1", source="browser", metadata=metadata))
         self.assertEqual(cursor.event_rows[0]["source"], "microphone")
         self.assertEqual(json.loads(cursor.event_rows[0]["metadata"]), metadata)
+
+    def test_camera_and_microphone_health_sources_are_server_mapped(self):
+        cursor = _EventCursor()
+        self._record(cursor, event("CAMERA_TRACK_ENDED", "camera-health", source="browser"))
+        self._record(cursor, event("MIC_TRACK_MUTED", "mic-health", source="browser"))
+        self.assertEqual([row["source"] for row in cursor.event_rows], ["camera", "microphone"])
+
+    def test_multiple_voices_is_an_authoritative_microphone_violation(self):
+        cursor = _EventCursor(enabled=True, limit=5)
+        metadata = {"durationMs": 1800, "overlapProbability": 0.84, "inferenceMs": 95, "model": "pyannote-segmentation-3.0-int8"}
+        result = self._record(cursor, event("MULTIPLE_VOICES_DETECTED", "overlap-1", source="browser", metadata=metadata))
+        duplicate = self._record(cursor, event("MULTIPLE_VOICES_DETECTED", "overlap-1", source="microphone", metadata=metadata))
+        self.assertEqual(result["violationCount"], 1)
+        self.assertEqual(cursor.event_rows[0]["source"], "microphone")
+        self.assertTrue(duplicate["duplicate"])
+
+    def test_multiple_voices_disabled_exam_does_not_increment(self):
+        cursor = _EventCursor(enabled=False)
+        result = self._record(cursor, event("MULTIPLE_VOICES_DETECTED", "overlap-disabled", source="microphone"))
+        self.assertEqual(result["violationCount"], 0)
 
     def test_limit_terminates_once_with_zero_score(self):
         cursor = _EventCursor(limit=1)

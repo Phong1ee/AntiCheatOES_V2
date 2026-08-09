@@ -214,10 +214,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
               ))}
             </SelectContent>
           </Select>
-          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-            Essay grading takes precedence. Results remain pending until all submitted essay answers for the attempt are graded.
-          </p>
-          <p className="text-sm text-gray-500">This change is saved when you click Save Settings above.</p>
         </CardContent>
       </Card>
 
@@ -235,7 +231,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader>
           <CardTitle>Question Navigation</CardTitle>
-          <CardDescription>Control how students move through questions during an attempt.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between gap-4">
@@ -246,14 +241,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
               onCheckedChange={(value) => setBoolean('sequential_navigation', value)}
             />
           </div>
-          <p className="text-sm text-gray-600">
-            {settings.sequential_navigation
-              ? 'Students must answer the current question before continuing to the next one. Previous and direct question navigation will be disabled.'
-              : 'Students may move freely between questions.'}
-          </p>
-          <p className="text-xs text-gray-500">
-            When question shuffling is enabled, students follow the randomized order created for their attempt.
-          </p>
         </CardContent>
       </Card>
 

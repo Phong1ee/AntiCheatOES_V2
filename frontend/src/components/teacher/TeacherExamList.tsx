@@ -158,7 +158,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
     });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex h-full flex-col gap-6">
       {/* Filters & Search */}
       <Card className="shadow-lg rounded-2xl border-0 shrink-0">
         <CardContent className="p-4">
@@ -202,7 +202,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
       </Card>
 
       {/* Exam List */}
-      <div>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
       <div className="grid gap-4">
         {filteredExams.map((exam) => {
           return (

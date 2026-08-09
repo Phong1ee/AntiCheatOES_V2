@@ -278,20 +278,9 @@ export function GeneralInfoTab({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Grading Scale</Label>
-              <div className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
-                <Award className="size-3.5" />
-                100 points (fixed)
-              </div>
-              <p className="text-xs text-gray-500">
-                Raw question scores are summed and normalized to a final score out of 100.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="passingScore">Passing Score</Label>
+          <div className="space-y-2">
+            <Label htmlFor="passingScore">Passing Score</Label>
+            <div className="flex max-w-[200px] items-center gap-2">
               <Input
                 id="passingScore"
                 type="number"
@@ -303,14 +292,14 @@ export function GeneralInfoTab({
                 min="0"
                 max="100"
                 step="0.01"
-                className="max-w-[160px]"
               />
-              <p className="text-xs text-gray-500">
-                {Number.isFinite(passingScore)
-                  ? `Students need a score of ${passingScore} or higher (out of 100) to pass.`
-                  : 'Enter a passing threshold from 0.00 to 100.00.'}
-              </p>
+              <span className="text-sm font-medium text-gray-500 whitespace-nowrap">/ 100</span>
             </div>
+            <p className="text-xs text-gray-500">
+              {Number.isFinite(passingScore)
+                ? `Students need a score of ${passingScore} or higher (out of 100) to pass.`
+                : 'Enter a passing threshold from 0.00 to 100.00.'}
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -83,11 +83,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
           <Preferences />
         </main>
       ) : (
-        <main className="flex-1 container mx-auto max-w-7xl px-4 py-8">
+        <main className="h-[calc(100vh-80px)] overflow-hidden container mx-auto max-w-7xl px-4 py-8">
           {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid h-full grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Main Content - Exam List */}
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-2 h-full overflow-hidden">
                 <TeacherExamList
                   onExamClick={handleNavigateToExam}
                   onNavigateToSettings={handleNavigateToSettings}
@@ -96,7 +96,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
               </div>
 
               {/* Sidebar */}
-              <div className="lg:col-span-1">
+              <div className="lg:col-span-1 h-full overflow-y-auto pr-1">
                 <TeacherInfoSidebar
                   onExamClick={handleNavigateToExam}
                 />

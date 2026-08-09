@@ -10,7 +10,6 @@ import {
   Calendar,
   ChevronRight,
 } from 'lucide-react';
-import { BulkDataRequestsCard } from './BulkDataRequestsCard';
 
 interface UpcomingExam {
   exam_id: string;
@@ -200,8 +199,6 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
           )}
         </CardContent>
       </Card>
-
-      <BulkDataRequestsCard />
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
 import type { MonitorAttempt, MonitorAttemptPage, MonitorDetail, MonitorExam, MonitorStudent, MonitorSubject } from '../../../types/teacher-anti-cheat';
+import { eventCategory, eventLabel, formatEventDetails } from '../../../anti-cheat/event-presentation';
 import {
   Shield,
   RefreshCw,
@@ -45,7 +46,7 @@ type AntiCheatStatus = 'clean' | 'warning' | 'flagged' | 'terminated';
 type EventType = 'violation' | 'ai-flag' | 'system';
 
 interface AiFlag {
-  type: 'no-face' | 'multiple-faces' | 'phone' | 'speech';
+  type: 'no-face' | 'multiple-faces' | 'gaze-away' | 'head-away' | 'phone' | 'speech';
   label: string;
   detectedAt: string;
 }
@@ -67,22 +68,28 @@ interface Attempt {
   aiFlags: AiFlag[];
   lastEvent: string;
   lastActivity: string;
+  lastViolationAt?: string;
+  startTime?: string;
+  submittedAt?: string;
   antiCheatStatus: AntiCheatStatus;
   score?: number;
   terminationReason?: string;
   examTitle?: string;
   aiFlagCount: number;
+  cameraFlagCount: number;
+  audioFlagCount: number;
+  browserViolationCount: number;
   policy: { maxViolations: number };
   violationBreakdown: { label: string; count: number }[];
   timeline: TimelineEvent[];
 }
 
-const AI_EVENT_TYPES = new Set(['NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED', 'PHONE_DETECTED', 'SPEECH_ACTIVITY_DETECTED']);
-
 function mapAiFlag(eventType: string, detectedAt: string): AiFlag | null {
   const flags: Record<string, AiFlag['type']> = {
     NO_FACE_DETECTED: 'no-face',
     MULTIPLE_FACES_DETECTED: 'multiple-faces',
+    GAZE_AWAY_SUSTAINED: 'gaze-away',
+    HEAD_AWAY_SUSTAINED: 'head-away',
     PHONE_DETECTED: 'phone',
     SPEECH_ACTIVITY_DETECTED: 'speech',
   };
@@ -95,10 +102,14 @@ function mapAttempt(attempt: MonitorAttempt): Attempt {
   return {
     id: String(attempt.attemptId), studentName: attempt.studentName, studentId: attempt.studentId,
     attemptStatus: status, violations: { count: attempt.violationCount, max: attempt.violationLimit },
-    aiFlags: [], aiFlagCount: attempt.aiFlagCount, lastEvent: attempt.lastEventType ?? '-',
+    aiFlags: [], aiFlagCount: attempt.aiFlagCount, lastEvent: attempt.lastEventType ? eventLabel(attempt.lastEventType) : '-',
     lastActivity: String(attempt.lastEventAt ?? ''),
+    lastViolationAt: attempt.lastViolationAt ? String(attempt.lastViolationAt) : undefined,
+    startTime: attempt.startTime ? String(attempt.startTime) : undefined,
+    submittedAt: attempt.submittedAt ? String(attempt.submittedAt) : undefined,
     antiCheatStatus: status === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean',
     score: attempt.score ?? undefined, terminationReason: attempt.terminationReason ?? undefined,
+    cameraFlagCount: attempt.cameraFlagCount ?? 0, audioFlagCount: attempt.audioFlagCount ?? 0, browserViolationCount: attempt.browserViolationCount ?? 0,
     policy: { maxViolations: attempt.violationLimit }, violationBreakdown: [], timeline: [],
   };
 }
@@ -117,9 +128,9 @@ function mapDetail(detail: MonitorDetail): Attempt {
     timeline: detail.timeline.map((event, index) => ({
       id: `${event.eventTimestamp}-${index}`,
       time: String(event.eventTimestamp),
-      type: event.isViolation ? 'violation' : AI_EVENT_TYPES.has(event.eventType) ? 'ai-flag' : 'system',
-      title: event.eventType,
-      detail: event.details || event.source,
+      type: event.isViolation ? 'violation' : ['camera', 'microphone'].includes(eventCategory(event.eventType, event.source)) ? 'ai-flag' : 'system',
+      title: eventLabel(event.eventType),
+      detail: `${eventCategory(event.eventType, event.source)} · ${formatEventDetails(event.details, event.metadata)}`,
     })),
   };
 }
@@ -162,6 +173,8 @@ const eventDot: Record<EventType, string> = {
 const aiFlagColor: Record<AiFlag['type'], string> = {
   'no-face':       'bg-violet-50 text-violet-700 border-violet-200',
   'multiple-faces':'bg-orange-50 text-orange-700 border-orange-200',
+  'gaze-away':     'bg-sky-50 text-sky-700 border-sky-200',
+  'head-away':     'bg-cyan-50 text-cyan-700 border-cyan-200',
   phone:           'bg-amber-50 text-amber-700 border-amber-200',
   speech:          'bg-rose-50 text-rose-700 border-rose-200',
 };
@@ -461,6 +474,7 @@ export function AntiCheatMonitor() {
   const [attemptStatusFilter, setAttemptStatusFilter] = useState('all');
   const [antiCheatFilter, setAntiCheatFilter] = useState('all');
   const [drawerAttempt, setDrawerAttempt] = useState<Attempt | null>(null);
+  const pollingInFlight = useRef(false);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
   const selectedExam = selectedSubject?.exams.find((e) => e.id === selectedExamId) ?? null;
@@ -509,20 +523,49 @@ export function AntiCheatMonitor() {
   };
 
   const refreshSelectedData = async () => {
-    if (!selectedExamId) return;
+    if (!selectedExamId || pollingInFlight.current) return;
     setMonitorError(null);
     setIsRefreshing(true);
+    pollingInFlight.current = true;
     try {
       if (selectedStudent) await loadStudentAttempts(selectedStudent, attemptPage?.page ?? 1);
       else setAssignedStudents(await teacherAntiCheatService.students(selectedExamId));
     } catch {
       setMonitorError('Unable to refresh monitor data. Please try again.');
     } finally {
+      pollingInFlight.current = false;
       setIsRefreshing(false);
     }
   };
 
   useEffect(() => { teacherAntiCheatService.subjects().then((items: MonitorSubject[]) => setSubjects(items.map((item) => ({ id: item.subjectId, code: item.code, name: item.name, exams: [] })))); }, []);
+
+  useEffect(() => {
+    if (!selectedExamId || !selectedSubjectId || !selectedStudent) return;
+    let disposed = false;
+    const poll = async () => {
+      if (disposed || document.hidden || pollingInFlight.current) return;
+      pollingInFlight.current = true;
+      try {
+        const result = await teacherAntiCheatService.studentAttempts(selectedExamId, selectedStudent.studentId, attemptPage?.page ?? 1);
+        setAttemptPage(result);
+        const mapped = result.items.map(mapAttempt);
+        setSubjects((current) => current.map((subject) => subject.id !== selectedSubjectId ? subject : {
+          ...subject,
+          exams: subject.exams.map((exam) => exam.id === selectedExamId ? { ...exam, attempts: mapped } : exam),
+        }));
+      } catch {
+        if (!disposed) setMonitorError('Live monitor update failed. Retrying shortly.');
+      } finally {
+        pollingInFlight.current = false;
+      }
+    };
+    const onVisibilityChange = () => { if (!document.hidden) void poll(); };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 4_000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => { disposed = true; window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibilityChange); };
+  }, [attemptPage?.page, selectedExamId, selectedStudent, selectedSubjectId]);
 
   const attempts = selectedExam?.attempts ?? [];
 
@@ -703,8 +746,8 @@ export function AntiCheatMonitor() {
             <div className="flex items-start gap-2.5 bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
               <Info className="size-4 text-violet-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-gray-500">
-                <span className="font-medium text-gray-700">AI flags</span> indicate suspicious activity for teacher review.
-                They do not automatically count toward the violation limit.
+                <span className="font-medium text-gray-700">Incident totals</span> are refreshed from server-authoritative anti-cheat events.
+                No camera or microphone media is shown here.
               </p>
             </div>
 
@@ -717,6 +760,7 @@ export function AntiCheatMonitor() {
                     <TableHead className="text-xs font-medium text-gray-500">Attempt</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Direct Violations</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">AI Flags</TableHead>
+                    <TableHead className="text-xs font-medium text-gray-500 text-center">Flag Summary</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Last Event</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Activity</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Anti-Cheat</TableHead>
@@ -762,11 +806,19 @@ export function AntiCheatMonitor() {
                             {attempt.aiFlagCount}
                           </span>
                         </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex justify-center gap-1 text-[11px]">
+                            <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">Cam {attempt.cameraFlagCount}</span>
+                            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-rose-700">Audio {attempt.audioFlagCount}</span>
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">Browser {attempt.browserViolationCount}</span>
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <p className="text-sm text-gray-600">{attempt.lastEvent}</p>
                         </TableCell>
                         <TableCell>
-                          <p className="text-sm text-gray-400">{attempt.lastActivity}</p>
+                          <p className="text-sm text-gray-400">{attempt.lastActivity || '-'}</p>
+                          {attempt.lastViolationAt && <p className="mt-1 text-[11px] text-red-500">Violation {attempt.lastViolationAt}</p>}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={`text-xs ${ac.cls}`}>
@@ -795,7 +847,7 @@ export function AntiCheatMonitor() {
 
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12 text-gray-400 text-sm">
+                      <TableCell colSpan={9} className="text-center py-12 text-gray-400 text-sm">
                         {attempts.length === 0
                           ? 'No attempt data available for this exam.'
                           : 'No attempts match your filters.'}

@@ -8,6 +8,8 @@ import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { WebcamMonitor } from "./WebcamMonitor";
 import { studentExamService } from "../../services/student-exam.service";
 import { useAntiCheatMonitoring } from "../../hooks/useAntiCheatMonitoring";
+import { useIncidentReporter } from "../../anti-cheat/incident-reporter";
+import { useAIAntiCheat } from "../../anti-cheat/use-ai-anti-cheat";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
 interface ExamInterfaceProps {
@@ -68,6 +70,9 @@ export function ExamInterface({ examId, onExit, mediaStream, refreshViolationRec
   const nextInFlightRef = useRef(false);
   const terminatedRedirectRef = useRef<number | null>(null);
   const refreshWarningShownRef = useRef(false);
+  const examEndingRef = useRef(false);
+
+  const shouldIgnoreAntiCheatEvents = useCallback(() => examEndingRef.current, []);
 
   const exitFullscreenIntentionally = useCallback(async () => {
     if (!document.fullscreenElement) return;
@@ -166,6 +171,7 @@ export function ExamInterface({ examId, onExit, mediaStream, refreshViolationRec
       stopAutoSave();
       setShowEssayGradingNote(result.resultVisibility !== "hidden" && result.essayPending);
       setIsSubmitted(true);
+      examEndingRef.current = true;
       mediaStream?.getTracks().forEach((track) => track.stop());
       void exitFullscreenIntentionally();
     } catch (error) {
@@ -320,27 +326,46 @@ export function ExamInterface({ examId, onExit, mediaStream, refreshViolationRec
     }
   };
 
-  useAntiCheatMonitoring({
-    active: antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId), examId, attemptId, mediaStream,
-    onFullscreenLost: () => setFullscreenLocked(true), onMediaProblem: () => { setFullscreenLocked(true); setSubmitError("Camera or microphone access was lost. Return to Dashboard and resume after granting permission."); },
-    onEvent: (event, eventType) => {
-      setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true);
-      if (event.terminated) {
-        setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave();
-        localStorage.removeItem(attemptKey);
-        if (attemptId) {
-          localStorage.removeItem(draftKey(attemptId));
-          localStorage.removeItem(markedQuestionsKey(attemptId));
-        }
-        mediaStream?.getTracks().forEach((track) => track.stop());
-        terminatedRedirectRef.current = window.setTimeout(exitAfterTermination, 2_500);
+  const handleAntiCheatEvent = useCallback((event: { violationCount: number; violationLimit: number; remainingViolations: number | null; terminated: boolean }, eventType: string) => {
+    setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true);
+    if (event.terminated) {
+      setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave();
+      examEndingRef.current = true;
+      localStorage.removeItem(attemptKey);
+      if (attemptId) {
+        localStorage.removeItem(draftKey(attemptId));
+        localStorage.removeItem(markedQuestionsKey(attemptId));
       }
-    },
+      mediaStream?.getTracks().forEach((track) => track.stop());
+      terminatedRedirectRef.current = window.setTimeout(exitAfterTermination, 2_500);
+    }
+  }, [attemptId, exitAfterTermination, mediaStream, stopAutoSave]);
+
+  const aiRuntimeActive = antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId);
+  const incidentReporter = useIncidentReporter({
+    active: aiRuntimeActive,
+    examId,
+    attemptId,
+    onEvent: handleAntiCheatEvent,
+  });
+  const aiRuntime = useAIAntiCheat({
+    active: aiRuntimeActive,
+    mediaStream,
+    reporter: incidentReporter,
+  });
+
+  useAntiCheatMonitoring({
+    active: aiRuntimeActive && aiRuntime.readiness === "ready", examId, attemptId, mediaStream,
+    reporter: incidentReporter,
+    shouldIgnoreEvents: shouldIgnoreAntiCheatEvents,
+    onFullscreenLost: () => setFullscreenLocked(true), onMediaProblem: () => { setFullscreenLocked(true); setSubmitError("Camera or microphone access was lost. Return to Dashboard and resume after granting permission."); },
   });
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
   if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
+
+  if (aiRuntimeActive && aiRuntime.readiness !== "ready") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Initializing anti-cheat</h1><p className="mt-3 text-sm leading-6 text-slate-600">{aiRuntime.readiness === "error" ? "Anti-cheat camera and microphone analysis could not be initialized. Please retry or return to Dashboard." : "Checking live camera, face analysis, and speech detection before the exam continues."}</p>{aiRuntime.error && <p className="mt-3 text-sm text-red-600">{aiRuntime.error}</p>}<div className="mt-6 flex gap-3"><button className="flex-1 rounded-lg border border-slate-300 px-5 py-3 font-medium text-slate-700 hover:bg-slate-50" onClick={handleNormalExit}>Return to Dashboard</button>{aiRuntime.readiness === "error" && <button className="flex-1 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={aiRuntime.retry}>Retry</button>}</div></div></div>;
 
   if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} /></div>;
 

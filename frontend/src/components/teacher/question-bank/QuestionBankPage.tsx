@@ -5,6 +5,7 @@ import { BankQuestionList } from "./BankQuestionList";
 import { YourQuestionsList } from "./YourQuestionsList";
 import { QuestionEditor } from "./QuestionEditor";
 import { QuestionDetailModal } from "./QuestionDetailModal";
+import { BulkDataRequestsCard } from "../BulkDataRequestsCard";
 import { Search, Library, User, Database } from "lucide-react";
 import { toast } from "sonner";
 import { teacherQuestionBankService } from "../../../services/teacher-question-bank.service";
@@ -508,22 +509,25 @@ export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPagePr
           ref={listScrollRef}
           className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
         >
-          <div className="mx-auto w-full max-w-4xl">
+          <div className="mx-auto w-full max-w-4xl space-y-5">
             {activeTab === "bank" ? (
-              <BankQuestionList
-                questions={questions}
-                loading={loading}
-                error={error}
-                total={total}
-                page={page}
-                pageSize={pageSize}
-                onPageChange={setPage}
-                onView={setDetailQuestionId}
-                onEdit={(questionId) => {
-                  setEditorQuestionId(questionId);
-                  setEditorOpen(true);
-                }}
-              />
+              <>
+                <BulkDataRequestsCard />
+                <BankQuestionList
+                  questions={questions}
+                  loading={loading}
+                  error={error}
+                  total={total}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onView={setDetailQuestionId}
+                  onEdit={(questionId) => {
+                    setEditorQuestionId(questionId);
+                    setEditorOpen(true);
+                  }}
+                />
+              </>
             ) : (
               <YourQuestionsList
                 questions={visibleQuestions}

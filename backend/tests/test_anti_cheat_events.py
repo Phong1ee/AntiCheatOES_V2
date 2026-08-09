@@ -1,4 +1,5 @@
 import inspect
+import json
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -17,6 +18,7 @@ class _EventCursor:
         }
         self.setting = {"anti_cheat_enabled": enabled, "violation_limit": limit}
         self.events = set()
+        self.event_rows = []
         self.termination_events = 0
         self.fetchone_value = None
         self.fetchall_value = []
@@ -33,6 +35,13 @@ class _EventCursor:
         elif sql.startswith("INSERT INTO exam_event"):
             if len(params) == 7:
                 self.events.add(params[5])
+                self.event_rows.append({
+                    "event_type": params[1],
+                    "source": params[3],
+                    "is_violation": params[4],
+                    "client_event_id": params[5],
+                    "metadata": params[6],
+                })
             else:
                 self.termination_events += 1
         elif sql.startswith("UPDATE attempt SET violation_count"):
@@ -84,14 +93,14 @@ class _EventConnection:
         pass
 
 
-def event(event_type, client_event_id):
+def event(event_type, client_event_id, *, source="browser", metadata=None):
     return {
         "attemptId": 10,
         "clientEventId": client_event_id,
         "eventType": event_type,
-        "source": "browser",
+        "source": source,
         "details": None,
-        "metadata": None,
+        "metadata": metadata,
         "answers": [],
     }
 
@@ -118,6 +127,20 @@ class AntiCheatEventTests(unittest.TestCase):
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(duplicate["violationCount"], 2)
 
+    def test_camera_ai_events_increment_the_shared_counter(self):
+        cursor = _EventCursor(limit=5)
+        gaze = self._record(cursor, event("GAZE_AWAY_SUSTAINED", "gaze-1", source="camera"))
+        head = self._record(cursor, event("HEAD_AWAY_SUSTAINED", "head-1", source="camera"))
+        self.assertEqual((gaze["violationCount"], head["violationCount"]), (1, 2))
+        self.assertEqual([row["source"] for row in cursor.event_rows], ["camera", "camera"])
+
+    def test_metadata_is_persisted_and_source_is_server_mapped(self):
+        cursor = _EventCursor()
+        metadata = {"confidence": 0.82, "durationMs": 2300}
+        self._record(cursor, event("SPEECH_ACTIVITY_DETECTED", "speech-1", source="browser", metadata=metadata))
+        self.assertEqual(cursor.event_rows[0]["source"], "microphone")
+        self.assertEqual(json.loads(cursor.event_rows[0]["metadata"]), metadata)
+
     def test_limit_terminates_once_with_zero_score(self):
         cursor = _EventCursor(limit=1)
         terminated = self._record(cursor, event("FULLSCREEN_EXIT", "event-1"))
@@ -141,6 +164,11 @@ class AntiCheatEventTests(unittest.TestCase):
         for value in ("", "x" * 65):
             with self.assertRaises(ValidationError):
                 AntiCheatEventRequest(attemptId=10, clientEventId=value, eventType="TAB_HIDDEN", source="browser")
+        with self.assertRaises(ValidationError):
+            AntiCheatEventRequest(
+                attemptId=10, clientEventId="raw-media", eventType="TAB_HIDDEN", source="browser",
+                metadata={"imageFrame": "not-permitted"},
+            )
 
 
 if __name__ == "__main__":

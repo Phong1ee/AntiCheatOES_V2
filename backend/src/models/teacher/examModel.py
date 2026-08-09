@@ -16,11 +16,21 @@ VIOLATION_EVENT_TYPES = {
     "PAGE_REFRESH", "CAMERA_PERMISSION_DENIED", "CAMERA_TRACK_MUTED",
     "CAMERA_TRACK_ENDED", "MIC_PERMISSION_DENIED", "MIC_TRACK_MUTED",
     "MIC_TRACK_ENDED", "NO_FACE_DETECTED", "MULTIPLE_FACES_DETECTED",
-    "PHONE_DETECTED", "SPEECH_ACTIVITY_DETECTED",
+    "GAZE_AWAY_SUSTAINED", "HEAD_AWAY_SUSTAINED", "PHONE_DETECTED",
+    "SPEECH_ACTIVITY_DETECTED",
 }
 
 ALLOWED_CLIENT_EVENT_TYPES = VIOLATION_EVENT_TYPES
 ALLOWED_EVENT_SOURCES = {"browser", "camera", "microphone"}
+EVENT_SOURCE_BY_TYPE = {
+    **{event_type: "browser" for event_type in VIOLATION_EVENT_TYPES},
+    "NO_FACE_DETECTED": "camera",
+    "MULTIPLE_FACES_DETECTED": "camera",
+    "GAZE_AWAY_SUSTAINED": "camera",
+    "HEAD_AWAY_SUSTAINED": "camera",
+    "PHONE_DETECTED": "camera",
+    "SPEECH_ACTIVITY_DETECTED": "microphone",
+}
 
 
 def _sha256(value: str) -> str:
@@ -1293,6 +1303,8 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             return _event_response(attempt, enabled, limit, event_accepted=False, duplicate=False)
 
         event_type = event["eventType"]
+        # Event source is derived from the approved event type, never trusted from the client.
+        event_source = EVENT_SOURCE_BY_TYPE[event_type]
         is_violation = enabled and event_type in VIOLATION_EVENT_TYPES
         # Disabled exams retain a non-violation diagnostic event for auditing.
         cursor.execute(
@@ -1303,7 +1315,7 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             ) VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s)
             """,
             (
-                attempt["attempt_id"], event_type, event.get("details"), event["source"],
+                attempt["attempt_id"], event_type, event.get("details"), event_source,
                 int(is_violation), client_event_id, json.dumps(event["metadata"]) if event.get("metadata") is not None else None,
             ),
         )

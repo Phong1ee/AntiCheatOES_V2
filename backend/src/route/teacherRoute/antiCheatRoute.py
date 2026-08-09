@@ -4,6 +4,28 @@ from src.middleware.authMiddleware import verify_token
 
 router = APIRouter(prefix="/anti-cheat")
 
+CAMERA_AI_EVENT_TYPES = "'NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','GAZE_AWAY_SUSTAINED','HEAD_AWAY_SUSTAINED','PHONE_DETECTED'"
+AUDIO_EVENT_TYPES = "'SPEECH_ACTIVITY_DETECTED','MIC_TRACK_MUTED','MIC_TRACK_ENDED'"
+AI_EVENT_TYPES = f"{CAMERA_AI_EVENT_TYPES},{AUDIO_EVENT_TYPES}"
+
+ATTEMPT_EVENT_SUMMARY_JOIN = f"""
+LEFT JOIN (
+    SELECT attempt_id,
+        MAX(CASE WHEN is_violation=1 THEN event_timestamp END) lastViolationAt,
+        SUM(CASE WHEN event_type IN ({CAMERA_AI_EVENT_TYPES}) THEN 1 ELSE 0 END) cameraFlagCount,
+        SUM(CASE WHEN event_type IN ({AUDIO_EVENT_TYPES}) THEN 1 ELSE 0 END) audioFlagCount,
+        SUM(CASE WHEN source='browser' AND is_violation=1 THEN 1 ELSE 0 END) browserViolationCount,
+        SUM(CASE WHEN event_type IN ({AI_EVENT_TYPES}) THEN 1 ELSE 0 END) aiFlagCount
+    FROM exam_event
+    GROUP BY attempt_id
+) event_summary ON event_summary.attempt_id=a.attempt_id
+LEFT JOIN exam_event latest_event ON latest_event.event_id=(
+    SELECT ee.event_id FROM exam_event ee
+    WHERE ee.attempt_id=a.attempt_id
+    ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1
+)
+"""
+
 def teacher(user=Depends(verify_token)):
     if user.get("role") != "teacher": raise HTTPException(403, "Teacher access required")
     return user
@@ -47,12 +69,12 @@ def exams(subject_id: str, user=Depends(teacher)):
 @router.get("/exams/{exam_id}/attempts")
 def attempts(exam_id:int, search:str="", status:str="", limit:int=Query(50,ge=1,le=100), offset:int=Query(0,ge=0), user=Depends(teacher)):
     owned_exam(exam_id,user["school_id"])
-    return rows("""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
-    (SELECT ee.event_type FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventType,
-    (SELECT ee.event_timestamp FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventAt,
-    EXISTS(SELECT 1 FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) flagged,
-    (SELECT COUNT(*) FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) aiFlagCount
+    return rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
+    latest_event.event_type latestEventType,latest_event.event_timestamp latestEventAt,event_summary.lastViolationAt,
+    COALESCE(event_summary.cameraFlagCount,0) cameraFlagCount,COALESCE(event_summary.audioFlagCount,0) audioFlagCount,COALESCE(event_summary.browserViolationCount,0) browserViolationCount,
+    COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
+    {ATTEMPT_EVENT_SUMMARY_JOIN}
     WHERE a.exam_id=%s AND (%s='' OR u.full_name LIKE CONCAT('%%',%s,'%%') OR a.student_id LIKE CONCAT('%%',%s,'%%')) AND (%s='' OR a.status=%s) ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""",(exam_id,search,search,search,status,status,limit,offset))
 
 @router.get("/exams/{exam_id}/students")
@@ -74,12 +96,12 @@ def student_attempts(exam_id: int, student_id: str, page: int = Query(1, ge=1), 
     page_size = 10
     total = rows("SELECT COUNT(*) total FROM attempt WHERE exam_id=%s AND student_id=%s", (exam_id, student_id))[0]["total"]
     offset = (page - 1) * page_size
-    items = rows("""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
-    (SELECT ee.event_type FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventType,
-    (SELECT ee.event_timestamp FROM exam_event ee WHERE ee.attempt_id=a.attempt_id ORDER BY ee.event_timestamp DESC,ee.event_id DESC LIMIT 1) lastEventAt,
-    EXISTS(SELECT 1 FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) flagged,
-    (SELECT COUNT(*) FROM exam_event ai WHERE ai.attempt_id=a.attempt_id AND ai.event_type IN ('NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','PHONE_DETECTED','SPEECH_ACTIVITY_DETECTED')) aiFlagCount
+    items = rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
+    latest_event.event_type latestEventType,latest_event.event_timestamp latestEventAt,event_summary.lastViolationAt,
+    COALESCE(event_summary.cameraFlagCount,0) cameraFlagCount,COALESCE(event_summary.audioFlagCount,0) audioFlagCount,COALESCE(event_summary.browserViolationCount,0) browserViolationCount,
+    COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
+    {ATTEMPT_EVENT_SUMMARY_JOIN}
     WHERE a.exam_id=%s AND a.student_id=%s ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""", (exam_id, student_id, page_size, offset))
     return {"items": items, "page": page, "pageSize": page_size, "total": total, "totalPages": (total + page_size - 1) // page_size}
 

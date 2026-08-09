@@ -87,7 +87,26 @@ class AntiCheatEventRequest(BaseModel):
             encoded = json.dumps(self.metadata, separators=(",", ":"))
             if len(encoded.encode("utf-8")) > 4096:
                 raise ValueError("metadata must not exceed 4096 bytes")
+            if _contains_raw_media_metadata(self.metadata):
+                raise ValueError("metadata must not contain media or biometric data")
         return self
+
+
+def _contains_raw_media_metadata(value: object) -> bool:
+    """Reject metadata keys that could carry prohibited raw detection payloads."""
+    prohibited_keys = {
+        "image", "imageframe", "frame", "video", "audio", "rawaudio",
+        "audiosamples", "rawmicrophonesamples", "microphonesamples",
+        "faceimage", "biometricembedding",
+    }
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = "".join(character for character in str(key).lower() if character.isalnum())
+            if normalized_key in prohibited_keys or _contains_raw_media_metadata(child):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_raw_media_metadata(child) for child in value)
+    return False
 
 
 @router.get("")

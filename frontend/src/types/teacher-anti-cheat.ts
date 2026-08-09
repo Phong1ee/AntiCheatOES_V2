@@ -1,6 +1,6 @@
 export interface MonitorSubject { subjectId:string; code:string; name:string; antiCheatExamCount:number }
 export interface MonitorExam { examId:number; title:string; startTime:string; endTime:string; antiCheatEnabled:boolean; violationLimit:number }
 export interface MonitorStudent { studentId:string; studentName:string; attemptCount:number }
-export interface MonitorAttempt { attemptId:number; studentId:string; studentName:string; attemptNo:number; attemptStatus:string; score:number|null; violationCount:number; violationLimit:number; terminationReason?:string|null; lastEventType?:string|null; lastEventAt?:string|null; flagged:boolean; aiFlagCount:number }
+export interface MonitorAttempt { attemptId:number; studentId:string; studentName:string; attemptNo:number; attemptStatus:string; startTime?:string|null; submittedAt?:string|null; score:number|null; violationCount:number; violationLimit:number; terminationReason?:string|null; lastViolationAt?:string|null; lastEventType?:string|null; lastEventAt?:string|null; flagged:boolean; aiFlagCount:number; cameraFlagCount?:number; audioFlagCount?:number; browserViolationCount?:number }
 export interface MonitorAttemptPage { items:MonitorAttempt[]; page:number; pageSize:number; total:number; totalPages:number }
 export interface MonitorDetail { attempt:MonitorAttempt & {title:string; antiCheatEnabled:boolean}; breakdown:{eventType:string;count:number}[]; timeline:{eventType:string;eventTimestamp:string;source:string;details?:string;metadata?:unknown;isViolation:boolean}[] }

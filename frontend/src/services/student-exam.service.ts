@@ -254,9 +254,9 @@ export const studentExamService = {
     };
   },
 
-  async recordAntiCheatEvent(examId: string | number, attemptId: number, eventType: string, source: "browser" | "camera" | "microphone", details?: string): Promise<AntiCheatEventResult> {
+  async recordAntiCheatEvent(examId: string | number, attemptId: number, eventType: string, source: "browser" | "camera" | "microphone", details?: string, metadata?: Record<string, unknown>): Promise<AntiCheatEventResult> {
     const { data } = await apiClient.post<AntiCheatEventResult>(`/api/exams/${examId}/events`, {
-      attemptId, clientEventId: window.crypto.randomUUID(), eventType, source, details,
+      attemptId, clientEventId: window.crypto.randomUUID(), eventType, source, details, metadata,
     }, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },

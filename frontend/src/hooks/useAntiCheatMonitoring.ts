@@ -1,35 +1,39 @@
 import { useCallback, useEffect, useRef } from "react";
 import { attemptSessionStorage } from "../services/attempt-session.storage";
-import { studentExamService, type AntiCheatEventResult } from "../services/student-exam.service";
+import type { IncidentReporter } from "../anti-cheat/incident-reporter";
 
 type EventType = "TAB_HIDDEN" | "WINDOW_BLUR" | "FULLSCREEN_EXIT" | "COPY_ATTEMPT" | "PASTE_ATTEMPT" | "CUT_ATTEMPT" | "PRINT_ATTEMPT" | "BLOCKED_SHORTCUT" | "CAMERA_TRACK_MUTED" | "CAMERA_TRACK_ENDED" | "MIC_TRACK_MUTED" | "MIC_TRACK_ENDED";
 
 interface Options {
   active: boolean; examId: string; attemptId: number | null; mediaStream?: MediaStream;
-  onEvent: (event: AntiCheatEventResult, eventType: string) => void;
+  reporter: IncidentReporter;
+  shouldIgnoreEvents: () => boolean;
   onFullscreenLost: () => void; onMediaProblem: () => void;
 }
 
-export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream, onEvent, onFullscreenLost, onMediaProblem }: Options) {
+export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream, reporter, shouldIgnoreEvents, onFullscreenLost, onMediaProblem }: Options) {
   // A browser action can fire blur, visibility, and fullscreen events together.
   // Count only the first event in that burst so one action costs one violation.
   const lastViolationBurst = useRef(0);
   const unloading = useRef(false);
+  const mediaIssueAt = useRef(new Map<MediaStreamTrack, number>());
 
   useEffect(() => {
     if (!active) {
       unloading.current = false;
       lastViolationBurst.current = 0;
+      mediaIssueAt.current.clear();
     }
   }, [active, attemptId]);
 
+  const { report } = reporter;
   const send = useCallback(async (eventType: EventType, source: "browser" | "camera" | "microphone") => {
-    if (!active || !attemptId || unloading.current) return;
+    if (!active || !attemptId || unloading.current || shouldIgnoreEvents()) return;
     const now = Date.now();
     if (now - lastViolationBurst.current < 1_500) return;
     lastViolationBurst.current = now;
-    try { onEvent(await studentExamService.recordAntiCheatEvent(examId, attemptId, eventType, source), eventType); } catch { /* Session failures are handled by the existing save/heartbeat gate. */ }
-  }, [active, attemptId, examId, onEvent]);
+    await report({ eventType, source });
+  }, [active, attemptId, report, shouldIgnoreEvents]);
 
   useEffect(() => {
     if (!active || !attemptId) return;
@@ -57,10 +61,20 @@ export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream,
     const listeners: Array<[MediaStreamTrack, "ended" | "mute", () => void]> = [];
     for (const track of mediaStream.getTracks()) {
       const isCamera = track.kind === "video";
-      const ended = () => { onMediaProblem(); void send(isCamera ? "CAMERA_TRACK_ENDED" : "MIC_TRACK_ENDED", isCamera ? "camera" : "microphone"); };
-      const muted = () => { onMediaProblem(); void send(isCamera ? "CAMERA_TRACK_MUTED" : "MIC_TRACK_MUTED", isCamera ? "camera" : "microphone"); };
+      const reportPhysicalIssue = (eventType: EventType) => {
+        const now = Date.now();
+        const previousIssue = mediaIssueAt.current.get(track) ?? 0;
+        // A mute often precedes an ended event for the same physical failure.
+        if (now - previousIssue < 2_500) return;
+        mediaIssueAt.current.set(track, now);
+        onMediaProblem();
+        void send(eventType, isCamera ? "camera" : "microphone");
+      };
+      const ended = () => reportPhysicalIssue(isCamera ? "CAMERA_TRACK_ENDED" : "MIC_TRACK_ENDED");
+      const muted = () => reportPhysicalIssue(isCamera ? "CAMERA_TRACK_MUTED" : "MIC_TRACK_MUTED");
       track.addEventListener("ended", ended); track.addEventListener("mute", muted); listeners.push([track, "ended", ended], [track, "mute", muted]);
     }
+    // Device changes are diagnostic only. Track events provide the one authoritative incident.
     const deviceChange = () => { if (mediaStream.getTracks().some((track) => track.readyState !== "live")) onMediaProblem(); };
     navigator.mediaDevices?.addEventListener?.("devicechange", deviceChange);
     return () => { listeners.forEach(([track, type, listener]) => track.removeEventListener(type, listener)); navigator.mediaDevices?.removeEventListener?.("devicechange", deviceChange); };

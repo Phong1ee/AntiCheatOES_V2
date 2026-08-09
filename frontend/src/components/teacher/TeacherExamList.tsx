@@ -22,6 +22,7 @@ import {
 import { Input } from '../ui/input';
 import { ExamDetailsModal } from './ExamDetailsModal';
 import { LoadingState } from './common/LoadingState';
+import { normalizeSearchText } from '../../utils/search';
 
 interface Exam {
   exam_id: number;
@@ -136,11 +137,11 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
     .filter((exam) => filterStatus === 'all' || exam.schedule_status === filterStatus)
     // Filter by search query
     .filter((exam) => {
-      const query = searchQuery.toLowerCase();
+      const query = normalizeSearchText(searchQuery);
       return (
-        exam.title.toLowerCase().includes(query) ||
-        exam.description.toLowerCase().includes(query) ||
-        (exam.examcode ?? '').toLowerCase().includes(query)
+        normalizeSearchText(exam.title).includes(query) ||
+        normalizeSearchText(exam.description).includes(query) ||
+        normalizeSearchText(exam.examcode ?? '').includes(query)
       );
     })
     // Sort

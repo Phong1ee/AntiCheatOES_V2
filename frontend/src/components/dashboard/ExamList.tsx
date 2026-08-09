@@ -320,7 +320,7 @@ export function ExamList({
                   <div className="flex items-center gap-2">
                     <RefreshCw className="size-4 text-teal-600" />
                     <span>
-                      Attempts: {exam.attemptsUsed}/{exam.maxAttempts ?? "Unlimited"}
+                      Attempts: {exam.attemptsUsed}/{exam.maxAttempts ? exam.maxAttempts : "Unlimited"}
                     </span>
                   </div>
                 </div>

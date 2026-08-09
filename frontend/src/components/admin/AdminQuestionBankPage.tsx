@@ -18,6 +18,7 @@ import {
   type QuestionEditorDataSource,
 } from '../teacher/question-bank/QuestionEditor';
 import { AdminQuestionImportModal } from './AdminQuestionImportModal';
+import { normalizeSearchText } from '../../utils/search';
 import {
   Database,
   Library,
@@ -1908,7 +1909,7 @@ export function AdminQuestionBankPage() {
   const filteredBank = bankQuestions;
 
   const filteredPending = pending.filter((q) => {
-    if (approvalSearch && !q.text.toLowerCase().includes(approvalSearch.toLowerCase()) && !q.subject.toLowerCase().includes(approvalSearch.toLowerCase())) return false;
+    if (approvalSearch && !normalizeSearchText(q.text).includes(normalizeSearchText(approvalSearch)) && !normalizeSearchText(q.subject).includes(normalizeSearchText(approvalSearch))) return false;
     if (approvalType && q.type !== approvalType) return false;
     if (approvalDiff && q.difficulty !== approvalDiff) return false;
     return true;

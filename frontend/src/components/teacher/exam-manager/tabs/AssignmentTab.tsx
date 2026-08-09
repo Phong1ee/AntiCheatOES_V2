@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { teacherExamService } from '../../../../services/teacher-exam.service';
 import type { AssignmentOptions } from '../../../../types/teacher-exam';
+import { normalizeSearchText } from '../../../../utils/search';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,13 +69,13 @@ export function AssignmentTab({ examId }: AssignmentTabProps) {
   }, [load]);
 
   const visibleStudents = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
+    const normalized = normalizeSearchText(search.trim());
     return (data?.students ?? []).filter((student) => {
       const matchesClass = classFilter === 'all' || student.class_ids.includes(Number(classFilter));
       const matchesSearch = !normalized
-        || student.full_name.toLowerCase().includes(normalized)
-        || student.school_id.toLowerCase().includes(normalized)
-        || student.email.toLowerCase().includes(normalized);
+        || normalizeSearchText(student.full_name).includes(normalized)
+        || normalizeSearchText(student.school_id).includes(normalized)
+        || normalizeSearchText(student.email).includes(normalized);
       return matchesClass && matchesSearch;
     });
   }, [classFilter, data, search]);

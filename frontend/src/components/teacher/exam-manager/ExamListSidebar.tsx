@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { normalizeSearchText } from '../../../utils/search';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -157,8 +158,8 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
     .filter((exam) => filterStatus === 'all' || exam.status === filterStatus)
     .filter((exam) => filterSubject === 'all' || exam.subjectId === filterSubject)
     .filter((exam) =>
-      exam.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exam.subject.toLowerCase().includes(searchQuery.toLowerCase())
+      normalizeSearchText(exam.title).includes(normalizeSearchText(searchQuery)) ||
+      normalizeSearchText(exam.subject).includes(normalizeSearchText(searchQuery))
     );
   const subjectNames = subjectOptions.map((subject) => subject.name);
 

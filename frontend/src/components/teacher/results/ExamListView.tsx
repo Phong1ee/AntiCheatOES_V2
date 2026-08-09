@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { normalizeSearchText } from '../../../utils/search';
 import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { LoadingState } from '../common/LoadingState';
@@ -119,8 +120,8 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
 
   const filteredExams = exams.filter((exam) => {
     const matchesSearch =
-      exam.examName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exam.subject.toLowerCase().includes(searchQuery.toLowerCase());
+      normalizeSearchText(exam.examName).includes(normalizeSearchText(searchQuery)) ||
+      normalizeSearchText(exam.subject).includes(normalizeSearchText(searchQuery));
     const matchesSubject = subjectFilter === 'all' || exam.subject === subjectFilter;
     const matchesStatus = statusFilter === 'all' || exam.status === statusFilter;
     return matchesSearch && matchesSubject && matchesStatus;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { normalizeSearchText } from '../../../utils/search';
 import { Card, CardContent } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -221,12 +222,12 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
   }, [examId, refreshKey]);
 
   const filteredResults = useMemo(() => {
-    const search = filters.search.trim().toLowerCase();
+    const search = normalizeSearchText(filters.search.trim());
     return results.filter((result) => {
       const matchesSearch =
         !search ||
-        result.name.toLowerCase().includes(search) ||
-        result.studentId.toLowerCase().includes(search);
+        normalizeSearchText(result.name).includes(search) ||
+        normalizeSearchText(result.studentId).includes(search);
       const matchesStatus = filters.status === 'all' || result.status === filters.status;
       return matchesSearch && matchesStatus;
     });

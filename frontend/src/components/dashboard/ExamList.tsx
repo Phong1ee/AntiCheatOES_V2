@@ -20,6 +20,7 @@ import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
 import { PreExamSecurityDialog } from "./PreExamSecurityDialog";
 import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
+import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
 
 type Exam = StudentExamListItem;
 
@@ -43,7 +44,7 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean, runtime?: AntiCheatRuntime) => void;
   onViewResults?: (examId: string) => void;
   exams?: StudentExamListItem[];
   loading?: boolean;
@@ -116,7 +117,7 @@ export function ExamList({
     onEnterExam?.(examId);
   };
 
-  const startExam = async (exam: Exam, code?: string, stream?: MediaStream) => {
+  const startExam = async (exam: Exam, code?: string, stream?: MediaStream, runtime?: AntiCheatRuntime) => {
     setStartingExamId(exam.id);
     try {
       const data = await studentExamService.start(exam.id, code);
@@ -130,7 +131,7 @@ export function ExamList({
         })
       );
       setCodeOpen(false);
-      onEnterExam?.(exam.id, stream);
+      onEnterExam?.(exam.id, stream, false, runtime);
     } finally {
       setStartingExamId(null);
     }
@@ -193,17 +194,17 @@ export function ExamList({
     }
   };
 
-  const handleSecurityReady = async (stream: MediaStream) => {
+  const handleSecurityReady = async (stream: MediaStream, runtime: AntiCheatRuntime) => {
     if (!selectedExam) throw new Error("No exam selected");
     if (securityResume) {
       if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
       const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
       if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
       localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
-      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded);
+      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded, runtime);
       return;
     }
-    await startExam(selectedExam, securityCode, stream);
+    await startExam(selectedExam, securityCode, stream, runtime);
   };
 
   if (loading) {

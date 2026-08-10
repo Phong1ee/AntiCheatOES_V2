@@ -280,6 +280,44 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(timer["expiresAt"], "2026-07-28T05:50:00")
         self.assertEqual(timer["remainingSeconds"], 3000)
 
+    def test_start_endpoint_is_the_first_operation_that_creates_a_timed_attempt(self):
+        exam = {
+            "exam_id": 5,
+            "examcode": None,
+            "max_attempt": 1,
+            "duration_minutes": 60,
+            "start_time": None,
+            "end_time": None,
+        }
+        created_attempt = {
+            "attempt_id": 10,
+            "attempt_no": 1,
+            "status": "in_progress",
+            "start_time": datetime(2026, 8, 10, 10, 0),
+            "violation_count": 0,
+        }
+        validated = {
+            "user": {"school_id": "S1"},
+            "exam": exam,
+            "attempts_used": 0,
+            "open_attempt": None,
+            "database_now": datetime(2026, 8, 10, 10, 0),
+        }
+        with (
+            patch.object(ExamController, "_validateStudentExamAccess", return_value=validated),
+            patch.object(examModel, "create_attempt_session_token", return_value="session-token"),
+            patch.object(examModel, "createAttempt", return_value=10) as create_attempt,
+            patch.object(examModel, "getAttemptById", return_value=created_attempt),
+            patch.object(examModel, "getExamSettings", return_value={"anti_cheat_enabled": True, "violation_limit": 5}),
+            patch.object(examModel, "get_database_now", return_value=created_attempt["start_time"]),
+        ):
+            result = ExamController.startExam("S1", "student", 5, None, "browser-device")
+
+        create_attempt.assert_called_once_with(5, "S1", 1, "browser-device", "session-token")
+        self.assertEqual(result["attemptId"], 10)
+        self.assertEqual(result["serverTime"], "2026-08-10T10:00:00")
+        self.assertEqual(result["remainingSeconds"], 3600)
+
     def test_attempt_questions_use_snapshot_and_never_expose_correct_answer(self):
         snapshot_row = {
             "question_id": 11,

@@ -11,7 +11,11 @@ export class AudioAntiCheatRuntime {
   private stopped = false;
   private pendingSpeechAt: number | null = null;
 
-  constructor(stream: MediaStream, private readonly onIncident: (incident: AntiCheatIncident) => void) {
+  constructor(
+    stream: MediaStream,
+    private readonly onIncident: (incident: AntiCheatIncident) => void,
+    private readonly onRuntimeError: (error: Error) => void = () => {},
+  ) {
     this.overlap = new OverlapDetector((incident) => {
       if (performance.now() < this.incidentCommittedUntil) return;
       if (this.pendingSpeech) { window.clearTimeout(this.pendingSpeech); this.pendingSpeech = null; }
@@ -19,16 +23,26 @@ export class AudioAntiCheatRuntime {
       this.incidentCommittedUntil = performance.now() + OVERLAP_DETECTOR_CONFIG.cooldownMs;
       this.logCoordinator('MULTIPLE_VOICES_DETECTED', now);
       this.onIncident({ eventType: 'MULTIPLE_VOICES_DETECTED', source: 'microphone', details: 'sustained overlapping voices confirmed', metadata: incident });
-    });
+    }, this.onRuntimeError);
     this.vad = new MicrophoneVadRuntime(
       stream,
       (incident) => this.deferSpeechIncident(incident),
       (probability, frame) => this.overlap.observeVadFrame(probability, frame),
       () => this.overlap.analyzeNow(),
+      this.onRuntimeError,
     );
   }
 
   async start(): Promise<void> { await this.overlap.start(); await this.vad.start(); }
+
+  resetForAttemptStart(): void {
+    if (this.pendingSpeech) window.clearTimeout(this.pendingSpeech);
+    this.pendingSpeech = null;
+    this.pendingSpeechAt = null;
+    this.incidentCommittedUntil = 0;
+    this.vad.resetForAttemptStart();
+    this.overlap.resetForAttemptStart();
+  }
 
   private deferSpeechIncident(incident: { durationMs: number; speechProbability: number }): void {
     if (this.pendingSpeech || this.stopped) return;

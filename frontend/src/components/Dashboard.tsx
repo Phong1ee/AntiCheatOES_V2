@@ -10,6 +10,7 @@ import { ProfileSettings } from './ProfileSettings';
 import { Preferences } from './Preferences';
 import { useStudentDashboardData } from '../hooks/useStudentDashboardData';
 import type { StudentExamListItem } from '../services/student-exam.service';
+import type { AntiCheatRuntime } from '../anti-cheat/anti-cheat-runtime';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -19,21 +20,25 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
   const [examMediaStream, setExamMediaStream] = useState<MediaStream | null>(null);
+  const [examAntiCheatRuntime, setExamAntiCheatRuntime] = useState<AntiCheatRuntime | null>(null);
   const [refreshViolationRecorded, setRefreshViolationRecorded] = useState(false);
   const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
   const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
   const [accessExamId, setAccessExamId] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
 
-  const handleEnterExam = (examId: string, stream?: MediaStream, didRecordRefreshViolation = false) => {
+  const handleEnterExam = (examId: string, stream?: MediaStream, didRecordRefreshViolation = false, runtime?: AntiCheatRuntime) => {
     setExamMediaStream(stream ?? null);
+    setExamAntiCheatRuntime(runtime ?? null);
     setRefreshViolationRecorded(didRecordRefreshViolation);
     setCurrentExamId(examId);
   };
 
   const handleExitExam = () => {
+    examAntiCheatRuntime?.stop();
     examMediaStream?.getTracks().forEach((track) => track.stop());
     setExamMediaStream(null);
+    setExamAntiCheatRuntime(null);
     setRefreshViolationRecorded(false);
     setCurrentExamId(null);
     // The attempt may have been submitted or terminated while the exam view
@@ -66,6 +71,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         examId={currentExamId}
         onExit={handleExitExam}
         mediaStream={examMediaStream ?? undefined}
+        preloadedAntiCheatRuntime={examAntiCheatRuntime ?? undefined}
         refreshViolationRecorded={refreshViolationRecorded}
       />
     );

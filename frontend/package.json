@@ -58,11 +58,13 @@
             "@vitejs/plugin-react-swc": "^3.10.2",
             "tailwindcss": "4.1.12",
             "tw-animate-css": "1.3.8",
-            "vite": "^6.4.1"
+            "vite": "^6.4.1",
+            "vitest": "^3.2.4"
       },
       "scripts": {
         "prepare:vad-assets": "node scripts/sync-vad-assets.mjs",
         "dev": "npm run prepare:vad-assets && vite",
-        "build": "npm run prepare:vad-assets && vite build"
+        "build": "npm run prepare:vad-assets && vite build",
+        "test": "vitest run"
       }
 }

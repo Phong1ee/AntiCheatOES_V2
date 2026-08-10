@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session, selectinload
 from database import get_db
 from src.a_db_config import (
     Attempt,
+    ChapterQuestion,
     CourseClass,
     Exam,
     ExamQuestion,
     ExamStatus,
     Question,
+    LOQuestion,
     StudentClass,
     StudentExam,
     Subject,
@@ -20,6 +22,7 @@ from src.a_db_config import (
     UserRole,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
+from src.service.teacher_subject_service import active_subject_ids
 
 router = APIRouter()
 
@@ -151,20 +154,56 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
     }
 
 
-def _serialize_question(link: ExamQuestion) -> dict:
+def _serialize_question(
+    link: ExamQuestion,
+    assigned_subject_ids: set[str],
+) -> dict:
     question = link.question
+    question_status = (
+        question.question_status.value
+        if hasattr(question.question_status, "value")
+        else question.question_status
+    )
+    question_difficulty = (
+        question.question_difficulties.value
+        if hasattr(question.question_difficulties, "value")
+        else question.question_difficulties
+    )
+    question_type = (
+        question.question_type.value
+        if hasattr(question.question_type, "value")
+        else question.question_type
+    )
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
-        "question_difficulties": question.question_difficulties.value if question.question_difficulties else None,
-        "question_type": question.question_type.value,
+        "question_difficulties": question_difficulty,
+        "question_type": question_type,
         "subject_id": question.subject_id,
         "chapter_ids": [item.chapter_id for item in question.chapter_questions],
         "lo_ids": [item.lo_id for item in question.lo_questions],
         "created_by": question.created_by,
-        "question_status": question.question_status.value if question.question_status else None,
+        "question_status": question_status,
         "question_point": link.question_point,
         "max_score": link.question_point,
+        "can_edit_content": question.subject_id in assigned_subject_ids,
+        "can_edit_points": True,
+        "source_question_id": question.source_question_id,
+        "question_bank_target_id": question.question_id,
+        "question_bank_target_tab": "bank" if question_status == "approved" else "mine",
+        "chapters": [
+            {
+                "chapter_id": item.chapter.chapter_id,
+                "chapter_name": item.chapter.chapter_name,
+            }
+            for item in question.chapter_questions
+            if item.chapter
+        ],
+        "learning_objectives": [
+            {"lo_id": item.lo.lo_id, "lo_name": item.lo.lo_name}
+            for item in question.lo_questions
+            if item.lo
+        ],
         "options": [
             {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
             for option in sorted(question.options, key=lambda item: item.options_id)
@@ -343,18 +382,26 @@ def get_exam_questions(
 ):
     del role_check
     _owned_exam(db, exam_id, current_user["school_id"])
+    assigned_subjects = active_subject_ids(db, current_user["school_id"])
     links = (
         db.query(ExamQuestion)
         .options(
             selectinload(ExamQuestion.question).selectinload(Question.options),
-            selectinload(ExamQuestion.question).selectinload(Question.chapter_questions),
-            selectinload(ExamQuestion.question).selectinload(Question.lo_questions),
+            selectinload(ExamQuestion.question)
+            .selectinload(Question.chapter_questions)
+            .selectinload(ChapterQuestion.chapter),
+            selectinload(ExamQuestion.question)
+            .selectinload(Question.lo_questions)
+            .selectinload(LOQuestion.lo),
         )
         .filter(ExamQuestion.exam_id == exam_id)
         .order_by(ExamQuestion.question_id)
         .all()
     )
-    return [_serialize_question(link) for link in links]
+    return [
+        _serialize_question(link, assigned_subjects)
+        for link in links
+    ]
 
 
 @router.get("/{exam_id}/get_exam_question/{question_id}")
@@ -367,19 +414,24 @@ def get_exam_question(
 ):
     del role_check
     _owned_exam(db, exam_id, current_user["school_id"])
+    assigned_subjects = active_subject_ids(db, current_user["school_id"])
     link = (
         db.query(ExamQuestion)
         .options(
             selectinload(ExamQuestion.question).selectinload(Question.options),
-            selectinload(ExamQuestion.question).selectinload(Question.chapter_questions),
-            selectinload(ExamQuestion.question).selectinload(Question.lo_questions),
+            selectinload(ExamQuestion.question)
+            .selectinload(Question.chapter_questions)
+            .selectinload(ChapterQuestion.chapter),
+            selectinload(ExamQuestion.question)
+            .selectinload(Question.lo_questions)
+            .selectinload(LOQuestion.lo),
         )
         .filter_by(exam_id=exam_id, question_id=question_id)
         .first()
     )
     if not link:
         raise HTTPException(status_code=404, detail="Question not found in this exam")
-    return _serialize_question(link)
+    return _serialize_question(link, assigned_subjects)
 
 
 @router.get("/get_exam_overview/")
@@ -390,6 +442,7 @@ def get_exam_overview(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
+    assigned_subjects = active_subject_ids(db, teacher.school_id)
     now = datetime.now()
     active_exams = (
         db.query(Exam)
@@ -427,6 +480,7 @@ def get_exam_overview(
             func.count(Question.question_id).label("question_count"),
         )
         .outerjoin(Question, Subject.subject_id == Question.subject_id)
+        .filter(Subject.subject_id.in_(assigned_subjects))
         .group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description)
         .order_by(Subject.subject_name)
         .limit(50)

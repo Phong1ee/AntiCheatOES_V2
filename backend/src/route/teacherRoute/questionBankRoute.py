@@ -22,10 +22,10 @@ from src.a_db_config import (
     QuestionRevision,
     QuestionStatus,
     Subject,
-    TeacherSubject,
     User,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
+from src.service.teacher_subject_service import active_subject_ids as _active_subject_ids
 
 router = APIRouter(prefix="/question-bank")
 
@@ -78,15 +78,6 @@ def _teacher(db: Session, school_id: str) -> User:
         raise HTTPException(status_code=403, detail="Teacher role is required")
     _assert_active_teacher(teacher)
     return teacher
-
-
-def _active_subject_ids(db: Session, teacher_id: str) -> set[str]:
-    return {
-        row[0]
-        for row in db.query(TeacherSubject.subject_id)
-        .filter(TeacherSubject.teacher_id == teacher_id, TeacherSubject.is_active.is_(True))
-        .all()
-    }
 
 
 def _require_subject_permission(db: Session, teacher: User, subject_id: str | None) -> None:

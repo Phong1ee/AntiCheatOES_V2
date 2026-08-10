@@ -30,6 +30,7 @@ from src.models.teacher.requestModel.TeacherExamRequest import (
     TeacherResultVisibilityRequest,
     TeacherExamStatusRequest,
 )
+from src.service.teacher_subject_service import require_active_subject_assignment
 
 router = APIRouter()
 
@@ -205,6 +206,7 @@ def add_exam_to_database(
     try:
         teacher = _teacher(db, current_user["school_id"])
         _validate_subject(db, request.subject_id)
+        require_active_subject_assignment(db, teacher.school_id, request.subject_id)
         exam = Exam(
             title=request.title.strip(),
             examcode=_normalize_exam_code(request.examcode),
@@ -247,6 +249,10 @@ def update_exam_in_database(
     try:
         exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
         _validate_subject(db, request.subject_id)
+        if request.subject_id != exam.subject_id:
+            require_active_subject_assignment(
+                db, current_user["school_id"], request.subject_id
+            )
         exam.title = request.title.strip()
         incoming_examcode = _normalize_exam_code(request.examcode)
         exam.examcode = incoming_examcode
@@ -283,6 +289,9 @@ def duplicate_exam(
     del role_check
     try:
         source = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        require_active_subject_assignment(
+            db, current_user["school_id"], source.subject_id
+        )
         duplicate = Exam(
             manage_by=current_user["school_id"],
             title=f"Copy of {source.title}"[:255],

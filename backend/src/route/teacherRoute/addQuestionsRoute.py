@@ -31,6 +31,7 @@ from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptio
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
+from src.service.teacher_subject_service import require_active_subject_assignment
 
 router = APIRouter()
 
@@ -338,6 +339,9 @@ def add_question_to_database(
     try:
         creator = _teacher(db, current_user["school_id"])
         chapters, los = _validate_taxonomy(db, request.subject_id, request.chapter_ids, request.lo_ids)
+        require_active_subject_assignment(
+            db, creator.school_id, request.subject_id
+        )
         _validate_options(request.question_type, request.options)
         if request.exam_id is not None:
             exam = _owned_exam(db, request.exam_id, creator.school_id)
@@ -398,6 +402,9 @@ def add_question_to_exam(
         if db.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=request.question_id).first():
             raise HTTPException(status_code=409, detail="Question is already in this exam")
         if request.options:
+            require_active_subject_assignment(
+                db, current_user["school_id"], question.subject_id
+            )
             if question.options:
                 raise HTTPException(status_code=409, detail="Question already has options")
             _validate_options(question.question_type.value, request.options)
@@ -444,10 +451,15 @@ def update_question_in_exam(
                 "cloned": False,
             }
 
+        require_active_subject_assignment(
+            db, teacher.school_id, question.subject_id
+        )
+
         target_subject = request.subject_id or question.subject_id
         chapter_ids = request.chapter_ids if request.chapter_ids is not None else [item.chapter_id for item in question.chapter_questions]
         lo_ids = request.lo_ids if request.lo_ids is not None else [item.lo_id for item in question.lo_questions]
         chapters, los = _validate_taxonomy(db, target_subject, chapter_ids, lo_ids)
+        require_active_subject_assignment(db, teacher.school_id, target_subject)
 
         can_edit_in_place = _can_edit_exam_draft_in_place(
             db, question, exam_id, teacher.school_id

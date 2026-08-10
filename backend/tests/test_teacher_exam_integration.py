@@ -30,6 +30,7 @@ from src.a_db_config import (
     ResultStrategy,
     StudentExam,
     Subject,
+    TeacherSubject,
     User,
 )
 from src.models.teacher.requestModel.ExamSettingsRequest import ExamSettingsRequest
@@ -102,6 +103,9 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.db.flush()
         self.db.add_all(
             [
+                TeacherSubject(teacher_id="T1", subject_id="DB", is_active=True),
+                TeacherSubject(teacher_id="T1", subject_id="WEB", is_active=False),
+                TeacherSubject(teacher_id="T2", subject_id="DB", is_active=True),
                 Chapter(chapter_id=1, chapter_name="DB Chapter", chapter_description="DB", subject_id="DB"),
                 Chapter(chapter_id=2, chapter_name="Web Chapter", chapter_description="Web", subject_id="WEB"),
                 Exam(manage_by="T1", title="Exam A", examcode="A", max_attempt=1, duration_minutes=60, subject_id="DB"),

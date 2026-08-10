@@ -43,6 +43,7 @@ from src.service.exam_pool_service import (
     select_unique_candidates,
     validate_rule_taxonomy,
 )
+from src.service.teacher_subject_service import require_active_subject_assignment
 
 router = APIRouter()
 
@@ -605,6 +606,10 @@ def update_pool_candidate(
         if not _has_content_changes(question, request):
             return {"success": True, "question_id": question_id, "cloned": False}
 
+        require_active_subject_assignment(
+            db, teacher.school_id, question.subject_id
+        )
+
         target_subject = request.subject_id or question.subject_id
         chapter_ids = (
             request.chapter_ids
@@ -617,6 +622,7 @@ def update_pool_candidate(
             else [item.lo_id for item in question.lo_questions]
         )
         chapters, los = _validate_taxonomy(db, target_subject, chapter_ids, lo_ids)
+        require_active_subject_assignment(db, teacher.school_id, target_subject)
         target_difficulty = request.question_difficulties or (
             question.question_difficulties.value
             if hasattr(question.question_difficulties, "value")

@@ -7,7 +7,7 @@ from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptio
 
 
 class QuestionUpdateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     question_point: Decimal = Field(
         validation_alias=AliasChoices("max_score", "question_point"),

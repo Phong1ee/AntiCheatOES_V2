@@ -23,6 +23,7 @@ from src.a_db_config import (
     QuestionSelectionMode,
     QuestionStatus,
     Subject,
+    TeacherSubject,
     User,
 )
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import (
@@ -113,6 +114,9 @@ class ExamPoolFeatureTests(unittest.TestCase):
             ]
         )
         self.db.flush()
+        self.db.add(
+            TeacherSubject(teacher_id="T1", subject_id="DB", is_active=True)
+        )
         self.db.add_all(
             [ChapterLO(chapter_id=1, lo_id=1), ChapterLO(chapter_id=1, lo_id=2)]
         )

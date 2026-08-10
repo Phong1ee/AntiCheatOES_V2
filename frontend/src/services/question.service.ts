@@ -29,19 +29,36 @@ export interface CreateQuestionRequest {
   max_score: number;
 }
 
-export interface UpdateQuestionRequest extends Omit<CreateQuestionRequest, "exam_id"> {}
+export interface UpdateQuestionRequest {
+  max_score: number;
+  question_text?: string;
+  question_difficulties?: QuestionDifficulty;
+  question_type?: QuestionType;
+  subject_id?: string;
+  chapter_ids?: number[];
+  lo_ids?: number[];
+  question_status?: "draft" | "pending" | "approved" | "rejected";
+  options?: QuestionOptionRequest[];
+}
 
 export interface ExamQuestionDetail {
   question_id: number;
   question_text: string;
   question_difficulties: QuestionDifficulty | null;
   question_type: QuestionType;
-  subject_id: string;
+  subject_id: string | null;
   chapter_ids: number[];
   lo_ids: number[];
   question_status: "draft" | "pending" | "approved" | "rejected";
   question_point: number;
   max_score: number;
+  can_edit_content: boolean;
+  can_edit_points: boolean;
+  source_question_id: number | null;
+  question_bank_target_id: number;
+  question_bank_target_tab: "bank" | "mine";
+  chapters: ChapterSummary[];
+  learning_objectives: LearningObjectiveSummary[];
   options: Array<{ options_id: number; options_text: string; is_correct: boolean }>;
 }
 

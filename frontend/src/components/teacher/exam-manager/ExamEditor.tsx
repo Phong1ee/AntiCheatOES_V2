@@ -54,6 +54,7 @@ interface ExamEditorProps {
     resultVisibility: ResultVisibility;
   }) => Promise<void>;
   onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
+  onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
 type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
@@ -61,7 +62,7 @@ type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
 const isExamEditorTab = (value: string): value is ExamEditorTab =>
   value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange, onViewInQuestionBank }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -227,6 +228,10 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setSaveError('Passing score must be between 0 and 100.');
       return;
     }
+    if (isNewExam && subjects.length === 0) {
+      setSaveError('You have not been assigned to any subjects.');
+      return;
+    }
     const normalizedExamCode = examCode.trim();
     if (requireExamCode && !normalizedExamCode) {
       setSaveError('Exam code is required when code protection is enabled.');
@@ -267,6 +272,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
     && `${endDate}T${endClock}` > `${startDate}T${startClock}`;
   const hasRequiredData = title.trim() !== ''
     && subjectId !== ''
+    && (!isNewExam || subjects.length > 0)
     && (!requireExamCode || examCode.trim() !== '')
     && scoresAreValid
     && scheduleIsValid;
@@ -453,11 +459,17 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               onEndTimeChange={setEndClock}
               saveError={saveError}
               onCancel={onClose}
+              isNewExam={isNewExam}
             />
           </TabsContent>
 
           <TabsContent value="questions" className="m-0 h-full p-0">
-            <QuestionsTab examId={examId} subjectId={subjectId} />
+            <QuestionsTab
+              examId={examId}
+              subjectId={subjectId}
+              canCreateContent={subjects.some((item) => item.subject_id === subjectId)}
+              onViewInQuestionBank={onViewInQuestionBank}
+            />
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 p-6">

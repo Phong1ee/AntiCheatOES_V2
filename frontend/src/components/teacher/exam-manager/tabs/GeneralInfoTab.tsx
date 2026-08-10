@@ -38,6 +38,7 @@ interface GeneralInfoTabProps {
   onEndTimeChange: (value: string) => void;
   saveError: string | null;
   onCancel: () => void;
+  isNewExam: boolean;
 }
 
 export function GeneralInfoTab({
@@ -65,8 +66,10 @@ export function GeneralInfoTab({
   onEndTimeChange,
   saveError,
   onCancel,
+  isNewExam,
 }: GeneralInfoTabProps) {
   const subjectSelectValue = subjectId;
+  const currentSubjectIsAssigned = subjects.some((item) => item.subject_id === subjectId);
 
   // Validation
   const errors: string[] = [];
@@ -115,16 +118,33 @@ export function GeneralInfoTab({
         <CardContent className="space-y-4">
           <div className="max-w-xl space-y-2">
               <Label htmlFor="subject">Subject *</Label>
-              <Select value={subjectSelectValue} onValueChange={onSubjectChange}>
+              <Select
+                value={subjectSelectValue}
+                onValueChange={onSubjectChange}
+                disabled={isNewExam && subjects.length === 0}
+              >
                 <SelectTrigger id="subject" className={!subject ? 'border-red-300' : ''}>
                   <SelectValue placeholder="Select subject" />
                 </SelectTrigger>
                 <SelectContent>
+                  {!isNewExam && subjectId && !currentSubjectIsAssigned && (
+                    <SelectItem value={subjectId} disabled>
+                      {subject || subjectId} (assignment inactive)
+                    </SelectItem>
+                  )}
                   {subjects.map((item) => (
                     <SelectItem key={item.subject_id} value={item.subject_id}>{item.subject_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {subjects.length === 0 && (
+                <p className="text-sm text-amber-700">You have not been assigned to any subjects.</p>
+              )}
+              {!isNewExam && subjectId && !currentSubjectIsAssigned && subjects.length > 0 && (
+                <p className="text-xs text-amber-700">
+                  Your assignment to the current Subject is inactive. You may keep it or select an assigned Subject.
+                </p>
+              )}
           </div>
 
           <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/60 p-4">

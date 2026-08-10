@@ -28,6 +28,7 @@ import {
   RefreshCw,
   CheckCircle2,
   ArrowLeft,
+  ExternalLink,
 } from 'lucide-react';
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
@@ -66,14 +67,24 @@ interface Question {
   chapterIds?: number[];
   loIds?: number[];
   status?: 'draft' | 'pending' | 'approved' | 'rejected';
+  subjectId?: string | null;
+  canEditContent: boolean;
+  canEditPoints: boolean;
+  sourceQuestionId?: number | null;
+  questionBankTargetId?: number;
+  questionBankTargetTab?: 'bank' | 'mine';
+  chapters: ChapterSummary[];
+  learningObjectives: LearningObjectiveSummary[];
 }
 
 interface QuestionsTabProps {
   examId: string | null;
   subjectId: string;
+  canCreateContent: boolean;
+  onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
-export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
+export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQuestionBank }: QuestionsTabProps) {
   // Load questions based on examId
   const initialQuestions: Question[] = [];
 
@@ -135,6 +146,14 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
         chapterIds: question.chapter_ids,
         loIds: question.lo_ids,
         status: question.question_status,
+        subjectId: question.subject_id,
+        canEditContent: question.can_edit_content,
+        canEditPoints: question.can_edit_points,
+        sourceQuestionId: question.source_question_id,
+        questionBankTargetId: question.question_bank_target_id,
+        questionBankTargetTab: question.question_bank_target_tab,
+        chapters: question.chapters,
+        learningObjectives: question.learning_objectives,
       };
     }), []);
 
@@ -186,15 +205,24 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
   useEffect(() => {
     let active = true;
     const loadTaxonomy = async () => {
-      if (!subjectId) {
+      const taxonomySubjectId = selectedQ?.subjectId ?? subjectId;
+      if (!taxonomySubjectId) {
         setChapters([]);
         setLearningObjectives([]);
+        setTaxonomyLoading(false);
+        return;
+      }
+      if (selectedQ && !selectedQ.canEditContent) {
+        setChapters(selectedQ.chapters);
+        setLearningObjectives(selectedQ.learningObjectives);
+        setTaxonomyLoading(false);
+        setTaxonomyError(null);
         return;
       }
       try {
         setTaxonomyLoading(true);
         setTaxonomyError(null);
-        const chapterRows = await teacherQuestionBankService.listChapters(subjectId);
+        const chapterRows = await teacherQuestionBankService.listChapters(taxonomySubjectId);
         if (!active) return;
         setChapters(chapterRows);
         const validChapterIds = new Set(chapterRows.map((chapter) => chapter.chapter_id));
@@ -226,7 +254,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
     };
     void loadTaxonomy();
     return () => { active = false; };
-  }, [subjectId, selectedQuestion, selectedQ?.chapterIds?.join(',')]);
+  }, [subjectId, selectedQuestion, selectedQ?.subjectId, selectedQ?.canEditContent, selectedQ?.chapterIds?.join(',')]);
 
   const addQuestion = (type: Question['type']) => {
     const newQuestion: Question = {
@@ -241,6 +269,11 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       loIds: [],
       status: 'draft',
       correctAnswer: type === 'true-false' ? 'true' : 0,
+      subjectId,
+      canEditContent: canCreateContent,
+      canEditPoints: true,
+      chapters: [],
+      learningObjectives: [],
     };
     setQuestions([...questions, newQuestion]);
     setSelectedQuestion(newQuestion.id);
@@ -434,18 +467,31 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
       setSaveError('Save the exam before adding questions.');
       return;
     }
-    if (!selectedQ.question.trim() || !subjectId || !selectedQ.difficulty) {
-      setSaveError('Question text, subject, and difficulty are required.');
-      return;
-    }
     if (!Number.isFinite(selectedQ.maxScore) || selectedQ.maxScore <= 0) {
       setSaveError('Max Score must be a positive number.');
+      return;
+    }
+    if (!selectedQ.canEditPoints) {
+      setSaveError('You cannot change this question for the selected exam.');
       return;
     }
 
     try {
       setIsSaving(true);
       setSaveError(null);
+      if (!selectedQ.canEditContent && !selectedQ.id.startsWith('new-')) {
+        const result = await questionService.updateInExam(
+          Number(examId),
+          Number(selectedQ.id),
+          { max_score: selectedQ.maxScore },
+        );
+        await loadQuestions(String(result.question_id));
+        toast.success('Question score saved successfully.');
+        return;
+      }
+      if (!selectedQ.question.trim() || !(selectedQ.subjectId ?? subjectId) || !selectedQ.difficulty) {
+        throw new Error('Question text, subject, and difficulty are required.');
+      }
       const isTrueFalse = selectedQ.type === 'true-false';
       if (selectedQ.type === 'matching') throw new Error('Matching questions are not supported by the API.');
       const questionType = selectedQ.type === 'mcq' ? 'MCQ' : selectedQ.type;
@@ -469,7 +515,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           question_text: selectedQ.question.trim(),
           question_difficulties: selectedQ.difficulty,
           question_type: questionType,
-          subject_id: subjectId,
+          subject_id: selectedQ.subjectId ?? subjectId,
           chapter_ids: selectedQ.chapterIds ?? [],
           lo_ids: selectedQ.loIds ?? [],
           question_status: selectedQ.status ?? 'draft',
@@ -483,7 +529,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
           question_text: selectedQ.question.trim(),
           question_difficulties: selectedQ.difficulty,
           question_type: questionType,
-          subject_id: subjectId,
+          subject_id: selectedQ.subjectId ?? subjectId,
           chapter_ids: selectedQ.chapterIds ?? [],
           lo_ids: selectedQ.loIds ?? [],
           question_status: selectedQ.status ?? 'draft',
@@ -662,6 +708,18 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                       <Badge variant="outline">{selectedPoolCandidate.question_difficulties}</Badge>
                       <Badge variant="outline">{selectedPoolCandidate.question_status}</Badge>
                     </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onViewInQuestionBank(
+                        selectedPoolCandidate.question_id,
+                        selectedPoolCandidate.question_status === 'approved' ? 'bank' : 'mine',
+                      )}
+                    >
+                      <ExternalLink className="mr-2 size-4" />
+                      View in Question Bank
+                    </Button>
                     <p className="text-lg text-gray-900">{selectedPoolCandidate.question_text}</p>
                     <div className="flex flex-wrap gap-2">
                       {selectedPoolCandidate.chapters.map((chapter) => <Badge key={chapter.chapter_id} variant="secondary">{chapter.chapter_name}</Badge>)}
@@ -834,6 +892,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               size="sm"
               variant="outline"
               onClick={() => addQuestion('mcq')}
+              disabled={!canCreateContent}
               className="flex-1 text-xs"
             >
               <Plus className="size-3 mr-1" />
@@ -843,6 +902,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               size="sm"
               variant="outline"
               onClick={() => addQuestion('true-false')}
+              disabled={!canCreateContent}
               className="flex-1 text-xs"
             >
               <Plus className="size-3 mr-1" />
@@ -852,6 +912,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
               size="sm"
               variant="outline"
               onClick={() => addQuestion('essay')}
+              disabled={!canCreateContent}
               className="flex-1 text-xs"
             >
               <Plus className="size-3 mr-1" />
@@ -998,7 +1059,9 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                         e.stopPropagation();
                         duplicateQuestion(question.id);
                       }}
-                      className="p-1 hover:bg-gray-200 rounded"
+                      disabled={!question.canEditContent}
+                      className="p-1 hover:bg-gray-200 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Duplicate question"
                     >
                       <Copy className="size-3 text-gray-500" />
                     </button>
@@ -1034,16 +1097,37 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
             <div className="flex items-center justify-between">
               <h3 className="text-lg text-gray-800">Edit Question</h3>
               <div className="flex gap-2">
+                {!selectedQ.id.startsWith('new-') && selectedQ.questionBankTargetId && selectedQ.questionBankTargetTab && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const targetId = selectedQ.questionBankTargetId;
+                      const targetTab = selectedQ.questionBankTargetTab;
+                      if (targetId && targetTab) onViewInQuestionBank(targetId, targetTab);
+                    }}
+                  >
+                    <ExternalLink className="mr-2 size-4" />
+                    View in Question Bank
+                  </Button>
+                )}
                 <Button variant="outline" size="sm">
                   <X className="size-4 mr-2" />
                   Cancel
                 </Button>
                 <Button size="sm" onClick={saveQuestion} disabled={isSaving} className="bg-gradient-to-r from-teal-500 to-blue-600">
                   <Save className="size-4 mr-2" />
-                  {isSaving ? 'Saving...' : 'Save Question'}
+                  {isSaving ? 'Saving...' : selectedQ.canEditContent ? 'Save Question' : 'Save Points'}
                 </Button>
               </div>
             </div>
+
+            {!selectedQ.canEditContent && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                You are not assigned to this question&apos;s subject. Only the score for this exam can be changed.
+              </div>
+            )}
 
             <Card className="shadow-md rounded-2xl border-0">
               <CardContent className="p-6 space-y-4">
@@ -1052,6 +1136,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                   <Label>Question</Label>
                   <Textarea
                     value={selectedQ.question}
+                    disabled={!selectedQ.canEditContent}
                     onChange={(e) =>
                       updateQuestion(selectedQ.id, { question: e.target.value })
                     }
@@ -1060,7 +1145,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                     className="resize-none"
                   />
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" disabled={!selectedQ.canEditContent}>
                       <ImageIcon className="size-4 mr-2" />
                       Add Image
                     </Button>
@@ -1073,6 +1158,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                     <Label>Question Type</Label>
                     <Select
                       value={selectedQ.type}
+                      disabled={!selectedQ.canEditContent}
                       onValueChange={(value: Question['type']) => updateQuestion(selectedQ.id, {
                         type: value,
                         options: value === 'mcq' ? (selectedQ.options?.length ? selectedQ.options : ['', '']) : undefined,
@@ -1096,6 +1182,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                     <Label>Difficulty</Label>
                     <Select
                       value={selectedQ.difficulty ?? undefined}
+                      disabled={!selectedQ.canEditContent}
                       onValueChange={(value: QuestionDifficulty) => updateQuestion(selectedQ.id, { difficulty: value })}
                     >
                       <SelectTrigger>
@@ -1119,6 +1206,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                       }
                       min="1"
                       step="0.01"
+                      disabled={!selectedQ.canEditPoints}
                   />
                 </div>
                 <div className="col-span-2 grid gap-4 md:grid-cols-2">
@@ -1132,6 +1220,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                             <Checkbox
                               aria-label={`Select chapter ${chapter.chapter_name}`}
                               checked={(selectedQ.chapterIds ?? []).includes(chapter.chapter_id)}
+                              disabled={!selectedQ.canEditContent}
                               onCheckedChange={(checked) => {
                                 const current = selectedQ.chapterIds ?? [];
                                 const next = checked === true
@@ -1156,6 +1245,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                             <Checkbox
                               aria-label={`Select learning objective ${lo.lo_name}`}
                               checked={(selectedQ.loIds ?? []).includes(lo.lo_id)}
+                              disabled={!selectedQ.canEditContent}
                               onCheckedChange={(checked) => {
                                 const current = selectedQ.loIds ?? [];
                                 updateQuestion(selectedQ.id, {
@@ -1184,6 +1274,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                         <Switch
                           id="allow-multiple"
                           checked={selectedQ.hasMultipleCorrect || false}
+                          disabled={!selectedQ.canEditContent}
                           onCheckedChange={(checked) => {
                             updateQuestion(selectedQ.id, { hasMultipleCorrect: checked });
                             // Reset to single answer if switching to single mode
@@ -1211,6 +1302,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={!selectedQ.canEditContent}
                               onChange={() => {
                                 let newCorrectAnswers: number[];
                                 if (isChecked) {
@@ -1229,6 +1321,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                               type="radio"
                               name={`correct-${selectedQ.id}`}
                               checked={isChecked}
+                              disabled={!selectedQ.canEditContent}
                               onChange={() => {
                                 updateQuestion(selectedQ.id, { correctAnswer: index });
                               }}
@@ -1237,6 +1330,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                           )}
                           <Input
                             value={option}
+                            disabled={!selectedQ.canEditContent}
                             onChange={(e) => {
                               const newOptions = [...selectedQ.options!];
                               newOptions[index] = e.target.value;
@@ -1249,7 +1343,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                             type="button"
                             variant="ghost"
                             size="sm"
-                            disabled={selectedQ.options!.length <= 2}
+                            disabled={!selectedQ.canEditContent || selectedQ.options!.length <= 2}
                             onClick={() => removeOption(index)}
                             aria-label={`Remove option ${index + 1}`}
                           >
@@ -1258,7 +1352,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                         </div>
                       );
                     })}
-                    <Button type="button" variant="outline" size="sm" onClick={addOption}>
+                    <Button type="button" variant="outline" size="sm" onClick={addOption} disabled={!selectedQ.canEditContent}>
                       <Plus className="size-4 mr-1" /> Add option
                     </Button>
                     <p className="text-xs text-gray-500">
@@ -1279,6 +1373,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                           type="radio"
                           name="tf-answer"
                           checked={selectedQ.correctAnswer === 'true'}
+                          disabled={!selectedQ.canEditContent}
                           onChange={() => updateQuestion(selectedQ.id, { correctAnswer: 'true' })}
                           className="size-4 text-teal-600"
                         />
@@ -1289,6 +1384,7 @@ export function QuestionsTab({ examId, subjectId }: QuestionsTabProps) {
                           type="radio"
                           name="tf-answer"
                           checked={selectedQ.correctAnswer === 'false'}
+                          disabled={!selectedQ.canEditContent}
                           onChange={() => updateQuestion(selectedQ.id, { correctAnswer: 'false' })}
                           className="size-4 text-teal-600"
                         />

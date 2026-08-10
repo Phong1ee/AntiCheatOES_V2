@@ -49,9 +49,10 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
 interface ExamManagerPageProps {
   initialExamId?: string | null;
   initialTab?: 'general' | 'settings';
+  onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
-export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPageProps) {
+export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBank }: ExamManagerPageProps) {
   const [exams, setExams] = useState<Exam[]>([]);
   const [subjects, setSubjects] = useState<TeacherSubject[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
@@ -196,6 +197,7 @@ export function ExamManagerPage({ initialExamId, initialTab }: ExamManagerPagePr
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
           onResultVisibilityChange={handleResultVisibilityChange}
+          onViewInQuestionBank={onViewInQuestionBank}
         />
       </div>
     </div>

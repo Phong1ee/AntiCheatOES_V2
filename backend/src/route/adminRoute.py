@@ -32,7 +32,7 @@ from src.a_db_config import (
     User,
     UserRole,
 )
-from src.middleware.authMiddleware import ADMIN_ONLY, verify_token
+from src.middleware.authMiddleware import ADMIN_ONLY, verify_token, TEACHER_ONLY
 from src.service.question_bank_import_parser import (
     ParsedQuestionBank,
     QuestionBankParseError,

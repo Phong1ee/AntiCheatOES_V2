@@ -33,9 +33,19 @@ function useDebouncedValue(value: string, delayMs: number) {
 
 interface QuestionBankPageProps {
   initialSubjectId?: string | null;
+  initialQuestionId?: number | null;
+  initialTab?: QuestionBankTab;
+  initialNavigationKey?: number;
+  onInitialNavigationHandled?: (requestKey: number) => void;
 }
 
-export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPageProps) {
+export function QuestionBankPage({
+  initialSubjectId = null,
+  initialQuestionId = null,
+  initialTab,
+  initialNavigationKey,
+  onInitialNavigationHandled,
+}: QuestionBankPageProps) {
   const [activeTab, setActiveTab] = useState<QuestionBankTab>("bank");
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, 350);
@@ -67,6 +77,7 @@ export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPagePr
   const [detail, setDetail] = useState<QuestionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
 
   useEffect(() => {
     if (!initialSubjectId) return;
@@ -76,6 +87,18 @@ export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPagePr
     setPage(1);
     setQuestions([]);
   }, [initialSubjectId]);
+
+  useEffect(() => {
+    if (!initialQuestionId || !initialTab || initialNavigationKey === undefined) return;
+    setActiveTab(initialTab);
+    setSelectedSubject("all");
+    setFilters({});
+    setPage(1);
+    setQuestions([]);
+    setDetailQuestionId(initialQuestionId);
+    setDetailReloadKey((current) => current + 1);
+    onInitialNavigationHandled?.(initialNavigationKey);
+  }, [initialNavigationKey, initialQuestionId, initialTab]);
 
   const queryParams = useMemo(() => {
     const { chapter_id, lo_id, ...questionFilters } = filters;
@@ -327,7 +350,7 @@ export function QuestionBankPage({ initialSubjectId = null }: QuestionBankPagePr
     return () => {
       cancelled = true;
     };
-  }, [detailQuestionId]);
+  }, [detailQuestionId, detailReloadKey]);
 
   const updateFilters = (nextFilters: QuestionBankFilters) => {
     setFilters(nextFilters);

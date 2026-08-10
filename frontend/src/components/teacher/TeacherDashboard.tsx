@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { TeacherHeader } from './TeacherHeader';
 import { TeacherExamList } from './TeacherExamList';
 import { TeacherInfoSidebar } from './TeacherInfoSidebar';
@@ -21,6 +21,12 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [examManagerTab, setExamManagerTab] = useState<'general' | 'settings'>('general');
   const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const [questionBankSubjectId, setQuestionBankSubjectId] = useState<string | null>(null);
+  const [questionBankNavigation, setQuestionBankNavigation] = useState<{
+    questionId: number;
+    tab: 'bank' | 'mine';
+    requestKey: number;
+  } | null>(null);
+  const questionBankNavigationSequence = useRef(0);
   const { setUser } = useUserRole();
 
   // Set user role on mount
@@ -55,6 +61,13 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     setActiveTab('results');
   };
 
+  const handleViewInQuestionBank = (questionId: number, tab: 'bank' | 'mine') => {
+    const requestKey = ++questionBankNavigationSequence.current;
+    setQuestionBankSubjectId(null);
+    setQuestionBankNavigation({ questionId, tab, requestKey });
+    setActiveTab('questions');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
       <TeacherHeader
@@ -67,9 +80,20 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
         <ExamManagerPage
           initialExamId={selectedExamId}
           initialTab={examManagerTab}
+          onViewInQuestionBank={handleViewInQuestionBank}
         />
       ) : activeTab === 'questions' ? (
-        <QuestionBankPage initialSubjectId={questionBankSubjectId} />
+        <QuestionBankPage
+          initialSubjectId={questionBankSubjectId}
+          initialQuestionId={questionBankNavigation?.questionId ?? null}
+          initialTab={questionBankNavigation?.tab}
+          initialNavigationKey={questionBankNavigation?.requestKey}
+          onInitialNavigationHandled={(requestKey) => {
+            setQuestionBankNavigation((current) => (
+              current?.requestKey === requestKey ? null : current
+            ));
+          }}
+        />
       ) : activeTab === 'results' ? (
         <ExamResultsPage initialExamId={resultsExamId} />
       ) : activeTab === 'anticheat' ? (

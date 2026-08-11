@@ -121,11 +121,11 @@ export class CameraFaceRuntime {
 
   private handleObservation(observation: ReturnType<typeof analyzeFaceLandmarks>): void {
     const now = performance.now();
+    // Head/gaze-away detection was unreliable (frequent false positives) and no
+    // longer counts as a violation; only face presence/count is enforced.
     const incidents = [
       this.filter.observe('NO_FACE_DETECTED', observation.faceCount === 0, now, CAMERA_AI_CONFIG.noFaceDurationMs, {}),
       this.filter.observe('MULTIPLE_FACES_DETECTED', observation.faceCount >= 2, now, CAMERA_AI_CONFIG.multipleFacesDurationMs, { faceCount: observation.faceCount }),
-      this.filter.observe('HEAD_AWAY_SUSTAINED', observation.headAway, now, CAMERA_AI_CONFIG.headAwayDurationMs, { yaw: observation.yaw, pitch: observation.pitch }),
-      this.filter.observe('GAZE_AWAY_SUSTAINED', observation.gazeAway, now, CAMERA_AI_CONFIG.gazeAwayDurationMs, { gazeOffset: observation.gazeOffset ?? 0 }),
     ];
     incidents.forEach((incident) => { if (incident) this.onIncident(incident); });
     this.logDiagnostics('running', observation);

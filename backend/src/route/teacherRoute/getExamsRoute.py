@@ -68,14 +68,17 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
 
 
 def _assignment_options(db: Session, exam_id: int, teacher_school_id: str) -> dict:
-    _owned_exam(db, exam_id, teacher_school_id)
+    exam = _owned_exam(db, exam_id, teacher_school_id)
     classes = (
         db.query(CourseClass)
         .options(
             selectinload(CourseClass.subject),
             selectinload(CourseClass.student_classes).selectinload(StudentClass.student),
         )
-        .filter(CourseClass.teacher_id == teacher_school_id)
+        .filter(
+            CourseClass.teacher_id == teacher_school_id,
+            CourseClass.subject_id == exam.subject_id,
+        )
         .order_by(CourseClass.class_name, CourseClass.class_id)
         .all()
     )
@@ -265,17 +268,21 @@ def sync_assignments(
     del role_check
     teacher_school_id = current_user["school_id"]
     try:
-        _owned_exam(db, exam_id, teacher_school_id)
+        exam = _owned_exam(db, exam_id, teacher_school_id)
         owned_classes = (
             db.query(CourseClass)
             .filter(
                 CourseClass.teacher_id == teacher_school_id,
+                CourseClass.subject_id == exam.subject_id,
                 CourseClass.class_id.in_(request.class_ids or [-1]),
             )
             .all()
         )
         if len(owned_classes) != len(request.class_ids):
-            raise HTTPException(status_code=403, detail="One or more classes are not taught by this teacher")
+            raise HTTPException(
+                status_code=403,
+                detail="One or more classes are not taught by this teacher for this exam's subject",
+            )
 
         roster_ids = {
             row[0]
@@ -284,6 +291,7 @@ def sync_assignments(
             .join(User, User.school_id == StudentClass.student_id)
             .filter(
                 CourseClass.teacher_id == teacher_school_id,
+                CourseClass.subject_id == exam.subject_id,
                 User.role == UserRole.student,
             )
             .distinct()
@@ -294,7 +302,10 @@ def sync_assignments(
         if invalid_ids:
             raise HTTPException(
                 status_code=422,
-                detail={"message": "Students must belong to a class taught by this teacher", "student_ids": invalid_ids},
+                detail={
+                    "message": "Students must belong to a class taught by this teacher for this exam's subject",
+                    "student_ids": invalid_ids,
+                },
             )
         class_student_ids = {
             row[0]

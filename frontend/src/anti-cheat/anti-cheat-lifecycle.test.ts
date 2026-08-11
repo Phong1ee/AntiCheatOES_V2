@@ -14,7 +14,7 @@ describe('secured attempt lifecycle', () => {
     expect(start).toHaveBeenCalledOnce();
   });
 
-  it('starts only after required preflight and fullscreen succeed', async () => {
+  it('requests fullscreen before the AI preflight so the click user-activation is not lost', async () => {
     const calls: string[] = [];
     const prepared = runtime();
 
@@ -24,7 +24,7 @@ describe('secured attempt lifecycle', () => {
       startAttempt: async () => { calls.push('start'); },
     });
 
-    expect(calls).toEqual(['preflight', 'fullscreen', 'start']);
+    expect(calls).toEqual(['fullscreen', 'preflight', 'start']);
     expect(returnedRuntime).toBe(prepared);
     expect(prepared.resetForAttemptStart).toHaveBeenCalledOnce();
   });

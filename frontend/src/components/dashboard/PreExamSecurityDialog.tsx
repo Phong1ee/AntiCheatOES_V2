@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { MICROPHONE_CAPTURE_PROFILE } from "../../anti-cheat/microphone-ai.config";
 import { preflightAntiCheatRuntime, startSecuredAttempt } from "../../anti-cheat/anti-cheat-lifecycle";
 import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
+import { requestFullscreenOrThrow } from "../../utils/fullscreen";
 
 interface PreExamSecurityDialogProps {
   open: boolean;
@@ -96,7 +97,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
         // This initializes the actual MediaPipe, Silero, and Pyannote sessions,
         // not merely their model URLs. The live runtime transfers into the exam.
         preflight: () => preflightAntiCheatRuntime(stream),
-        requestFullscreen: () => document.documentElement.requestFullscreen(),
+        requestFullscreen: requestFullscreenOrThrow,
         startAttempt: (preparedRuntime) => onReady(stream, preparedRuntime),
       });
       preflightRuntimeRef.current = runtime;

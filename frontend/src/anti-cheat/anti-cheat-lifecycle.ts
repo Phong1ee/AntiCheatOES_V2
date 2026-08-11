@@ -11,15 +11,17 @@ interface SecureStartDependencies<TRuntime extends PreparedSecurityRuntime> {
   startAttempt: (runtime: TRuntime) => Promise<void>;
 }
 
-// Keep the backend attempt behind every client-side security gate.
+// Fullscreen must be requested first, still inside the click's user-activation
+// window: some browsers (e.g. Vivaldi) reject requestFullscreen() once that
+// window has lapsed, which the AI preflight below is slow enough to cause.
 export async function startSecuredAttempt<TRuntime extends PreparedSecurityRuntime>({
   preflight,
   requestFullscreen,
   startAttempt,
 }: SecureStartDependencies<TRuntime>): Promise<TRuntime> {
+  await requestFullscreen();
   const runtime = await preflight();
   try {
-    await requestFullscreen();
     await startAttempt(runtime);
     runtime.resetForAttemptStart?.();
     return runtime;

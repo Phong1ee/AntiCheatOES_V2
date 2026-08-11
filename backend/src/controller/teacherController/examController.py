@@ -128,7 +128,10 @@ class ExamController:
         server_time = examModel.get_database_now()
         return {
             "success": True,
-            "serverTime": f"{server_time.replace(microsecond=0).isoformat()}Z",
+            # MySQL NOW() is a local naive DATETIME, matching the exam schedule fields
+            # returned alongside it. Labelling it UTC with a "Z" suffix made the browser
+            # shift it by the local offset, so "today" could land on the next calendar day.
+            "serverTime": server_time.replace(microsecond=0).isoformat(),
             "exams": exams,
         }
 

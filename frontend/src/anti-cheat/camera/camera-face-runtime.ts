@@ -6,6 +6,7 @@ import { PerformanceController } from '../performance-controller';
 import { analyzeFaceLandmarks } from './face-analyzer';
 
 type IncidentHandler = (incident: CameraAiIncident) => void;
+type RuntimeErrorHandler = (error: Error) => void;
 
 export class CameraFaceRuntime {
   private landmarker: FaceLandmarker | null = null;
@@ -23,7 +24,22 @@ export class CameraFaceRuntime {
   private lastDiagnosticsAt = 0;
   private lastDiagnosticFrameCount = 0;
 
-  constructor(private readonly stream: MediaStream, private readonly onIncident: IncidentHandler) {}
+  constructor(
+    private readonly stream: MediaStream,
+    private onIncident: IncidentHandler,
+    private readonly onRuntimeError: RuntimeErrorHandler = () => {},
+  ) {}
+
+  setIncidentHandler(onIncident: IncidentHandler): void {
+    this.onIncident = onIncident;
+  }
+
+  resetForAttemptStart(): void {
+    this.filter.reset();
+    this.smoothedYaw = null;
+    this.smoothedPitch = null;
+    this.smoothedGaze = null;
+  }
 
   async start(): Promise<void> {
     const track = this.stream.getVideoTracks()[0];
@@ -83,7 +99,11 @@ export class CameraFaceRuntime {
       return;
     }
     const track = this.stream.getVideoTracks()[0];
-    if (!track || track.readyState !== 'live' || !this.landmarker) return;
+    if (!track || track.readyState !== 'live') {
+      this.onRuntimeError(new Error('The camera track is no longer live.'));
+      return;
+    }
+    if (!this.landmarker) return;
     this.inferenceInFlight = true;
     try {
       if (this.stopped || !this.landmarker || !this.video) return;
@@ -92,6 +112,8 @@ export class CameraFaceRuntime {
       this.performance.record(performance.now() - startedAt);
       this.processedFrames += 1;
       this.handleObservation(this.smoothObservation(analyzeFaceLandmarks(result.faceLandmarks)));
+    } catch (cause) {
+      if (!this.stopped) this.onRuntimeError(cause instanceof Error ? cause : new Error('Camera analysis stopped unexpectedly.'));
     } finally {
       this.inferenceInFlight = false;
     }

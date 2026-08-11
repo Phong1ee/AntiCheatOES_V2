@@ -26,11 +26,16 @@ export class OverlapDetector {
   private stopped = false;
   private skippedInferences = 0;
   private lastDiagnosticsAt = 0;
+  private generation = 0;
 
-  constructor(private readonly onIncident: (incident: OverlapIncident) => void) {}
+  constructor(
+    private readonly onIncident: (incident: OverlapIncident) => void,
+    private readonly onRuntimeError: (error: Error) => void = () => {},
+  ) {}
 
   async start(): Promise<void> {
     this.worker.onmessage = (event) => this.handleWorkerMessage(event.data);
+    this.worker.onerror = () => this.onRuntimeError(new Error('The overlap detection worker stopped unexpectedly.'));
     this.worker.postMessage({ type: 'init', modelUrl: OVERLAP_DETECTOR_CONFIG.modelUrl, overlapThreshold: OVERLAP_DETECTOR_CONFIG.overlapProbabilityThreshold });
     await new Promise<void>((resolve, reject) => {
       this.cancelInitialization = reject;
@@ -78,7 +83,7 @@ export class OverlapDetector {
       samples.set(this.ring.subarray(this.writeIndex)); samples.set(this.ring.subarray(0, this.writeIndex), this.ring.length - this.writeIndex);
     }
     this.inFlight = true;
-    this.worker.postMessage({ type: 'analyze', samples: samples.buffer }, [samples.buffer]);
+    this.worker.postMessage({ type: 'analyze', generation: this.generation, samples: samples.buffer }, [samples.buffer]);
   }
 
   private scheduleInference(): void {
@@ -88,6 +93,7 @@ export class OverlapDetector {
 
   private handleWorkerMessage(message: {
     type: string;
+    generation?: number;
     peakOverlapProbability?: number;
     p95OverlapProbability?: number;
     overlapFrameRatio?: number;
@@ -95,7 +101,12 @@ export class OverlapDetector {
     recentContinuousOverlapMs?: number;
     inferenceMs?: number;
   }): void {
-    if (message.type === 'error') { this.inFlight = false; return; }
+    if (message.generation !== undefined && message.generation !== this.generation) return;
+    if (message.type === 'error') {
+      this.inFlight = false;
+      this.onRuntimeError(new Error('The overlap detection worker reported an error.'));
+      return;
+    }
     if (message.type !== 'result') return;
     this.inFlight = false;
     this.performance.record(message.inferenceMs ?? 0);
@@ -109,6 +120,15 @@ export class OverlapDetector {
     // The Worker already proves the continuous overlap duration from its frame timeline.
     if (peakOverlapProbability < OVERLAP_DETECTOR_CONFIG.overlapProbabilityThreshold || durationMs < OVERLAP_DETECTOR_CONFIG.sustainedOverlapMs) return;
     this.onIncident({ durationMs, overlapProbability: peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, recentContinuousOverlapMs, inferenceMs, model: OVERLAP_DETECTOR_CONFIG.modelName });
+  }
+
+  resetForAttemptStart(): void {
+    this.generation += 1;
+    this.ring.fill(0);
+    this.writeIndex = 0;
+    this.sampleCount = 0;
+    this.lastSpeechAt = 0;
+    this.inFlight = false;
   }
 
   stop(): void {

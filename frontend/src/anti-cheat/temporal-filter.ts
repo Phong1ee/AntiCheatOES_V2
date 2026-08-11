@@ -35,4 +35,8 @@ export class TemporalIncidentFilter {
       metadata: { ...metadata, durationMs: observedDuration },
     };
   }
+
+  reset(): void {
+    this.states.clear();
+  }
 }

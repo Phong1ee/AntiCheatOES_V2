@@ -46,6 +46,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
   const passedCount = passableResults.filter((result) => result.score! >= result.passingScore!).length;
   const serverNow = serverTime ? new Date(serverTime) : new Date();
   const activeAndUpcomingExams = selectActiveAndUpcomingExams(exams, serverNow);
+  const needsAntiCheatPreflight = activeAndUpcomingExams.some((exam) => exam.antiCheatEnabled);
 
   return (
     <div className="space-y-6">
@@ -96,7 +97,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
 
       <ExamCodesWidget exams={activeAndUpcomingExams.filter((exam) => exam.status === 'open')} />
 
-      <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
+      {needsAntiCheatPreflight && <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
         <CardHeader>
           <CardTitle className="text-lg text-gray-800">Pre-Exam Checklist</CardTitle>
         </CardHeader>
@@ -116,7 +117,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card className="shadow-lg rounded-2xl border-0">
         <CardHeader>

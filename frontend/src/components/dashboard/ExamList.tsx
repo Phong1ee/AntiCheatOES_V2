@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -20,6 +20,7 @@ import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
 import { PreExamSecurityDialog } from "./PreExamSecurityDialog";
 import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
+import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
 
 type Exam = StudentExamListItem;
 
@@ -43,13 +44,15 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean, runtime?: AntiCheatRuntime) => void;
   onViewResults?: (examId: string) => void;
   exams?: StudentExamListItem[];
   loading?: boolean;
   loadError?: string | null;
   onRetry?: () => void;
   autoOpenCodeExamId?: string | null;
+  onAutoOpenHandled?: () => void;
+  onStartError?: (message: string) => void;
 }
 
 export function ExamList({
@@ -60,6 +63,8 @@ export function ExamList({
   loadError: suppliedLoadError,
   onRetry,
   autoOpenCodeExamId,
+  onAutoOpenHandled,
+  onStartError,
 }: ExamListProps) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("date");
@@ -73,6 +78,7 @@ export function ExamList({
   const [fetchedExams, setFetchedExams] = useState<Exam[]>([]);
   const [fetchedLoading, setFetchedLoading] = useState(suppliedExams === undefined);
   const [fetchedLoadError, setFetchedLoadError] = useState<string | null>(null);
+  const handledAutoOpenIdRef = useRef<string | null>(null);
 
   const fetchExams = async () => {
       try {
@@ -106,8 +112,26 @@ export function ExamList({
       return firstDate - secondDate;
     });
 
-  const handleViewDetails = (exam: Exam) => {
+  const resetExamFlow = () => {
+    setDetailsOpen(false);
+    setCodeOpen(false);
+    setSecurityOpen(false);
+    setSecurityCode(undefined);
+    setSecurityResume(false);
+    setSelectedExam(null);
+  };
+
+  const prepareExamFlow = (exam: Exam) => {
+    setDetailsOpen(false);
+    setCodeOpen(false);
+    setSecurityOpen(false);
+    setSecurityCode(undefined);
+    setSecurityResume(false);
     setSelectedExam(exam);
+  };
+
+  const handleViewDetails = (exam: Exam) => {
+    prepareExamFlow(exam);
     setDetailsOpen(true);
   };
 
@@ -116,7 +140,7 @@ export function ExamList({
     onEnterExam?.(examId);
   };
 
-  const startExam = async (exam: Exam, code?: string, stream?: MediaStream) => {
+  const startExam = async (exam: Exam, code?: string, stream?: MediaStream, runtime?: AntiCheatRuntime) => {
     setStartingExamId(exam.id);
     try {
       const data = await studentExamService.start(exam.id, code);
@@ -129,16 +153,18 @@ export function ExamList({
           durationMinutes: data.durationMinutes,
         })
       );
-      setCodeOpen(false);
-      onEnterExam?.(exam.id, stream);
+      resetExamFlow();
+      onEnterExam?.(exam.id, stream, false, runtime);
+    } catch (error) {
+      onStartError?.(error instanceof Error ? error.message : "Unable to start the exam.");
+      throw error;
     } finally {
       setStartingExamId(null);
     }
   };
 
   const handleRequestCode = (exam: Exam) => {
-    setSelectedExam(exam);
-    setDetailsOpen(false);
+    prepareExamFlow(exam);
     if (!exam.requiresExamCode && !exam.antiCheatEnabled) {
       setFetchedLoadError(null);
       void startExam(exam).catch((error: unknown) => {
@@ -152,8 +178,18 @@ export function ExamList({
     }
   };
   useEffect(() => {
+    if (!autoOpenCodeExamId) {
+      handledAutoOpenIdRef.current = null;
+      return;
+    }
+    if (handledAutoOpenIdRef.current === autoOpenCodeExamId) return;
+
+    handledAutoOpenIdRef.current = autoOpenCodeExamId;
+    // The parent command is one-shot: returning to My Exams must not replay it.
+    onAutoOpenHandled?.();
     const exam = exams.find((item) => item.id === autoOpenCodeExamId && item.status === "open");
-    if (exam) handleRequestCode(exam);
+    if (exam?.canResume) void handleResume(exam);
+    else if (exam) handleRequestCode(exam);
   }, [autoOpenCodeExamId, exams]);
 
   const handleCodeVerify = async (code: string) => {
@@ -175,35 +211,42 @@ export function ExamList({
 
   const handleResume = async (exam: Exam) => {
     if (!exam.openAttemptId) return;
+    resetExamFlow();
     setFetchedLoadError(null);
     if (exam.antiCheatEnabled) {
-      setSelectedExam(exam); setSecurityCode(undefined); setSecurityResume(true); setSecurityOpen(true);
+      setSelectedExam(exam); setSecurityResume(true); setSecurityOpen(true);
       return;
     }
     try {
       const resumed = await studentExamService.resume(exam.id, exam.openAttemptId, "normal_resume");
       if (Boolean(resumed.terminated)) {
-        setFetchedLoadError("This attempt has already ended and cannot be resumed.");
+        const message = "This attempt has already ended and cannot be resumed.";
+        setFetchedLoadError(message);
+        onStartError?.(message);
         return;
       }
       localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: exam.id, attemptId: exam.openAttemptId }));
+      resetExamFlow();
       onEnterExam?.(exam.id);
     } catch (error) {
-      setFetchedLoadError(error instanceof Error ? error.message : "Unable to resume this exam.");
+      const message = error instanceof Error ? error.message : "Unable to resume this exam.";
+      setFetchedLoadError(message);
+      onStartError?.(message);
     }
   };
 
-  const handleSecurityReady = async (stream: MediaStream) => {
+  const handleSecurityReady = async (stream: MediaStream, runtime: AntiCheatRuntime) => {
     if (!selectedExam) throw new Error("No exam selected");
     if (securityResume) {
       if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
       const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
       if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
       localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
-      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded);
+      resetExamFlow();
+      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded, runtime);
       return;
     }
-    await startExam(selectedExam, securityCode, stream);
+    await startExam(selectedExam, securityCode, stream, runtime);
   };
 
   if (loading) {
@@ -404,7 +447,7 @@ export function ExamList({
       <ExamDetailsDialog
         exam={selectedExam}
         open={detailsOpen}
-        onOpenChange={setDetailsOpen}
+        onOpenChange={(open) => open ? setDetailsOpen(true) : resetExamFlow()}
         onEnterExam={() => selectedExam && handleRequestCode(selectedExam)}
         onRequestCode={() => selectedExam && handleRequestCode(selectedExam)}
       />
@@ -412,7 +455,7 @@ export function ExamList({
       <ExamCodeDialog
         exam={selectedExam}
         open={codeOpen}
-        onOpenChange={setCodeOpen}
+        onOpenChange={(open) => open ? setCodeOpen(true) : resetExamFlow()}
         onVerify={handleCodeVerify}
         onStart={handleCodeStart}
       />
@@ -420,7 +463,7 @@ export function ExamList({
         open={securityOpen}
         examTitle={selectedExam.title}
         violationLimit={selectedExam.violationLimit}
-        onOpenChange={setSecurityOpen}
+        onOpenChange={(open) => open ? setSecurityOpen(true) : resetExamFlow()}
         onReady={handleSecurityReady}
       />}
     </div>

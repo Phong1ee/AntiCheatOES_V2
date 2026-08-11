@@ -23,6 +23,7 @@ export class MicrophoneVadRuntime {
     private readonly onIncident: (incident: SpeechIncident) => void,
     private readonly onSpeechFrame?: (probability: number, frame: Float32Array) => void,
     private readonly onSpeechConfirmed?: () => void,
+    private readonly onRuntimeError: (error: Error) => void = () => {},
   ) {}
 
   async start(): Promise<void> {
@@ -53,7 +54,11 @@ export class MicrophoneVadRuntime {
         if (this.stopped) return;
         const now = performance.now();
         if (isSpeech >= MICROPHONE_AI_CONFIG.positiveSpeechThreshold && this.speechStartedAt === null) this.speechStartedAt = now;
-        this.onSpeechFrame?.(isSpeech, frame);
+        try {
+          this.onSpeechFrame?.(isSpeech, frame);
+        } catch (cause) {
+          this.onRuntimeError(cause instanceof Error ? cause : new Error('Speech analysis stopped unexpectedly.'));
+        }
         const incident = this.filter.observe(isSpeech, now);
         if (incident) {
           this.logDiagnostics('single speech confirmed', { finalSpeechDurationMs: incident.durationMs });
@@ -64,7 +69,11 @@ export class MicrophoneVadRuntime {
       onSpeechRealStart: () => {
         this.realSpeechConfirmedAt = performance.now();
         this.logDiagnostics('real speech confirmed');
-        this.onSpeechConfirmed?.();
+        try {
+          this.onSpeechConfirmed?.();
+        } catch (cause) {
+          this.onRuntimeError(cause instanceof Error ? cause : new Error('Speech analysis stopped unexpectedly.'));
+        }
       },
       // Segments supplied by the library are intentionally ignored and never persisted.
       onSpeechEnd: () => {
@@ -88,6 +97,12 @@ export class MicrophoneVadRuntime {
     const vad = this.vad;
     this.vad = null;
     if (vad) void vad.destroy();
+  }
+
+  resetForAttemptStart(): void {
+    this.filter.reset();
+    this.speechStartedAt = null;
+    this.realSpeechConfirmedAt = null;
   }
 
   private logDiagnostics(event: string, details: Record<string, number> = {}): void {

@@ -3,41 +3,38 @@ import { AlertCircle, Camera, Maximize, Mic, ShieldCheck } from "lucide-react";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { MICROPHONE_CAPTURE_PROFILE } from "../../anti-cheat/microphone-ai.config";
+import { preflightAntiCheatRuntime, startSecuredAttempt } from "../../anti-cheat/anti-cheat-lifecycle";
+import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
 
 interface PreExamSecurityDialogProps {
   open: boolean;
   examTitle: string;
   violationLimit: number;
   onOpenChange: (open: boolean) => void;
-  onReady: (stream: MediaStream) => Promise<void>;
-}
-
-const securityAssetPaths = [
-  `${import.meta.env.BASE_URL}models/camera/face_landmarker.task`,
-  `${import.meta.env.BASE_URL}vad/silero_vad_v5.onnx`,
-  `${import.meta.env.BASE_URL}models/audio/pyannote-segmentation-3.0-int8.onnx`,
-];
-
-async function preloadSecurityAssets(): Promise<void> {
-  const responses = await Promise.all(securityAssetPaths.map((path) => fetch(path, { cache: "force-cache" })));
-  if (responses.some((response) => !response.ok)) throw new Error("Security models could not be prepared. Please retry.");
+  onReady: (stream: MediaStream, runtime: AntiCheatRuntime) => Promise<void>;
 }
 
 export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenChange, onReady }: PreExamSecurityDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const ownedStreamRef = useRef<MediaStream | null>(null);
+  const preflightRuntimeRef = useRef<AntiCheatRuntime | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
 
   const stopStream = () => {
+    preflightRuntimeRef.current?.stop();
+    preflightRuntimeRef.current = null;
     ownedStreamRef.current?.getTracks().forEach((track) => track.stop());
     ownedStreamRef.current = null;
     setStream(null);
   };
 
-  useEffect(() => () => { ownedStreamRef.current?.getTracks().forEach((track) => track.stop()); }, []);
+  useEffect(() => () => {
+    preflightRuntimeRef.current?.stop();
+    ownedStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
   useEffect(() => {
     if (!stream) return;
     if (videoRef.current) videoRef.current.srcObject = stream;
@@ -83,9 +80,6 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
           channelCount: settings?.channelCount,
         });
       }
-      // Preload local model files while this dialog is still visible so the
-      // fullscreen readiness gate does not have to wait for asset downloads.
-      await preloadSecurityAssets();
       ownedStreamRef.current = nextStream;
       setStream(nextStream);
     } catch (cause) {
@@ -98,12 +92,21 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
     if (!stream) return;
     setError(null); setWorking(true);
     try {
-      await document.documentElement.requestFullscreen();
-      await onReady(stream);
+      const runtime = await startSecuredAttempt({
+        // This initializes the actual MediaPipe, Silero, and Pyannote sessions,
+        // not merely their model URLs. The live runtime transfers into the exam.
+        preflight: () => preflightAntiCheatRuntime(stream),
+        requestFullscreen: () => document.documentElement.requestFullscreen(),
+        startAttempt: (preparedRuntime) => onReady(stream, preparedRuntime),
+      });
+      preflightRuntimeRef.current = runtime;
       ownedStreamRef.current = null; // Ownership transfers to Dashboard/ExamInterface after API success.
+      preflightRuntimeRef.current = null;
       setStream(null);
       onOpenChange(false);
     } catch (cause) {
+      preflightRuntimeRef.current?.stop();
+      preflightRuntimeRef.current = null;
       if (document.fullscreenElement) await document.exitFullscreen();
       setError(cause instanceof Error ? cause.message : "Unable to start the secure exam session.");
     } finally { setWorking(false); }

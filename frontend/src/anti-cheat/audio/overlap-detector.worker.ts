@@ -73,8 +73,8 @@ self.onmessage = async (event: MessageEvent) => {
     const input = new ort.Tensor('float32', samples, [1, 1, samples.length]);
     const result = await session.run({ [session.inputNames[0]]: input });
     const output = result[session.outputNames[0]].data as Float32Array;
-    self.postMessage({ type: 'result', ...overlapEvidence(output), inferenceMs: performance.now() - startedAt });
+    self.postMessage({ type: 'result', generation: event.data.generation, ...overlapEvidence(output), inferenceMs: performance.now() - startedAt });
   } catch (error) {
-    self.postMessage({ type: 'error', message: error instanceof Error ? error.message : 'Overlap detector failed.' });
+    self.postMessage({ type: 'error', generation: event.data.generation, message: error instanceof Error ? error.message : 'Overlap detector failed.' });
   }
 };

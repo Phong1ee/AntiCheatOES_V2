@@ -37,5 +37,6 @@ export class SpeechTemporalFilter {
   reset(): void {
     this.speechStartedAt = null;
     this.lastPositiveAt = null;
+    this.lastIncidentAt = null;
   }
 }

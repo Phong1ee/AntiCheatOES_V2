@@ -31,6 +31,8 @@ from src.models.teacher.requestModel.TeacherExamRequest import TeacherExamReques
 from src.route.teacherRoute.addExamRoute import add_exam_to_database, update_exam_in_database
 from src.route.teacherRoute.addQuestionsRoute import (
     add_questions_to_exam_from_question_bank,
+    get_question_import_candidates,
+    get_questions_from_question_bank,
     update_question_in_exam,
 )
 from src.route.teacherRoute.getExamsRoute import (
@@ -186,8 +188,16 @@ class TeacherExamSubjectPermissionTests(unittest.TestCase):
         return question
 
     def _attach_shared_web_question(self) -> tuple[Exam, Question]:
+        """Import requires an active WEB assignment; the caller's inactive
+        precondition is restored immediately after so downstream assertions
+        about an unassigned teacher still hold."""
         exam = self.db.query(Exam).filter_by(examcode="T1-EXAM").one()
         question = self._shared_web_question()
+        assignment = self.db.query(TeacherSubject).filter_by(
+            teacher_id="T1", subject_id="WEB"
+        ).one()
+        assignment.is_active = True
+        self.db.commit()
         result = add_questions_to_exam_from_question_bank(
             exam.exam_id,
             [QuestionsSelectFromBank(question_id=question.question_id)],
@@ -196,6 +206,8 @@ class TeacherExamSubjectPermissionTests(unittest.TestCase):
             self.db,
         )
         self.assertEqual(result["imported_question_ids"], [question.question_id])
+        assignment.is_active = False
+        self.db.commit()
         return exam, question
 
     def test_overview_contains_only_active_assignments_and_real_counts(self):
@@ -489,6 +501,70 @@ class TeacherExamSubjectPermissionTests(unittest.TestCase):
                 self.db,
             )
         self.assertEqual(forbidden_write.exception.status_code, 403)
+
+    def test_import_rejects_question_from_unassigned_subject(self):
+        exam = self.db.query(Exam).filter_by(examcode="T1-EXAM").one()
+        question = self._shared_web_question()
+
+        with self.assertRaises(HTTPException) as forbidden:
+            add_questions_to_exam_from_question_bank(
+                exam.exam_id,
+                [QuestionsSelectFromBank(question_id=question.question_id)],
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(forbidden.exception.status_code, 403)
+        self.assertEqual(
+            self.db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).count(), 0
+        )
+
+    def test_browse_endpoints_reject_and_exclude_unassigned_subject(self):
+        exam = self.db.query(Exam).filter_by(examcode="T1-EXAM").one()
+        self._shared_web_question()
+
+        with self.assertRaises(HTTPException) as forbidden:
+            get_questions_from_question_bank(
+                "WEB",
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(forbidden.exception.status_code, 403)
+
+        with self.assertRaises(HTTPException) as forbidden_filter:
+            get_question_import_candidates(
+                exam.exam_id,
+                1,
+                10,
+                {"school_id": "T1"},
+                {},
+                self.db,
+                None,
+                None,
+                None,
+                "WEB",
+                None,
+                None,
+            )
+        self.assertEqual(forbidden_filter.exception.status_code, 403)
+
+        candidates = get_question_import_candidates(
+            exam.exam_id,
+            1,
+            10,
+            {"school_id": "T1"},
+            {},
+            self.db,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        self.assertEqual(candidates["items"], [])
+        self.assertEqual(candidates["filter_options"]["subjects"], [])
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ interface HeaderProps {
 }
 
 const navigation = [
-  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'dashboard', label: 'Exam Calendar' },
   { id: 'my-exams', label: 'My Exams' },
   { id: 'results', label: 'Exam Results' },
 ];

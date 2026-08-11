@@ -6,7 +6,7 @@ AntiCheatOES_V2_new - Online Examination System with Anti-Cheat Mechanisms.
 
 Technology Stack
 
-Use only technologies, languages, libraries, and project structure alreadypresent in this repository.
+Use only technologies, languages, libraries, and project structure already present in this repository, except for the explicitly approved Multiuser Reliability additions defined below.
 
 Backend:
 
@@ -57,6 +57,108 @@ Use the database access approach already present in the related module.
 Do not introduce a second ORM or migrate existing SQLAlchemy code to anotherdatabase layer.
 
 Before changing models or migrations, inspect the existing SQLAlchemy modelsand Alembic migration history.
+
+Multiuser Reliability Architecture — Explicitly Approved Additions
+
+The AntiCheatOES_V2 Multiuser / Reliability roadmap is an explicitly approved cross-role architecture task covering Student, Teacher, and Admin.
+
+These approvals apply only when the current prompt explicitly references AntiCheatOES_V2_Implementation_Runbook_All_Roles, the Multiuser / Reliability roadmap, or one of its numbered implementation phases. They do not authorize unrelated infrastructure changes outside that scope.
+
+For those roadmap tasks, the following additions are approved even if they are not currently present in the repository.
+
+Approved infrastructure:
+
+Docker
+
+Docker Compose
+
+Nginx as reverse proxy / load balancer
+
+Redis, using the existing Redis Python dependency where applicable
+
+RabbitMQ as the message broker
+
+Approved backend dependency additions:
+
+Exactly one Python RabbitMQ client may be added when the RabbitMQ phase requires it.
+
+Do not add multiple RabbitMQ clients or messaging frameworks for the same purpose.
+
+Do not add Celery unless a later explicit task specifically approves it.
+
+Do not add Kafka or another message broker.
+
+Do not introduce a new ORM for this roadmap.
+
+Approved load-testing tooling:
+
+Use exactly one external load-testing tool when the load-test phase requires it: Locust OR k6.
+
+Load-testing scripts and dependencies must remain development/test tooling and must not become application runtime dependencies unless explicitly required.
+
+Approved shared architecture modules may include:
+
+Redis client / CacheService
+
+RabbitMQ connection and topology module
+
+Transactional Outbox publisher
+
+Background workers
+
+Health and readiness endpoints
+
+Request-ID / structured logging middleware
+
+Dockerfiles
+
+Docker Compose configuration
+
+Nginx configuration
+
+Load and failure test scripts
+
+Approved database infrastructure may be added only when the current roadmap phase explicitly requires it and only after checking that no equivalent already exists. Examples include:
+
+outbox_event
+
+background_job
+
+audit_log
+
+revision, version, or cache-version fields
+
+processed-event or idempotency metadata when required
+
+focused UNIQUE constraints or indexes required for concurrency correctness
+
+Do not create any approved table, column, service, worker, middleware, queue, cache layer, endpoint, or infrastructure component blindly.
+
+For every Multiuser Reliability phase:
+
+Inspect the current source, active schema, Alembic migrations, and existing tests first.
+
+Search for an existing implementation or equivalent mechanism before changing code.
+
+If the required capability already exists and is correct, keep it and verify it with focused tests.
+
+Only implement, refactor, or migrate the missing or incorrect portion.
+
+Do not recreate an equivalent table, endpoint, service, migration, worker, cache layer, route, or business flow from scratch.
+
+Preserve existing correct business behavior and API compatibility unless the current phase explicitly changes the contract.
+
+Do not automatically implement later phases. Complete only the current phase, run its focused regression tests, and report the result before moving to the next phase.
+
+Backend Dependency Source of Truth
+
+When backend/pyproject.toml and backend/uv.lock are present and maintained, use them as the canonical backend dependency definition for roadmap work.
+
+Use uv sync / uv run for the canonical backend workflow unless the current repository explicitly documents another source of truth.
+
+If backend/requirements.txt exists but is stale, do not silently treat it as more authoritative than pyproject.toml and uv.lock. Either synchronize it in a focused dependency-management task or document the canonical uv workflow.
+
+Do not commit secrets or real environment credentials. Use example/template environment files for new infrastructure configuration.
 
 Current Project Structure
 
@@ -142,7 +244,7 @@ If any command cannot run, do not claim the schema changed; report the exact blo
 
 Do not remove a migration file after it may have been applied to any shared orconfigured database. Create a new focused migration to reverse the schemachange instead.
 
-Use the existing project tables and do not introduce a new table unless thecurrent task explicitly approves it. The current SQLAlchemy model set includes:
+Use the existing project tables and do not introduce a new table unless the current task explicitly approves it. The current SQLAlchemy model set includes:
 
 user
 
@@ -296,11 +398,47 @@ Task Scope Precedence
 
 The explicit task in the current user prompt determines the active module.
 
-The Student Module Roadmap applies only when the current task belongs to theStudent module.
+Multiuser Reliability Task Scope
 
-A clearly scoped Teacher module task may be implemented without completing theremaining Student roadmap items first.
+When the current prompt explicitly references AntiCheatOES_V2_Implementation_Runbook_All_Roles, the Multiuser Reliability roadmap, or one of its numbered phases, that prompt is a cross-role architecture task and takes precedence over the general Student Module Roadmap for its own scope.
 
-Do not implement Admin functionality unless the current task explicitlyrequests it.
+A Multiuser Reliability phase may update the shared infrastructure and the Student, Teacher, or Admin modules explicitly named by that phase.
+
+Do not require unrelated Student roadmap items to be completed first.
+
+Do not expand a phase into unrelated Teacher or Admin features that the current phase does not request.
+
+Do not automatically implement later roadmap phases.
+
+Complete only the current numbered phase, run its focused regression tests, and report the result before moving to the next phase.
+
+Existing Correct Implementation Rule
+
+Before implementing any requirement in a Multiuser Reliability phase:
+
+Search the current repository for an existing implementation.
+
+Inspect the active schema and Alembic history when the requirement is database-related.
+
+Inspect existing focused tests.
+
+If an equivalent implementation already exists and satisfies the requirement, do not rewrite it.
+
+Verify it with tests and preserve it.
+
+Add or modify code only where a verified gap exists.
+
+Do not create duplicate abstractions or parallel implementations merely because the Runbook contains an example name.
+
+When the Runbook suggests a table, column, route, service, worker, version field, or constraint, first determine whether the current project already has an equivalent mechanism that safely satisfies the same requirement.
+
+Preserve existing correct business behavior and API compatibility unless the current phase explicitly requires a contract change.
+
+The Student Module Roadmap applies only when the current task belongs to the Student module.
+
+A clearly scoped Teacher module task may be implemented without completing the remaining Student roadmap items first.
+
+Do not implement Admin functionality unless the current task explicitly requests it.
 
 When a task explicitly limits the scope to Teacher:
 
@@ -318,11 +456,11 @@ Do not expand the task into unrelated Student or Exam work.
 
 Anti-Cheat Task Scope
 
-An explicitly scoped anti-cheat task is a cross-module task. It may update theTeacher settings UI, Student exam flow, backend routes/controllers/models,Alembic migrations, services, types, and focused tests required by that task.
+An explicitly scoped anti-cheat task is a cross-module task. It may update the Teacher settings UI, Student exam flow, backend routes/controllers/models, Alembic migrations, services, types, and focused tests required by that task.
 
-The numbered anti-cheat implementation prompts take precedence over the generalStudent Module Roadmap for their own scope. Do not require unrelated Studentroadmap items, Admin functionality, fresh seed data, or unrelated refactorsbefore completing an anti-cheat prompt.
+The numbered anti-cheat implementation prompts take precedence over the general Student Module Roadmap for their own scope. Do not require unrelated Studentroadmap items, Admin functionality, fresh seed data, or unrelated refactors before completing an anti-cheat prompt.
 
-Implement only the current anti-cheat phase. Do not automatically implementlater phases unless the current prompt explicitly requests them.
+Implement only the current anti-cheat phase. Do not automatically implement later phases unless the current prompt explicitly requests them.
 
 Development Rules
 
@@ -410,33 +548,27 @@ Backend Commands
 
 Run backend:
 
-cd backend
-uv run python main.py
+cd backenduv run python main.py
 
 Check Python syntax:
 
-cd backend
-uv run python -m py_compile main.py
+cd backenduv run python -m py_compile main.py
 
 Run backend tests if a test suite exists:
 
-cd backend
-uv run pytest
+cd backenduv run pytest
 
 Run a focused backend test file when appropriate:
 
-cd backend
-uv run pytest path/to/test_file.py
+cd backenduv run pytest path/to/test_file.py
 
 Check Alembic current revision if Alembic is present:
 
-cd backend
-uv run alembic current
+cd backenduv run alembic current
 
 Check Alembic heads if Alembic is present:
 
-cd backend
-uv run alembic heads
+cd backenduv run alembic heads
 
 Do not run alembic upgrade head without first inspecting the generatedmigration.
 
@@ -444,23 +576,19 @@ Frontend Commands
 
 Run frontend:
 
-cd frontend
-npm run dev
+cd frontendnpm run dev
 
 Build frontend:
 
-cd frontend
-npm run build
+cd frontendnpm run build
 
 Run TypeScript type checking if the project defines a typecheck script:
 
-cd frontend
-npm run typecheck
+cd frontendnpm run typecheck
 
 Run lint if configured:
 
-cd frontend
-npm run lint
+cd frontendnpm run lint
 
 Do not add a new frontend test framework only for a single task unlessexplicitly requested.
 
@@ -524,7 +652,7 @@ Student answers MCQ and Essay questions; answers are autosaved using thevalid at
 
 Frontend sends anti-cheat events to the backend; backend owns the persistentviolation count and termination decision.
 
-Student submits manually, timer auto-submits, or backend terminates thecurrent attempt when its violation limit is reached.
+Student submits manually, timer auto-submits, or backend terminates the current attempt when its violation limit is reached.
 
 Normal submission follows existing grading behavior. A terminatedanti-cheat attempt receives score 0 and only that attempt is affected.
 
@@ -598,7 +726,7 @@ DELETE /api/teacher/question-bank/{question_id}
 
 Declare fixed paths such as /mine, /subjects, and /chapters beforedynamic routes such as /{question_id}, or otherwise ensure that dynamicrouting cannot capture the fixed paths incorrectly.
 
-Do not create /api/admin/question-bank/* unless the current task explicitlyrequests Admin functionality.
+Do not create /api/admin/question-bank/\* unless the current task explicitly requests Admin functionality.
 
 Teacher Anti-Cheat Monitor
 
@@ -822,7 +950,7 @@ The Teacher Anti-Cheat Monitor must use real database data, not mock attempts,co
 
 Required testing
 
-Add focused tests for anti-cheat disabled behavior, shared counting, duplicateevents, transaction rollback, concurrent events near the limit, zero-scoretermination, Essay finalization, refresh/Resume idempotency, device mismatch,session rotation, authorization, and real Teacher monitor queries. Run andreport only commands and test results that actually executed.
+Add focused tests for anti-cheat disabled behavior, shared counting, duplicateevents, transaction rollback, concurrent events near the limit, zero-scoretermination, Essay finalization, refresh/Resume idempotency, device mismatch,session rotation, authorization, and real Teacher monitor queries. Run and report only commands and test results that actually executed.
 
 Teacher Question Bank Rules
 
@@ -880,7 +1008,7 @@ Reusable Question Bank questions must not require exam_id orquestion_point.
 
 Your Questions tab
 
-Your Questions returns only questions where:question.created_by == current_teacher.school_id.
+Your Questions returns only questions where.created_by == current_teacher.school_id.
 
 Your Questions may display:
 
@@ -960,8 +1088,7 @@ new -> draft
 
 Submit:
 
-draft -> pending
-rejected -> pending
+draft -> pendingrejected -> pending
 
 Edit approved:
 
@@ -1125,14 +1252,11 @@ Supported cases:
 
 Subject, Chapter, and LO selected:
 
-question.subject_id
-chapter_question
-lo_question
+question.subject_idchapter_questionlo_question
 
 Subject and Chapter selected, no LO:
 
-question.subject_id
-chapter_question
+question.subject_idchapter_question
 
 Subject selected, no Chapter or LO:
 
@@ -1140,9 +1264,7 @@ question.subject_id
 
 Draft without Subject:
 
-question.subject_id = NULL
-no chapter_question rows
-no lo_question rows
+question.subject_id = NULLno chapter_question rowsno lo_question rows
 
 Question revision
 
@@ -1356,34 +1478,13 @@ Do not represent Chapters or Learning Objectives as one string.
 
 Use arrays, for example:
 
-interface SubjectSummary {
-  subject_id: string;
-  subject_name: string;
-}
+interface SubjectSummary {subject_id: string;subject_name: string;}
 
-interface ChapterSummary {
-  chapter_id: number;
-  chapter_name: string;
-}
+interface ChapterSummary {chapter_id: number;chapter_name: string;}
 
-interface LearningObjectiveSummary {
-  lo_id: number;
-  lo_name: string;
-}
+interface LearningObjectiveSummary {lo_id: number;lo_name: string;}
 
-interface QuestionBankItem {
-  question_id: number;
-  question_text: string;
-  question_type: QuestionType;
-  question_difficulties: QuestionDifficulty | null;
-  question_status: QuestionStatus;
-  subject: SubjectSummary | null;
-  chapters: ChapterSummary[];
-  learning_objectives: LearningObjectiveSummary[];
-  option_count?: number;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+interface QuestionBankItem {question_id: number;question_text: string;question_type: QuestionType;question_difficulties: QuestionDifficulty | null;question_status: QuestionStatus;subject: SubjectSummary | null;chapters: ChapterSummary[];learning_objectives: LearningObjectiveSummary[];option_count?: number;created_at?: string | null;updated_at?: string | null;}
 
 Adapt names to existing project conventions.
 

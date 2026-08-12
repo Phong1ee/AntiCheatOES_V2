@@ -37,7 +37,7 @@ interface ExamEditorProps {
     resultVisibility: ResultVisibility;
   } | null;
   subjects: TeacherSubject[];
-  initialTab?: 'general' | 'settings';
+  initialTab?: 'general' | 'questions' | 'settings';
   onClose: () => void;
   onSave: (examData: {
     id: string;

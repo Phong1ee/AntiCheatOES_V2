@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { CreateExamDialog, type CreateExamDraft } from "./CreateExamDialog";
 import { ExamEditor } from "./ExamEditor";
 import { ExamListSidebar } from "./ExamListSidebar";
 import { teacherExamService } from "../../../services/teacher-exam.service";
@@ -46,6 +47,8 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   resultVisibility: exam.result_visibility ?? "hidden",
 });
 
+type EditorTab = 'general' | 'questions' | 'settings';
+
 interface ExamManagerPageProps {
   initialExamId?: string | null;
   initialTab?: 'general' | 'settings';
@@ -58,6 +61,8 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
   const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editorTab, setEditorTab] = useState<EditorTab | undefined>(initialTab);
 
   const loadManagerData = async () => {
     try {
@@ -90,7 +95,34 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
     if (initialExamId) setSelectedExamId(initialExamId);
   }, [initialExamId]);
 
-  const handleCreateNew = () => setSelectedExamId(`new-${Date.now()}`);
+  useEffect(() => {
+    setEditorTab(initialTab);
+  }, [initialTab]);
+
+  const handleCreateNew = () => setCreateDialogOpen(true);
+
+  const handleCreateExam = async (draft: CreateExamDraft) => {
+    const created = await teacherExamService.create({
+      title: draft.title.trim(),
+      examcode: draft.examCode?.trim() || null,
+      max_attempt: draft.maxAttempt,
+      description: draft.description.trim(),
+      duration_minutes: draft.duration,
+      start_time: draft.startTime,
+      end_time: draft.endTime,
+      status: "draft",
+      result_visibility: "hidden",
+      subject_id: draft.subjectId,
+      total_points: 100 as const,
+      passing_score: draft.passingScore,
+    });
+    await loadManagerData();
+    setSelectedExamId(String(created.exam_id));
+    // Land on Questions: the exam details are already captured, so adding
+    // questions is the next step in the flow.
+    setEditorTab("questions");
+    toast.success("Exam created successfully.");
+  };
 
   const handleSaveExam = async (examData: {
     id: string;
@@ -181,7 +213,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
         <ExamListSidebar
           exams={exams}
           selectedExamId={selectedExamId}
-          onSelectExam={setSelectedExamId}
+          onSelectExam={(id) => { setEditorTab(undefined); setSelectedExamId(id); }}
           onCreateNew={handleCreateNew}
           onDeleteExam={handleDeleteExam}
           onDuplicateExam={handleDuplicateExam}
@@ -193,13 +225,20 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           examId={selectedExamId}
           exam={selectedExam}
           subjects={subjects}
-          initialTab={initialTab}
+          initialTab={editorTab}
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
           onResultVisibilityChange={handleResultVisibilityChange}
           onViewInQuestionBank={onViewInQuestionBank}
         />
       </div>
+
+      <CreateExamDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        subjects={subjects}
+        onCreate={handleCreateExam}
+      />
     </div>
   );
 }

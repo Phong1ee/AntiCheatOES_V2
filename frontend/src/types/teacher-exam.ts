@@ -19,6 +19,7 @@ export interface TeacherExamApi {
   start_time: string | null;
   end_time: string | null;
   totalStudents: number;
+  question_count: number;
   manage_by: string;
   status: ExamStatus;
   schedule_status: "upcoming" | "ongoing" | "completed";

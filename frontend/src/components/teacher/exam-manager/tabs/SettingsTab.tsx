@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
+import { CheckCircle, CheckCircle2, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
@@ -44,6 +44,23 @@ const visibilityOptions: { value: ResultVisibility; label: string}[] = [
 const isResultVisibility = (value: string): value is ResultVisibility =>
   visibilityOptions.some((option) => option.value === value);
 
+const snapshotOf = (settings: TeacherExamSettingsPayload, resultVisibility: ResultVisibility) =>
+  JSON.stringify({ settings, resultVisibility });
+
+/** Returns a message when the payload is not safe to send, otherwise null. */
+const validateSettings = (settings: TeacherExamSettingsPayload): string | null => {
+  if (!Number.isInteger(settings.grace_period) || settings.grace_period < 0) {
+    return 'Grace period must be a non-negative integer.';
+  }
+  if (
+    settings.anti_cheat_enabled
+    && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
+  ) {
+    return 'Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.';
+  }
+  return null;
+};
+
 export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
   { examId, resultVisibility, onResultVisibilityChange, onSavingChange },
   ref,
@@ -53,6 +70,8 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const lastSavedRef = useRef<string | null>(null);
   const persistedExamId = examId && !examId.startsWith('new-') ? Number(examId) : null;
   const currentExamId = useRef<number | null>(persistedExamId);
   currentExamId.current = persistedExamId;
@@ -68,6 +87,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   useEffect(() => {
     let active = true;
     if (!persistedExamId) {
+      lastSavedRef.current = null;
       setSettings(defaultTeacherExamSettings);
       setError(null);
       setLoading(false);
@@ -75,6 +95,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         active = false;
       };
     }
+    lastSavedRef.current = null;
 
     const load = async () => {
       try {
@@ -93,6 +114,8 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           auto_grade: data.auto_grade,
           result_strategy: data.result_strategy,
         };
+        // Baseline for the auto-save effect: freshly loaded state is already persisted.
+        lastSavedRef.current = snapshotOf(mapped, resultVisibility);
         setSettings(mapped);
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load exam settings.');
@@ -125,23 +148,14 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
     setSettings((current) => ({ ...current, violation_limit }));
   };
 
-  const saveSettings = async () => {
+  const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!persistedExamId) {
       setError('Create the exam before saving settings.');
       return;
     }
-    const numericValues = [
-      settings.grace_period,
-    ];
-    if (numericValues.some((value) => !Number.isInteger(value) || value < 0)) {
-      setError('Grace period must be a non-negative integer.');
-      return;
-    }
-    if (
-      settings.anti_cheat_enabled
-      && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
-    ) {
-      setError('Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.');
+    const validationError = validateSettings(settings);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     const payload: TeacherExamSettingsPayload = settings;
@@ -155,7 +169,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         await onResultVisibilityChange(draftResultVisibility);
         if (currentExamId.current !== targetExamId) return;
       }
-      setSettings({
+      const persisted: TeacherExamSettingsPayload = {
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
         sequential_navigation: saved.sequential_navigation,
@@ -165,8 +179,13 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         violation_limit: saved.violation_limit,
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
-      });
-      toast.success('Exam settings saved.');
+      };
+      // Record what the server now holds so the auto-save effect does not fire
+      // again for the state it just wrote back.
+      lastSavedRef.current = snapshotOf(persisted, draftResultVisibility);
+      setSettings(persisted);
+      setSavedAt(Date.now());
+      if (!silent) toast.success('Exam settings saved.');
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : 'Unable to save exam settings.';
       if (currentExamId.current === persistedExamId) {
@@ -178,7 +197,24 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
     }
   };
 
-  useImperativeHandle(ref, () => ({ save: saveSettings }));
+  // Settings are independent toggles, so they are committed as they change
+  // instead of behind a separate save button.
+  useEffect(() => {
+    if (!persistedExamId || loading) return undefined;
+    const snapshot = snapshotOf(settings, draftResultVisibility);
+    if (lastSavedRef.current === null || snapshot === lastSavedRef.current) return undefined;
+    const validationError = validateSettings(settings);
+    if (validationError) {
+      // Hold the invalid value on screen rather than sending a request that fails.
+      setError(validationError);
+      return undefined;
+    }
+    setError(null);
+    const timer = window.setTimeout(() => { void saveSettings({ silent: true }); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [settings, draftResultVisibility, persistedExamId, loading]);
+
+  useImperativeHandle(ref, () => ({ save: () => saveSettings() }));
 
   if (!persistedExamId) {
     return <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Create the exam before configuring settings.</div>;
@@ -189,6 +225,18 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <div className="flex items-center justify-end gap-1.5 text-xs text-gray-500" aria-live="polite">
+        {saving ? (
+          <><Loader2 className="size-3.5 animate-spin" />Saving changes...</>
+        ) : error ? (
+          <span className="text-red-600">Not saved</span>
+        ) : savedAt ? (
+          <><CheckCircle2 className="size-3.5 text-teal-500" />All changes saved</>
+        ) : (
+          <span>Changes save automatically</span>
+        )}
+      </div>
+
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <Card className="rounded-2xl border-0 shadow-md">

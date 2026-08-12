@@ -38,6 +38,7 @@ from src.route.teacherRoute.addQuestionsRoute import (
     bulk_remove_questions_from_exam,
     update_question_in_exam,
 )
+from src.route.teacherRoute.getExamsRoute import get_teacher_exams
 from src.route.teacherRoute.examPoolRoute import (
     get_pool_availability,
     get_pool_config,
@@ -343,6 +344,48 @@ class ExamPoolFeatureTests(unittest.TestCase):
         self.assertEqual(self.db.query(Option).count(), 6)
         self.assertEqual(self.db.query(ChapterQuestion).count(), 3)
         self.assertEqual(self.db.query(LOQuestion).count(), 3)
+
+    def test_listed_exam_reports_question_count_for_manual_and_pool_modes(self):
+        exam = self.db.query(Exam).one()
+        first = self._question("Manual one")
+        second = self._question("Manual two")
+        self.db.add_all([
+            ExamQuestion(exam_id=exam.exam_id, question_id=first.question_id, question_point=1),
+            ExamQuestion(exam_id=exam.exam_id, question_id=second.question_id, question_point=1),
+        ])
+        self.db.commit()
+
+        listed = get_teacher_exams({"school_id": "T1"}, {}, self.db)
+        self.assertEqual(
+            next(item for item in listed if item["exam_id"] == exam.exam_id)["question_count"], 2
+        )
+
+        # Pure pool mode clears exam_question rows, so the count must come from the
+        # rules' draw counts instead of the (now empty) attached-question table.
+        put_pool_config(
+            exam.exam_id,
+            PoolConfigRequest(
+                subject_id="DB",
+                fixed_randomization=False,
+                rules=[
+                    PoolRuleRequest(
+                        chapter_id=1,
+                        lo_id=1,
+                        difficulty="easy",
+                        draw_count=2,
+                        max_score_per_question=Decimal("2.50"),
+                    )
+                ],
+            ),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertEqual(self.db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).count(), 0)
+        pooled = get_teacher_exams({"school_id": "T1"}, {}, self.db)
+        self.assertEqual(
+            next(item for item in pooled if item["exam_id"] == exam.exam_id)["question_count"], 2
+        )
 
     def test_pool_authorization_validation_persistence_and_overlap(self):
         own = self._question("Own draft", owner="T1", question_status=QuestionStatus.draft)

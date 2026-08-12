@@ -13,9 +13,9 @@ import {
 } from '../../ui/select';
 import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
-import { SettingsTab, type SettingsTabHandle } from './tabs/SettingsTab';
+import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
-import { FileText, BookOpen, Clock, Hash, Settings2, Users, CheckCircle2, Save } from 'lucide-react';
+import { FileText, BookOpen, Clock, Hash, Settings2, Users, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -54,6 +54,7 @@ interface ExamEditorProps {
     resultVisibility: ResultVisibility;
   }) => Promise<void>;
   onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
+  onStatusChange: (examId: string, status: ExamStatus) => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
@@ -62,7 +63,7 @@ type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
 const isExamEditorTab = (value: string): value is ExamEditorTab =>
   value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange, onViewInQuestionBank }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange, onStatusChange, onViewInQuestionBank }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -78,12 +79,33 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [startClock, setStartClock] = useState('');
   const [endDate, setEndDate] = useState('');
   const [endClock, setEndClock] = useState('');
-  const [lastSaved, setLastSaved] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<ExamEditorTab>('general');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const settingsTabRef = useRef<SettingsTabHandle>(null);
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  const loadedExamIdRef = useRef<string | null>(null);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  // Status is committed on selection so it is never left as pending unsaved
+  // state; this matches the exam list's status menu, which already saves directly.
+  const handleStatusSelect = async (nextStatus: ExamStatus) => {
+    if (nextStatus === status) return;
+    if (!examId || examId.startsWith('new-')) {
+      setStatus(nextStatus);
+      return;
+    }
+    try {
+      setStatusSaving(true);
+      setSaveError(null);
+      await onStatusChange(examId, nextStatus);
+      setStatus(nextStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to change the exam status.';
+      setSaveError(message);
+      toast.error(message);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
 
   // Generate unique exam code for new exams
   const generateExamCode = () => {
@@ -156,18 +178,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         setStartClock(savedStartTime.slice(0, 5));
         setEndDate(savedEndDate);
         setEndClock(savedEndTime.slice(0, 5));
-        setActiveTab(initialTab ?? 'general');
+        // Only reset the tab when a different exam is opened. Saving status or
+        // settings replaces the exam object, and that must not yank the teacher
+        // back to General while they are working in another tab.
+        if (loadedExamIdRef.current !== examId) setActiveTab(initialTab ?? 'general');
       }
     }
+    loadedExamIdRef.current = examId;
   }, [examId, exam, initialTab]);
-
-  // Auto-save simulation
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setLastSaved(new Date());
-    }, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
   if (!examId) {
     return (
@@ -198,14 +216,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   }
 
   const isNewExam = examId.startsWith('new-');
-
-  const getTimeSinceLastSave = () => {
-    const seconds = Math.floor((new Date().getTime() - lastSaved.getTime()) / 1000);
-    if (seconds < 60) return `${seconds} seconds ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes === 1) return '1 minute ago';
-    return `${minutes} minutes ago`;
-  };
 
   const statusConfig = {
     draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -254,7 +264,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         status,
         resultVisibility,
       });
-      setLastSaved(new Date());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save the exam.';
       setSaveError(message);
@@ -346,8 +355,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </div>
 
           <div className="flex flex-col items-stretch gap-2 flex-shrink-0">
-            <Select value={status} onValueChange={(value) => {
-              if (value === 'draft' || value === 'published') setStatus(value);
+            <Select value={status} disabled={statusSaving} onValueChange={(value) => {
+              if (value === 'draft' || value === 'published') void handleStatusSelect(value);
             }}>
               <SelectTrigger className={`w-36 rounded-full font-medium ${statusConfig[status].color}`} aria-label="Exam status">
                 <SelectValue />
@@ -369,24 +378,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               </Button>
             )}
 
-            {activeTab === 'settings' && (
-              <Button
-                onClick={() => void settingsTabRef.current?.save()}
-                disabled={settingsSaving}
-                className="w-36 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save className="mr-2 size-4" />
-                {settingsSaving ? 'Saving...' : 'Save Settings'}
-              </Button>
-            )}
           </div>
         </div>
 
-        {/* Auto-save indicator */}
-        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-          <CheckCircle2 className="size-3.5 text-teal-500" />
-          <span>Auto-saved {getTimeSinceLastSave()}</span>
-        </div>
       </div>
 
       {/* Tabs */}
@@ -474,10 +468,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
 
           <TabsContent value="settings" className="m-0 p-6">
             <SettingsTab
-              ref={settingsTabRef}
               examId={examId}
               resultVisibility={resultVisibility}
-              onSavingChange={setSettingsSaving}
               onResultVisibilityChange={async (nextVisibility) => {
                 await onResultVisibilityChange(examId, nextVisibility);
                 setResultVisibility(nextVisibility);

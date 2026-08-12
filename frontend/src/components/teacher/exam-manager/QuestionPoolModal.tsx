@@ -168,9 +168,14 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
           <Button className="shrink-0" variant="ghost" size="sm" onClick={onClose} disabled={importing} aria-label="Close"><X className="size-5" /></Button>
         </div>
 
-        <div className="flex gap-2 border-b bg-gray-50 px-4 py-3 sm:px-6">
-          <Button type="button" size="sm" variant={mode === 'manual' ? 'default' : 'outline'} onClick={() => setMode('manual')}><Database className="mr-2 size-4" />Manual Selection</Button>
-          <Button type="button" size="sm" variant={mode === 'pool' ? 'default' : 'outline'} onClick={() => setMode('pool')}><Settings2 className="mr-2 size-4" />Pool Configuration</Button>
+        <div className="flex flex-wrap items-center gap-2 border-b bg-gray-50 px-4 py-3 sm:px-6">
+          <Button type="button" size="sm" variant={mode === 'manual' ? 'default' : 'outline'} onClick={() => setMode('manual')}><Database className="mr-2 size-4" />Pick questions myself</Button>
+          <Button type="button" size="sm" variant={mode === 'pool' ? 'default' : 'outline'} onClick={() => setMode('pool')}><Settings2 className="mr-2 size-4" />Draw questions automatically</Button>
+          <p className="w-full text-xs text-gray-500 sm:w-auto sm:pl-2">
+            {mode === 'manual'
+              ? 'Choose the exact questions every student will see.'
+              : 'Describe the mix you want and let the system draw the questions.'}
+          </p>
         </div>
 
         {mode === 'manual' ? (

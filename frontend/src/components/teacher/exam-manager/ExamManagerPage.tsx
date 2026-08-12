@@ -36,7 +36,7 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   startTime: exam.start_time ?? "",
   endTime: exam.end_time ?? "",
   date: exam.start_time ?? new Date().toISOString(),
-  questionCount: 0,
+  questionCount: exam.question_count ?? 0,
   assignedStudents: exam.totalStudents,
   averageScore: null,
   duration: exam.duration_minutes ?? 0,
@@ -229,6 +229,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
           onResultVisibilityChange={handleResultVisibilityChange}
+          onStatusChange={handleStatusChange}
           onViewInQuestionBank={onViewInQuestionBank}
         />
       </div>

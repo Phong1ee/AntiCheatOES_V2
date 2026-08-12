@@ -950,12 +950,13 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
             </div>
 
             <div className="space-y-2">
-              <h4 className="text-xs text-gray-700 uppercase mb-2">Distribution</h4>
+              <h4 className="text-xs text-gray-700 uppercase">What each student gets</h4>
+              <p className="mb-2 text-xs text-gray-500">Click a row to review which questions can be drawn for it.</p>
               {poolConfig.rules.map((rule) => (
                 <Card key={rule.rule_id} className={`cursor-pointer shadow-sm ${activePoolRuleId === rule.rule_id ? 'border-purple-500' : ''}`} onClick={() => void loadPoolRuleCandidates(rule.rule_id)}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-800">{rule.chapter_name}{rule.lo_name ? ` · ${rule.lo_name}` : ' · All LOs'}</span>
+                      <span className="text-xs text-gray-800">{rule.chapter_name}{rule.lo_name ? ` · ${rule.lo_name}` : ' · Whole chapter'}</span>
                       <Badge
                         variant="outline"
                         className={
@@ -970,8 +971,8 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-600">
-                      <span>Draw {rule.draw_count} questions</span>
-                      <span className="text-gray-500">from {rule.available_count}</span>
+                      <span>{rule.draw_count} question{rule.draw_count === 1 ? '' : 's'}</span>
+                      <span className="text-gray-500">picked from {rule.available_count}</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -980,7 +981,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
 
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-teal-800">Total Per Student</span>
+                <span className="text-xs text-teal-800">Questions per student</span>
                 <Badge className="bg-gradient-to-r from-teal-500 to-blue-600">
                   {poolConfig.total_questions}
                 </Badge>

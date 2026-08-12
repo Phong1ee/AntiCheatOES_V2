@@ -11,6 +11,8 @@ from src.a_db_config import (
     ChapterQuestion,
     CourseClass,
     Exam,
+    ExamPoolConfig,
+    ExamPoolRule,
     ExamQuestion,
     ExamStatus,
     Question,
@@ -128,6 +130,24 @@ def _assignment_options(db: Session, exam_id: int, teacher_school_id: str) -> di
     }
 
 
+def _question_count(db: Session, exam: Exam) -> int:
+    """Questions a student actually sits: drawn-per-attempt in pool mode, attached rows otherwise."""
+    mode = (
+        exam.question_selection_mode.value
+        if hasattr(exam.question_selection_mode, "value")
+        else exam.question_selection_mode
+    )
+    if mode == "pool":
+        drawn = (
+            db.query(func.coalesce(func.sum(ExamPoolRule.draw_count), 0))
+            .join(ExamPoolConfig, ExamPoolConfig.pool_config_id == ExamPoolRule.pool_config_id)
+            .filter(ExamPoolConfig.exam_id == exam.exam_id)
+            .scalar()
+        )
+        return int(drawn or 0)
+    return db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).count()
+
+
 def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
     return {
         "exam_id": exam.exam_id,
@@ -142,6 +162,7 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "result_visibility": exam.result_visibility.value if exam.result_visibility else None,
         "subject_id": exam.subject_id,
         "totalStudents": db.query(StudentExam).filter_by(exam_id=exam.exam_id).count(),
+        "question_count": _question_count(db, exam),
         "manage_by": exam.manage_by,
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": get_exam_status(exam, now_time),

@@ -11,6 +11,8 @@ from src.a_db_config import (
     ChapterQuestion,
     CourseClass,
     Exam,
+    ExamPoolConfig,
+    ExamPoolRule,
     ExamQuestion,
     ExamStatus,
     Question,
@@ -73,14 +75,17 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
 
 
 def _assignment_options(db: Session, exam_id: int, teacher_school_id: str) -> dict:
-    _owned_exam(db, exam_id, teacher_school_id)
+    exam = _owned_exam(db, exam_id, teacher_school_id)
     classes = (
         db.query(CourseClass)
         .options(
             selectinload(CourseClass.subject),
             selectinload(CourseClass.student_classes).selectinload(StudentClass.student),
         )
-        .filter(CourseClass.teacher_id == teacher_school_id)
+        .filter(
+            CourseClass.teacher_id == teacher_school_id,
+            CourseClass.subject_id == exam.subject_id,
+        )
         .order_by(CourseClass.class_name, CourseClass.class_id)
         .all()
     )
@@ -130,6 +135,24 @@ def _assignment_options(db: Session, exam_id: int, teacher_school_id: str) -> di
     }
 
 
+def _question_count(db: Session, exam: Exam) -> int:
+    """Questions a student actually sits: drawn-per-attempt in pool mode, attached rows otherwise."""
+    mode = (
+        exam.question_selection_mode.value
+        if hasattr(exam.question_selection_mode, "value")
+        else exam.question_selection_mode
+    )
+    if mode == "pool":
+        drawn = (
+            db.query(func.coalesce(func.sum(ExamPoolRule.draw_count), 0))
+            .join(ExamPoolConfig, ExamPoolConfig.pool_config_id == ExamPoolRule.pool_config_id)
+            .filter(ExamPoolConfig.exam_id == exam.exam_id)
+            .scalar()
+        )
+        return int(drawn or 0)
+    return db.query(ExamQuestion).filter_by(exam_id=exam.exam_id).count()
+
+
 def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
     return {
         "exam_id": exam.exam_id,
@@ -144,6 +167,7 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
         "result_visibility": exam.result_visibility.value if exam.result_visibility else None,
         "subject_id": exam.subject_id,
         "totalStudents": db.query(StudentExam).filter_by(exam_id=exam.exam_id).count(),
+        "question_count": _question_count(db, exam),
         "manage_by": exam.manage_by,
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": get_exam_status(exam, now_time),
@@ -271,17 +295,22 @@ def sync_assignments(
     del role_check
     teacher_school_id = current_user["school_id"]
     try:
+        exam = _owned_exam(db, exam_id, teacher_school_id)
         claim_exam_version(db, exam_id, teacher_school_id, request.expected_version)
         owned_classes = (
             db.query(CourseClass)
             .filter(
                 CourseClass.teacher_id == teacher_school_id,
+                CourseClass.subject_id == exam.subject_id,
                 CourseClass.class_id.in_(request.class_ids or [-1]),
             )
             .all()
         )
         if len(owned_classes) != len(request.class_ids):
-            raise HTTPException(status_code=403, detail="One or more classes are not taught by this teacher")
+            raise HTTPException(
+                status_code=403,
+                detail="One or more classes are not taught by this teacher for this exam's subject",
+            )
 
         roster_ids = {
             row[0]
@@ -290,6 +319,7 @@ def sync_assignments(
             .join(User, User.school_id == StudentClass.student_id)
             .filter(
                 CourseClass.teacher_id == teacher_school_id,
+                CourseClass.subject_id == exam.subject_id,
                 User.role == UserRole.student,
             )
             .distinct()
@@ -300,7 +330,10 @@ def sync_assignments(
         if invalid_ids:
             raise HTTPException(
                 status_code=422,
-                detail={"message": "Students must belong to a class taught by this teacher", "student_ids": invalid_ids},
+                detail={
+                    "message": "Students must belong to a class taught by this teacher for this exam's subject",
+                    "student_ids": invalid_ids,
+                },
             )
         class_student_ids = {
             row[0]

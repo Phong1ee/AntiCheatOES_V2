@@ -20,7 +20,6 @@ import {
   Copy,
   Image as ImageIcon,
   Database,
-  Save,
   X,
   Loader2,
   Eye,
@@ -33,11 +32,14 @@ import {
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
 import { toast } from 'sonner';
+import { SectionSaveBar } from '../SectionSaveBar';
+import type { PoolDraft } from '../PoolConfigurationBuilder';
 import {
   questionService,
   type PoolCandidate,
   type PoolConfig,
   type PoolPreview,
+  type PoolRule,
 } from '../../../../services/question.service';
 import { teacherQuestionBankService } from '../../../../services/teacher-question-bank.service';
 import type { ChapterSummary, LearningObjectiveSummary, QuestionDifficulty } from '../../../../types/question-bank';
@@ -84,9 +86,30 @@ interface QuestionsTabProps {
   canCreateContent: boolean;
   onSaved: () => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateContent, onSaved, onViewInQuestionBank }: QuestionsTabProps) {
+/** Only the fields that get written back, so unrelated re-renders stay "clean". */
+const questionSnapshot = (question: Question) => JSON.stringify({
+  type: question.type,
+  question: question.question,
+  maxScore: question.maxScore,
+  difficulty: question.difficulty,
+  options: question.options ?? null,
+  correctAnswer: Array.isArray(question.correctAnswer)
+    ? [...question.correctAnswer].sort()
+    : question.correctAnswer ?? null,
+  chapterIds: [...(question.chapterIds ?? [])].sort(),
+  loIds: [...(question.loIds ?? [])].sort(),
+  status: question.status ?? null,
+  subjectId: question.subjectId ?? null,
+});
+
+/** Matches the key used by the pool draft so rules survive a config re-save. */
+const poolRuleKey = (rule: Pick<PoolRule, 'chapter_id' | 'lo_id' | 'difficulty'>) =>
+  `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`;
+
+export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateContent, onSaved, onViewInQuestionBank, onDirtyChange }: QuestionsTabProps) {
   // Load questions based on examId
   const initialQuestions: Question[] = [];
 
@@ -103,19 +126,28 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   const [poolView, setPoolView] = useState<'candidate-list' | 'question-detail' | 'preview'>('candidate-list');
   const [poolPreview, setPoolPreview] = useState<PoolPreview | null>(null);
   const [poolCandidateLoading, setPoolCandidateLoading] = useState(false);
-  const [poolCandidateSaving, setPoolCandidateSaving] = useState(false);
   const [poolCandidateError, setPoolCandidateError] = useState<string | null>(null);
   const poolRequestSequence = useRef(0);
-  const [isSaving, setIsSaving] = useState(false);
+  const [questionsSaving, setQuestionsSaving] = useState(false);
+  const [questionsSavedAt, setQuestionsSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  /** Serialized persisted state per question id, for dirty detection. */
+  const [baselines, setBaselines] = useState<Record<string, string>>({});
+  const [pendingRemovals, setPendingRemovals] = useState<Set<string>>(new Set());
+  const baselinesRef = useRef(baselines);
+  baselinesRef.current = baselines;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
   const [exitPoolOpen, setExitPoolOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [poolDraft, setPoolDraft] = useState<PoolDraft | null>(null);
+  /** Candidate inclusions edited locally, keyed by rule identity. */
+  const [candidateDrafts, setCandidateDrafts] = useState<Record<string, number[]>>({});
+  const candidateDraftsRef = useRef(candidateDrafts);
+  candidateDraftsRef.current = candidateDrafts;
+  const [poolSaving, setPoolSaving] = useState(false);
+  const [poolSavedAt, setPoolSavedAt] = useState<number | null>(null);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [learningObjectives, setLearningObjectives] = useState<LearningObjectiveSummary[]>([]);
   const [taxonomyLoading, setTaxonomyLoading] = useState(false);
@@ -162,6 +194,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   const loadQuestions = useCallback(async (questionToSelect?: string) => {
     if (!examId || examId.startsWith('new-')) {
       setQuestions([]);
+      setBaselines({});
+      setPendingRemovals(new Set());
       setSelectedQuestion(null);
       return;
     }
@@ -172,6 +206,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       const persistedQuestions = await questionService.getExamQuestions(Number(examId));
       const mappedQuestions = mapQuestions(persistedQuestions);
       setQuestions(mappedQuestions);
+      setBaselines(Object.fromEntries(mappedQuestions.map((question) => [question.id, questionSnapshot(question)])));
+      setPendingRemovals(new Set());
       setSelectedQuestion(questionToSelect ?? mappedQuestions[0]?.id ?? null);
       setSelectedIds(new Set());
     } catch (error) {
@@ -281,6 +317,20 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     setSelectedQuestion(newQuestion.id);
   };
 
+  // Removal is queued locally and applied by "Save Questions", so it stays
+  // reversible while the teacher is still editing.
+  const toggleRemoval = (id: string) => {
+    if (id.startsWith('new-')) {
+      const remaining = questions.filter((question) => question.id !== id);
+      setQuestions(remaining);
+      if (selectedQuestion === id) setSelectedQuestion(remaining[0]?.id ?? null);
+      return;
+    }
+    const next = new Set(removedQuestionIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setRemovedQuestionIds(next);
+  };
+
   const deleteQuestion = (id: string) => setQuestionToDelete(questions.find((question) => question.id === id) ?? null);
 
   const confirmDeleteQuestion = async () => {
@@ -294,13 +344,33 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       const remaining = questions.filter((question) => question.id !== questionToDelete.id);
       setQuestions(remaining);
       if (selectedQuestion === questionToDelete.id) setSelectedQuestion(remaining[0]?.id ?? null);
-      setQuestionToDelete(null);
-      toast.success('Question removed from the exam.');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to remove the question.');
+      toast.error(error instanceof Error ? error.message : 'Unable to delete question.');
     } finally {
+      setQuestionToDelete(null);
       setIsDeleting(false);
     }
+  };
+      setQuestions(remaining);
+      if (selectedQuestion === id) setSelectedQuestion(remaining[0]?.id ?? null);
+      return;
+    }
+    setPendingRemovals((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const markSelectedForRemoval = () => {
+    setQuestions((current) => current.filter((question) => !(question.id.startsWith('new-') && selectedIds.has(question.id))));
+    setPendingRemovals((current) => {
+      const next = new Set(current);
+      selectedIds.forEach((id) => { if (!id.startsWith('new-')) next.add(id); });
+      return next;
+    });
+    setSelectedIds(new Set());
   };
 
   const loadPoolRuleCandidates = useCallback(async (ruleId: number) => {
@@ -314,8 +384,9 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       const included = new Set(
         response.questions.filter((question) => question.included).map((question) => question.question_id),
       );
+      const draft = candidateDraftsRef.current[poolRuleKey(response.rule)];
       setPoolCandidates(response.questions);
-      setIncludedCandidateIds(included);
+      setIncludedCandidateIds(draft ? new Set(draft) : new Set(included));
       setSavedIncludedCandidateIds(new Set(included));
       setActivePoolRuleId(ruleId);
       setSelectedPoolQuestionId(null);
@@ -347,32 +418,78 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     [includedCandidateIds, savedIncludedCandidateIds],
   );
 
-  const savePoolCandidates = async () => {
-    if (!examId || activePoolRuleId === null) return;
-    const excludedNow = [...savedIncludedCandidateIds].filter((id) => !includedCandidateIds.has(id)).length;
-    if (
-      excludedNow >= 5
-      && !window.confirm(`Exclude ${excludedNow} currently included questions from this rule?`)
-    ) return;
+  /** Records an inclusion change against the active rule without contacting the API. */
+  const applyIncluded = (next: Set<number>) => {
+    setIncludedCandidateIds(next);
+    const rule = poolConfig?.rules.find((candidate) => candidate.rule_id === activePoolRuleId);
+    if (!rule) return;
+    const key = poolRuleKey(rule);
+    const unchanged = next.size === savedIncludedCandidateIds.size
+      && [...next].every((id) => savedIncludedCandidateIds.has(id));
+    setCandidateDrafts((current) => {
+      const drafts = { ...current };
+      if (unchanged) delete drafts[key];
+      else drafts[key] = [...next];
+      return drafts;
+    });
+  };
+
+  const poolDirty = poolDraft !== null || Object.keys(candidateDrafts).length > 0;
+
+  const discardPoolChanges = () => {
+    setPoolDraft(null);
+    setCandidateDrafts({});
+    setPoolCandidateError(null);
+    setIncludedCandidateIds(new Set(savedIncludedCandidateIds));
+  };
+
+  /**
+   * Persists the whole pool section: the rule configuration first (which can
+   * renumber rules), then every locally edited candidate selection remapped
+   * onto the rules that now exist.
+   */
+  const savePool = async () => {
+    if (!examId || examId.startsWith('new-')) return;
     try {
-      setPoolCandidateSaving(true);
+      setPoolSaving(true);
       setPoolCandidateError(null);
-      const updated = await questionService.savePoolRuleCandidates(
-        Number(examId),
-        activePoolRuleId,
-        [...includedCandidateIds],
-        expectedVersion,
-      );
-      setPoolConfig(updated);
+      let config: PoolConfig | null = poolConfig;
+      if (poolDraft) {
+        config = await questionService.savePoolConfig(Number(examId), {
+          subject_id: poolConfig?.subject_id || subjectId,
+          fixed_randomization: poolDraft.fixed_randomization,
+          rules: poolDraft.rules,
+        });
+      }
+      for (const [key, includedIds] of Object.entries(candidateDrafts)) {
+        const rule = config?.rules.find((candidate) => poolRuleKey(candidate) === key);
+        if (!rule) continue;
+        config = await questionService.savePoolRuleCandidates(Number(examId), rule.rule_id, includedIds);
+      }
+      setPoolDraft(null);
+      setCandidateDrafts({});
+      // The server accepted exactly this selection, so re-baseline it here:
+      // a candidates-only save may not bump the config version, which is what
+      // otherwise triggers a reload.
+      setSavedIncludedCandidateIds(new Set(includedCandidateIds));
+      if (config) {
+        setPoolConfig(config);
+        setIsPoolMode(config.mode === 'pool');
+        if (config.mode === 'pool') {
+          setQuestions([]);
+          setSelectedQuestion(null);
+        } else {
+          await loadQuestions();
+        }
+      }
+      setPoolSavedAt(Date.now());
       await onSaved();
-      await loadPoolRuleCandidates(activePoolRuleId);
       toast.success('Candidate selection saved.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to save candidate selection.';
-      setPoolCandidateError(message);
-      toast.error(message);
+      // Drafts are kept so a failed save can be retried without redoing the work.
+      setPoolCandidateError(error instanceof Error ? error.message : 'Unable to save the question pool.');
     } finally {
-      setPoolCandidateSaving(false);
+      setPoolSaving(false);
     }
   };
 
@@ -421,7 +538,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       setBulkBusy(false);
     }
   };
-
   const confirmExitPool = async () => {
     if (!examId) return;
     try {
@@ -469,121 +585,197 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     });
   };
 
-  const saveQuestion = async () => {
-    if (!selectedQ || !examId || examId.startsWith('new-')) {
+  const changedQuestions = useMemo(
+    () => questions.filter((question) => (
+      !pendingRemovals.has(question.id)
+      && (question.id.startsWith('new-') || baselines[question.id] !== questionSnapshot(question))
+    )),
+    [questions, baselines, pendingRemovals],
+  );
+
+  const questionsDirty = changedQuestions.length > 0 || pendingRemovals.size > 0;
+
+  /**
+   * Folds freshly imported rows in without discarding work in progress: a
+   * question the teacher has edited keeps its local version, everything else
+   * takes the server's, and unsaved new questions are appended untouched.
+   */
+  const handleImported = useCallback(async () => {
+    if (!examId || examId.startsWith('new-')) return;
+    const serverQuestions = mapQuestions(await questionService.getExamQuestions(Number(examId)));
+    setQuestions((current) => {
+      const edited = new Map(
+        current
+          .filter((question) => !question.id.startsWith('new-')
+            && baselinesRef.current[question.id] !== undefined
+            && baselinesRef.current[question.id] !== questionSnapshot(question))
+          .map((question) => [question.id, question]),
+      );
+      return [
+        ...serverQuestions.map((question) => edited.get(question.id) ?? question),
+        ...current.filter((question) => question.id.startsWith('new-')),
+      ];
+    });
+    setBaselines(Object.fromEntries(serverQuestions.map((question) => [question.id, questionSnapshot(question)])));
+  }, [examId, mapQuestions]);
+
+  useEffect(() => {
+    onDirtyChange?.(questionsDirty || poolDirty);
+  }, [questionsDirty, poolDirty, onDirtyChange]);
+
+  /** Returns a user-facing problem with the question, or null when it can be sent. */
+  const validateQuestion = (question: Question): string | null => {
+    if (!Number.isFinite(question.maxScore) || question.maxScore <= 0) {
+      return 'Max Score must be a positive number.';
+    }
+    if (!question.canEditPoints) return 'You cannot change this question for the selected exam.';
+    // Questions from another teacher's subject only ever send their score.
+    if (!question.canEditContent && !question.id.startsWith('new-')) return null;
+    if (question.type === 'matching') return 'Matching questions are not supported by the API.';
+    if (!question.question.trim() || !(question.subjectId ?? subjectId) || !question.difficulty) {
+      return 'Question text, subject, and difficulty are required.';
+    }
+    if (question.type === 'mcq') {
+      const optionTexts = question.options ?? [];
+      if (optionTexts.length < 2 || optionTexts.some((option) => !option.trim())) {
+        return 'Multiple-choice questions require at least two non-empty options.';
+      }
+    }
+    return null;
+  };
+
+  const buildQuestionPayload = (question: Question) => {
+    const isTrueFalse = question.type === 'true-false';
+    const questionType = question.type === 'mcq' ? 'MCQ' : question.type;
+    const optionTexts = isTrueFalse ? ['True', 'False'] : question.options ?? [];
+    const correctIndices: number[] = isTrueFalse
+      ? [question.correctAnswer === 'false' ? 1 : 0]
+      : Array.isArray(question.correctAnswer) ? question.correctAnswer : [Number(question.correctAnswer ?? 0)];
+    return {
+      question_text: question.question.trim(),
+      question_difficulties: question.difficulty as QuestionDifficulty,
+      question_type: questionType as 'MCQ' | 'essay' | 'true-false',
+      subject_id: (question.subjectId ?? subjectId) as string,
+      chapter_ids: question.chapterIds ?? [],
+      lo_ids: question.loIds ?? [],
+      question_status: question.status ?? 'draft',
+      max_score: question.maxScore,
+      options: optionTexts.map((options_text, index) => ({
+        options_id: question.optionIds?.[index],
+        options_text,
+        is_correct: correctIndices.includes(index),
+      })),
+    };
+  };
+
+  /**
+   * Commits the whole Questions section in one press: queued removals, staged
+   * bank imports, new questions, then edits to existing ones.
+   */
+  const saveQuestions = async () => {
+    if (!examId || examId.startsWith('new-')) {
       setSaveError('Save the exam before adding questions.');
       return;
     }
-    if (!Number.isFinite(selectedQ.maxScore) || selectedQ.maxScore <= 0) {
-      setSaveError('Max Score must be a positive number.');
-      return;
-    }
-    if (!selectedQ.canEditPoints) {
-      setSaveError('You cannot change this question for the selected exam.');
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSaveError(null);
-      if (!selectedQ.canEditContent && !selectedQ.id.startsWith('new-')) {
-        const result = await questionService.updateInExam(
-          Number(examId),
-          Number(selectedQ.id),
-          { max_score: selectedQ.maxScore },
-        );
-        await loadQuestions(String(result.question_id));
-        toast.success('Question score saved successfully.');
+    for (const question of changedQuestions) {
+      const problem = validateQuestion(question);
+      if (problem) {
+        setSelectedQuestion(question.id);
+        setSaveError(problem);
         return;
       }
-      if (!selectedQ.question.trim() || !(selectedQ.subjectId ?? subjectId) || !selectedQ.difficulty) {
-        throw new Error('Question text, subject, and difficulty are required.');
+    }
+    try {
+      setQuestionsSaving(true);
+      setSaveError(null);
+      const removalIds = [...pendingRemovals].filter((id) => !id.startsWith('new-')).map(Number);
+      if (removalIds.length > 0) {
+        await questionService.bulkRemove(Number(examId), removalIds);
       }
-      const isTrueFalse = selectedQ.type === 'true-false';
-      if (selectedQ.type === 'matching') throw new Error('Matching questions are not supported by the API.');
-      const questionType = selectedQ.type === 'mcq' ? 'MCQ' : selectedQ.type;
-      const optionTexts = isTrueFalse ? ['True', 'False'] : selectedQ.options ?? [];
-      const correctIndices: number[] = isTrueFalse
-        ? [selectedQ.correctAnswer === 'false' ? 1 : 0]
-        : Array.isArray(selectedQ.correctAnswer) ? selectedQ.correctAnswer : [Number(selectedQ.correctAnswer ?? 0)];
-
-      if (questionType === 'MCQ' && (optionTexts.length < 2 || optionTexts.some((option) => !option.trim()))) {
-        throw new Error('Multiple-choice questions require at least two non-empty options.');
-      }
-
-      const options = optionTexts.map((options_text, index) => ({
-        options_id: selectedQ.optionIds?.[index],
-        options_text,
-        is_correct: correctIndices.includes(index),
-      }));
-
-      if (selectedQ.id.startsWith('new-')) {
-        const questionId = await questionService.create({
-          question_text: selectedQ.question.trim(),
-          question_difficulties: selectedQ.difficulty,
-          question_type: questionType,
-          subject_id: selectedQ.subjectId ?? subjectId,
-          chapter_ids: selectedQ.chapterIds ?? [],
-          lo_ids: selectedQ.loIds ?? [],
-          question_status: selectedQ.status ?? 'draft',
-          options,
-          exam_id: Number(examId),
-          max_score: selectedQ.maxScore,
-          expected_version: expectedVersion,
-        });
-        await loadQuestions(String(questionId));
-      } else {
-        const payload = {
-          question_text: selectedQ.question.trim(),
-          question_difficulties: selectedQ.difficulty,
-          question_type: questionType,
-          subject_id: selectedQ.subjectId ?? subjectId,
-          chapter_ids: selectedQ.chapterIds ?? [],
-          lo_ids: selectedQ.loIds ?? [],
-          question_status: selectedQ.status ?? 'draft',
-          max_score: selectedQ.maxScore,
-          options,
-          expected_version: expectedVersion,
-        };
-        if (isPoolMode && activePoolRuleId !== null) {
-          const result = await questionService.updatePoolCandidate(
-            Number(examId),
-            activePoolRuleId,
-            Number(selectedQ.id),
-            payload,
-          );
-          await loadPoolRuleCandidates(activePoolRuleId);
-          await loadPoolConfig();
-          await onSaved();
+      for (const question of changedQuestions) {
+        // New question: create in the exam with the full payload
+        if (question.id.startsWith('new-')) {
+          const payload = buildQuestionPayload(question);
+          await questionService.create({
+            question_text: payload.question_text,
+            question_difficulties: payload.question_difficulties,
+            question_type: payload.question_type,
+            subject_id: payload.subject_id,
+            chapter_ids: payload.chapter_ids,
+            lo_ids: payload.lo_ids,
+            question_status: payload.question_status,
+            options: payload.options,
+            exam_id: Number(examId),
+            max_score: payload.max_score,
+            expected_version: expectedVersion,
+          });
+        } else if (!question.canEditContent) {
+          // Cannot edit content: only max_score may change
+          await questionService.updateInExam(Number(examId), Number(question.id), { max_score: question.maxScore, expected_version: expectedVersion });
         } else {
-          const result = await questionService.updateInExam(
-            Number(examId),
-            Number(selectedQ.id),
-            payload,
-          );
-          await loadQuestions(String(result.question_id));
-          await onSaved();
+          // Editable content: full update path; pool candidates saved via pool API
+          const isTrueFalse = question.type === 'true-false';
+          if (question.type === 'matching') throw new Error('Matching questions are not supported by the API.');
+          const questionType = question.type === 'mcq' ? 'MCQ' : question.type;
+          const optionTexts = isTrueFalse ? ['True', 'False'] : question.options ?? [];
+          const correctIndices: number[] = isTrueFalse
+            ? [question.correctAnswer === 'false' ? 1 : 0]
+            : Array.isArray(question.correctAnswer) ? question.correctAnswer : [Number(question.correctAnswer ?? 0)];
+
+          if (questionType === 'MCQ' && (optionTexts.length < 2 || optionTexts.some((option) => !option.trim()))) {
+            throw new Error('Multiple-choice questions require at least two non-empty options.');
+          }
+
+          const options = optionTexts.map((options_text, index) => ({
+            options_id: question.optionIds?.[index],
+            options_text,
+            is_correct: correctIndices.includes(index),
+          }));
+
+          const payload = {
+            question_text: question.question.trim(),
+            question_difficulties: question.difficulty,
+            question_type: questionType,
+            subject_id: question.subjectId ?? subjectId,
+            chapter_ids: question.chapterIds ?? [],
+            lo_ids: question.loIds ?? [],
+            question_status: question.status ?? 'draft',
+            max_score: question.maxScore,
+            options,
+            expected_version: expectedVersion,
+          };
+
+          if (isPoolMode && activePoolRuleId !== null && question.id && !question.id.startsWith('new-')) {
+            await questionService.updatePoolCandidate(
+              Number(examId),
+              activePoolRuleId,
+              Number(question.id),
+              payload,
+            );
+            await loadPoolRuleCandidates(activePoolRuleId);
+            await loadPoolConfig();
+            await onSaved();
+          } else {
+            const result = await questionService.updateInExam(
+              Number(examId),
+              Number(question.id),
+              payload,
+            );
+            await loadQuestions(String(result.question_id));
+            await onSaved();
+          }
         }
       }
-      toast.success('Question saved successfully.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to save the question.';
-      setSaveError(message);
-      toast.error(message);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleAddPoolConfig = async (config: PoolConfig) => {
-    setPoolConfig(config);
-    setIsPoolMode(config.mode === 'pool');
-    setActivePoolRuleId(null);
-    if (config.mode === 'fixed_randomization') {
       await loadQuestions();
-    } else {
-      setQuestions([]);
-      setSelectedQuestion(null);
+        }
+      }
+      await loadQuestions();
+      setQuestionsSavedAt(Date.now());
+    } catch (error) {
+      // Local edits are preserved so the teacher can fix the cause and retry.
+      setSaveError(error instanceof Error ? error.message : 'Unable to save the questions.');
+    } finally {
+      setQuestionsSaving(false);
     }
   };
 
@@ -594,7 +786,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
   if (isPoolMode && poolConfig) {
     return (
-      <div className="grid h-full grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="flex h-full min-h-0 flex-col">
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-r bg-gray-50">
           <div className="space-y-3 border-b p-4">
             <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
@@ -614,10 +807,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (poolSelectionDirty && !window.confirm('Discard unsaved candidate changes and edit the pool configuration?')) return;
-                  setShowQuestionPool(true);
-                }}
+                onClick={() => setShowQuestionPool(true)}
               >
                 <Database className="mr-1 size-3" />Edit Pool
               </Button>
@@ -635,10 +825,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
               <button
                 type="button"
                 key={rule.rule_id}
-                onClick={() => {
-                  if (poolSelectionDirty && !window.confirm('Discard unsaved candidate changes?')) return;
-                  void loadPoolRuleCandidates(rule.rule_id);
-                }}
+                onClick={() => void loadPoolRuleCandidates(rule.rule_id)}
                 className={`w-full rounded-lg border bg-white p-3 text-left shadow-sm transition ${
                   activePoolRuleId === rule.rule_id ? 'border-purple-500 ring-2 ring-purple-100' : 'hover:border-gray-300'
                 }`}
@@ -756,9 +943,9 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
               ) : (
                 <>
                   <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-                    <Button size="sm" variant="outline" onClick={() => setIncludedCandidateIds(new Set(poolCandidates.map((question) => question.question_id)))}>Select All Eligible</Button>
-                    <Button size="sm" variant="outline" onClick={() => setIncludedCandidateIds(new Set())}>Clear Selection</Button>
-                    <Button size="sm" variant="ghost" disabled={!poolSelectionDirty} onClick={() => setIncludedCandidateIds(new Set(savedIncludedCandidateIds))}>Cancel / Revert</Button>
+                    <Button size="sm" variant="outline" onClick={() => applyIncluded(new Set(poolCandidates.map((question) => question.question_id)))}>Select All Eligible</Button>
+                    <Button size="sm" variant="outline" onClick={() => applyIncluded(new Set())}>Clear Selection</Button>
+                    <Button size="sm" variant="ghost" disabled={!poolSelectionDirty} onClick={() => applyIncluded(new Set(savedIncludedCandidateIds))}>Revert this rule</Button>
                   </div>
                   <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                     {poolCandidates.map((question) => (
@@ -766,12 +953,12 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                         <CardContent className="flex items-start gap-3 p-4">
                           <Checkbox
                             checked={includedCandidateIds.has(question.question_id)}
-                            onCheckedChange={(checked) => setIncludedCandidateIds((current) => {
-                              const next = new Set(current);
+                            onCheckedChange={(checked) => {
+                              const next = new Set(includedCandidateIds);
                               if (checked === true) next.add(question.question_id);
                               else next.delete(question.question_id);
-                              return next;
-                            })}
+                              applyIncluded(next);
+                            }}
                             aria-label={`Include question ${question.question_id}`}
                           />
                           <div className="min-w-0 flex-1">
@@ -792,17 +979,34 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       </Card>
                     ))}
                   </div>
-                  <div className="flex items-center justify-between border-t p-4">
-                    <span className="text-sm text-gray-600">{includedCandidateIds.size} included · {poolCandidates.length - includedCandidateIds.size} excluded</span>
-                    <Button disabled={!poolSelectionDirty || poolCandidateSaving} onClick={() => void savePoolCandidates()}>
-                      {poolCandidateSaving && <Loader2 className="mr-2 size-4 animate-spin" />}Save Candidate Selection
-                    </Button>
+                  <div className="border-t px-4 py-3 text-sm text-gray-600">
+                    {includedCandidateIds.size} included · {poolCandidates.length - includedCandidateIds.size} excluded
                   </div>
                 </>
               )}
             </>
           )}
         </main>
+        </div>
+
+        <SectionSaveBar
+          label="Save Question Pool"
+          dirty={poolDirty}
+          saving={poolSaving}
+          savedAt={poolSavedAt}
+          error={poolCandidateError}
+          summary={
+            <span>
+              {poolDraft
+                ? `${poolDraft.rules.reduce((sum, rule) => sum + rule.draw_count, 0)} questions per attempt (pending)`
+                : `${poolConfig.total_questions} questions per attempt`}
+              {Object.keys(candidateDrafts).length > 0
+                && ` · ${Object.keys(candidateDrafts).length} rule${Object.keys(candidateDrafts).length === 1 ? '' : 's'} with edited candidates`}
+            </span>
+          }
+          onSave={() => void savePool()}
+          onDiscard={discardPoolChanges}
+        />
 
         {showQuestionPool && examId && (
           <QuestionPoolModal
@@ -811,8 +1015,18 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             subjectId={subjectId}
             expectedVersion={expectedVersion}
             initialPoolConfig={poolConfig}
+            poolDraft={poolDraft}
+            onPoolDraftChange={setPoolDraft}
+            allowManual={false}
             onClose={() => setShowQuestionPool(false)}
             onImported={async () => undefined}
+            allowManual={false}
+            onClose={() => setShowQuestionPool(false)}
+            onImported={async () => {
+              setIsPoolMode(false);
+              setPoolConfig(null);
+              await loadQuestions();
+            }}
             onPoolSaved={async (config) => {
               await handleAddPoolConfig(config);
               await onSaved();
@@ -831,13 +1045,31 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
+    <div className="flex h-full min-h-0 flex-col">
+    {poolDraft && (
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-purple-200 bg-purple-50 px-4 py-3">
+        <div className="min-w-0 text-sm text-purple-900">
+          <p className="font-medium">Question pool configured but not saved</p>
+          <p className="text-xs text-purple-700">
+            {poolDraft.rules.reduce((sum, rule) => sum + rule.draw_count, 0)} questions per attempt across {poolDraft.rules.length} rule{poolDraft.rules.length === 1 ? '' : 's'}. Saving switches this exam to pool mode.
+          </p>
+          {poolCandidateError && <p className="mt-1 text-xs text-red-600">{poolCandidateError}</p>}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" disabled={poolSaving} onClick={discardPoolChanges}>Discard</Button>
+          <Button size="sm" disabled={poolSaving} onClick={() => void savePool()} className="bg-gradient-to-r from-purple-500 to-blue-600">
+            {poolSaving && <Loader2 className="mr-2 size-4 animate-spin" />}Save Question Pool
+          </Button>
+        </div>
+      </div>
+    )}
+    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-3">
       {/* Question List - Left */}
       <div className="lg:col-span-1 flex min-h-0 flex-col border-r border-gray-200 bg-gray-50">
         <div className="question-sidebar-actions-container min-w-0 space-y-3 border-b border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm text-gray-700">
-              {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length})`}
+              {isPoolMode ? 'Pool Configuration' : loadingQuestions ? 'Loading questions...' : `Questions (${questions.length - pendingRemovals.size})`}
             </h3>
             {!isPoolMode && questions.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-gray-600">
@@ -933,7 +1165,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             </Button>
           </div>
           <div className="question-sidebar-bulk-actions">
-            <Button size="sm" variant="outline" onClick={() => setBulkRemoveOpen(true)} disabled={selectedIds.size === 0 || bulkBusy} className="min-w-0 whitespace-normal text-red-600">
+            <Button size="sm" variant="outline" onClick={markSelectedForRemoval} disabled={selectedIds.size === 0} className="min-w-0 whitespace-normal text-red-600">
               <Trash2 className="size-3 shrink-0" /> <span className="min-w-0 break-words">Remove Selected ({selectedIds.size})</span>
             </Button>
           </div>
@@ -963,12 +1195,13 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             </div>
 
             <div className="space-y-2">
-              <h4 className="text-xs text-gray-700 uppercase mb-2">Distribution</h4>
+              <h4 className="text-xs text-gray-700 uppercase">What each student gets</h4>
+              <p className="mb-2 text-xs text-gray-500">Click a row to review which questions can be drawn for it.</p>
               {poolConfig.rules.map((rule) => (
                 <Card key={rule.rule_id} className={`cursor-pointer shadow-sm ${activePoolRuleId === rule.rule_id ? 'border-purple-500' : ''}`} onClick={() => void loadPoolRuleCandidates(rule.rule_id)}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-800">{rule.chapter_name}{rule.lo_name ? ` · ${rule.lo_name}` : ' · All LOs'}</span>
+                      <span className="text-xs text-gray-800">{rule.chapter_name}{rule.lo_name ? ` · ${rule.lo_name}` : ' · Whole chapter'}</span>
                       <Badge
                         variant="outline"
                         className={
@@ -983,8 +1216,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-600">
-                      <span>Draw {rule.draw_count} questions</span>
-                      <span className="text-gray-500">from {rule.available_count}</span>
+                      <span>{rule.draw_count} question{rule.draw_count === 1 ? '' : 's'}</span>
+                      <span className="text-gray-500">picked from {rule.available_count}</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -993,7 +1226,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-teal-800">Total Per Student</span>
+                <span className="text-xs text-teal-800">Questions per student</span>
                 <Badge className="bg-gradient-to-r from-teal-500 to-blue-600">
                   {poolConfig.total_questions}
                 </Badge>
@@ -1015,7 +1248,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                 onClick={() => setSelectedQuestion(question.id)}
                 className={`p-3 border-b border-gray-200 cursor-pointer hover:bg-white transition-colors ${
                   selectedQuestion === question.id ? 'bg-white border-l-4 border-teal-500' : ''
-                }`}
+                } ${pendingRemovals.has(question.id) ? 'bg-red-50/60 opacity-60' : ''}`}
               >
                 <div className="flex items-start gap-2">
                   {!isPoolMode && (
@@ -1045,6 +1278,14 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       {question.hasMultipleCorrect && (
                         <Badge variant="outline" className="text-xs bg-purple-100 text-purple-700">
                           Multi
+                        </Badge>
+                      )}
+                      {pendingRemovals.has(question.id) && (
+                        <Badge variant="outline" className="text-xs bg-red-100 text-red-700">Will be removed</Badge>
+                      )}
+                      {!pendingRemovals.has(question.id) && (question.id.startsWith('new-') || baselines[question.id] !== questionSnapshot(question)) && (
+                        <Badge variant="outline" className="text-xs bg-amber-100 text-amber-700">
+                          {question.id.startsWith('new-') ? 'New' : 'Edited'}
                         </Badge>
                       )}
                       <span className="text-xs text-gray-500 ml-auto">Max {question.maxScore}</span>
@@ -1081,11 +1322,15 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteQuestion(question.id);
+                        toggleRemoval(question.id);
                       }}
                       className="p-1 hover:bg-red-100 rounded"
+                      aria-label={pendingRemovals.has(question.id) ? 'Keep question' : 'Remove question'}
+                      title={pendingRemovals.has(question.id) ? 'Keep question' : 'Remove question'}
                     >
-                      <Trash2 className="size-3 text-red-500" />
+                      {pendingRemovals.has(question.id)
+                        ? <RefreshCw className="size-3 text-gray-600" />
+                        : <Trash2 className="size-3 text-red-500" />}
                     </button>
                   </div>}
                 </div>
@@ -1125,16 +1370,15 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                     View in Question Bank
                   </Button>
                 )}
-                <Button variant="outline" size="sm">
-                  <X className="size-4 mr-2" />
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={saveQuestion} disabled={isSaving} className="bg-gradient-to-r from-teal-500 to-blue-600">
-                  <Save className="size-4 mr-2" />
-                  {isSaving ? 'Saving...' : selectedQ.canEditContent ? 'Save Question' : 'Save Points'}
-                </Button>
               </div>
             </div>
+
+            {pendingRemovals.has(selectedQ.id) && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <span>This question will be removed from the exam when you save.</span>
+                <Button variant="outline" size="sm" onClick={() => toggleRemoval(selectedQ.id)}>Keep it</Button>
+              </div>
+            )}
 
             {!selectedQ.canEditContent && (
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
@@ -1421,6 +1665,26 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
         )}
       </div>
 
+      </div>
+
+      <SectionSaveBar
+        label="Save Questions"
+        dirty={questionsDirty}
+        saving={questionsSaving}
+        savedAt={questionsSavedAt}
+        error={saveError}
+        summary={
+          <span>
+            {changedQuestions.length > 0 && `${changedQuestions.length} edited`}
+            {changedQuestions.length > 0 && pendingRemovals.size > 0 && ' · '}
+            {pendingRemovals.size > 0 && `${pendingRemovals.size} to remove`}
+            {!questionsDirty && `${questions.length} question${questions.length === 1 ? '' : 's'} in this exam`}
+          </span>
+        }
+        onSave={() => void saveQuestions()}
+        onDiscard={() => { setSaveError(null); void loadQuestions(); }}
+      />
+
       {/* Question Pool Modal */}
       {showQuestionPool && (
         <QuestionPoolModal
@@ -1429,8 +1693,14 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
           subjectId={subjectId}
           expectedVersion={expectedVersion}
           initialPoolConfig={poolConfig}
+          poolDraft={poolDraft}
+          onPoolDraftChange={setPoolDraft}
+          onClose={() => setShowQuestionPool(false)}
+          poolDraft={poolDraft}
+          onPoolDraftChange={setPoolDraft}
           onClose={() => setShowQuestionPool(false)}
           onImported={async () => {
+            await handleImported();
             setIsPoolMode(false);
             setPoolConfig(null);
             await loadQuestions();
@@ -1441,28 +1711,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
           }}
         />
       )}
-      <AlertDialog open={questionToDelete !== null} onOpenChange={(open) => { if (!open && !isDeleting) setQuestionToDelete(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove this question from the exam?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The reusable question, options, chapters, and learning outcomes will remain in the question bank.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={isDeleting} onClick={(event) => { event.preventDefault(); void confirmDeleteQuestion(); }} className="bg-red-600 hover:bg-red-700">
-              {isDeleting ? 'Removing...' : 'Remove question'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={bulkRemoveOpen} onOpenChange={(open) => { if (!bulkBusy) setBulkRemoveOpen(open); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Remove {selectedIds.size} selected question{selectedIds.size === 1 ? '' : 's'}?</AlertDialogTitle><AlertDialogDescription>Only exam associations are removed. Reusable questions, options, chapters, and learning objectives remain intact.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={bulkBusy} className="bg-red-600 hover:bg-red-700" onClick={(event) => { event.preventDefault(); void confirmBulkRemove(); }}>{bulkBusy ? 'Removing...' : 'Remove Selected'}</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <AlertDialog open={exitPoolOpen} onOpenChange={(open) => { if (!bulkBusy) setExitPoolOpen(open); }}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Exit Pool Mode?</AlertDialogTitle><AlertDialogDescription>Every unique saved pool candidate will become a normal fixed exam question. This can add more questions than each student previously received. Existing attempts remain unchanged.</AlertDialogDescription></AlertDialogHeader>

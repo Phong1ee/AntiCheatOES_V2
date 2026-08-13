@@ -696,6 +696,8 @@ class TeacherExamIntegrationTests(unittest.TestCase):
     def test_import_candidate_filters_and_pagination(self):
         teacher_two = self.db.query(User).filter_by(school_id="T2").one()
         target = self._bank_question("T2", QuestionStatus.approved, "Unique normalization prompt", "MCQ", "hard", "DB")
+        # T1 is not actively assigned to WEB (see setUp), so this own draft is excluded
+        # from the bank entirely, same as any other unassigned-subject question.
         self._bank_question("T1", QuestionStatus.draft, "Own web draft", "essay", "easy", "WEB")
         for index in range(23):
             self._bank_question("T2", QuestionStatus.approved, f"Approved item {index:02d}")
@@ -705,10 +707,10 @@ class TeacherExamIntegrationTests(unittest.TestCase):
 
         default_page = get_question_import_candidates(exam.exam_id, current_user={"school_id": "T1"}, role_check={}, db=self.db)
         self.assertEqual((len(default_page["items"]), default_page["page_size"]), (10, 10))
-        self.assertEqual(default_page["total"], 25)
+        self.assertEqual(default_page["total"], 24)
         self.assertEqual(default_page["total_pages"], 3)
         final_page = get_question_import_candidates(exam.exam_id, 2, 20, {"school_id": "T1"}, {}, self.db)
-        self.assertEqual((len(final_page["items"]), final_page["total_pages"]), (5, 2))
+        self.assertEqual((len(final_page["items"]), final_page["total_pages"]), (4, 2))
 
         filters = [
             {"search": "NORMALIZATION"},

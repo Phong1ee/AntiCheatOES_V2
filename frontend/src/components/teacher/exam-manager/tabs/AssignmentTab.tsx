@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Search, Users } from 'lucide-react';
-import { toast } from 'sonner';
 
 import { teacherExamService } from '../../../../services/teacher-exam.service';
+import { SectionSaveBar } from '../SectionSaveBar';
 import type { AssignmentOptions } from '../../../../types/teacher-exam';
 import { normalizeSearchText } from '../../../../utils/search';
 import {
@@ -27,9 +27,10 @@ interface AssignmentTabProps {
   examId: string | null;
   expectedVersion?: number;
   onSaved: () => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTabProps) {
+export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange }: AssignmentTabProps) {
   const [data, setData] = useState<AssignmentOptions | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [originalIds, setOriginalIds] = useState<Set<string>>(new Set());
@@ -38,6 +39,8 @@ export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTa
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [confirmRemoval, setConfirmRemoval] = useState(false);
 
   const load = useCallback(async () => {
@@ -89,6 +92,10 @@ export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTa
   const dirty = selectedIds.size !== originalIds.size
     || [...selectedIds].some((id) => !originalIds.has(id));
 
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
   const toggleStudent = (schoolId: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -113,15 +120,34 @@ export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTa
     if (!examId) return;
     try {
       setSaving(true);
-      const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds], expectedVersion);
-      toast.success(
-        `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
-      );
+      setSaving(true);
+      try {
+        setSaveError(null);
+        const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds], expectedVersion);
+        if (result && typeof result.added_count === 'number') {
+          toast.success(
+            `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
+          );
+        } else {
+          // older API responses may not return details
+          toast.success('Assignments saved.');
+        }
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Unable to save assignments.');
+      } finally {
+        setSaving(false);
+      }
+
       setConfirmRemoval(false);
       await onSaved();
       await load();
-    } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : 'Unable to save assignments.');
+      setConfirmRemoval(false);
+      await onSaved();
+      await load();
+      setSavedAt(Date.now());
+    } catch (error_) {
+      // The selection stays dirty so the teacher can correct and retry.
+      setSaveError(error_ instanceof Error ? error_.message : 'Unable to save assignments.');
     } finally {
       setSaving(false);
     }
@@ -135,9 +161,6 @@ export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTa
     <Card className="mx-auto max-w-5xl border-0 shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Users className="size-5 text-teal-600" />Assign Students</CardTitle>
-        <CardDescription>
-          Class selection is a bulk action over current membership. Future class members are not assigned automatically.
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading && !data ? (
@@ -222,16 +245,21 @@ export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTa
               ))}
             </div>
 
-            <div className="flex justify-end">
-              <Button
-                disabled={!dirty || saving}
-                onClick={() => removedCount > 0 ? setConfirmRemoval(true) : void save()}
-                className="bg-gradient-to-r from-teal-500 to-blue-600"
-              >
-                {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-                Save Assignments
-              </Button>
-            </div>
+            <SectionSaveBar
+              label="Save Assignments"
+              dirty={dirty}
+              saving={saving}
+              savedAt={savedAt}
+              error={saveError}
+              summary={
+                <span>
+                  {selectedIds.size} student{selectedIds.size === 1 ? '' : 's'} selected
+                  {removedCount > 0 && ` · ${removedCount} to remove`}
+                </span>
+              }
+              onSave={() => removedCount > 0 ? setConfirmRemoval(true) : void save()}
+              onDiscard={() => { setSelectedIds(new Set(originalIds)); setSaveError(null); }}
+            />
           </>
         )}
       </CardContent>

@@ -34,21 +34,29 @@ export function useIncidentReporter({ active, examId, attemptId, onEvent }: Inci
 
   const report = useCallback(async (incident: AntiCheatIncident) => {
     if (!active || !attemptId) return;
-    // Prevent a detector from racing the same incident while its prior request is pending.
+    // Prevent a continuous detector from racing the same incident while its prior
+    // request is pending. Browser events are discrete user actions, so each one is
+    // its own violation and must never be dropped here; a repeat would otherwise be
+    // lost for as long as the previous request is pending or retrying. Their burst
+    // suppression already lives in useAntiCheatMonitoring.
+    const deduped = incident.source !== 'browser';
     const key = `${incident.source}:${incident.eventType}`;
-    if (inFlight.current.has(key)) return;
+    if (deduped) {
+      if (inFlight.current.has(key)) return;
+      inFlight.current.add(key);
+    }
+    const release = () => { if (deduped) inFlight.current.delete(key); };
     const clientEventId = window.crypto.randomUUID();
-    inFlight.current.add(key);
     const send = async (retry = 0): Promise<void> => {
       try {
         const event = await studentExamService.recordAntiCheatEvent(examId, attemptId, clientEventId, incident.eventType, incident.source, incident.details, incident.metadata);
         callbacks.current.onEvent(event, incident.eventType);
-        inFlight.current.delete(key);
+        release();
       } catch (error) {
         const status = error instanceof ApiError ? error.status : undefined;
         const transient = !status || status >= 500 || status === 408 || status === 429;
         if (!transient || retry >= 2 || !active) {
-          inFlight.current.delete(key);
+          release();
           return;
         }
         const delay = retry === 0 ? 500 : 1_500;

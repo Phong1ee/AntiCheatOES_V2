@@ -5,6 +5,7 @@ import { UserManagementPage } from './UserManagementPage';
 import { TeacherPermissionsPage } from './TeacherPermissionsPage';
 import { AuditLogPage } from './AuditLogPage';
 import { AdminQuestionBankPage } from './AdminQuestionBankPage';
+import { SubjectClassPage } from './SubjectClassPage';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -19,6 +20,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
       {activeTab === 'monitoring' && <SystemHealthPage />}
       {activeTab === 'users' && <UserManagementPage />}
       {activeTab === 'permissions' && <TeacherPermissionsPage />}
+      {activeTab === 'classes' && <SubjectClassPage />}
       {activeTab === 'audit' && <AuditLogPage />}
       {activeTab === 'questions' && <AdminQuestionBankPage />}
     </div>

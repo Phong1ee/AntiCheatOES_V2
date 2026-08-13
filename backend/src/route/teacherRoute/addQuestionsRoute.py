@@ -31,7 +31,7 @@ from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptio
 from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdateRequest
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
-from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.teacher_subject_service import active_subject_ids, require_active_subject_assignment
 from src.service.exam_version_service import claim_exam_version
 
 router = APIRouter()
@@ -619,6 +619,7 @@ def get_questions_from_question_bank(
         teacher = _teacher(db, current_user["school_id"])
         if not db.query(Subject).filter(Subject.subject_id == subject_id).first():
             raise HTTPException(status_code=404, detail="Subject not found")
+        require_active_subject_assignment(db, teacher.school_id, subject_id)
         questions = (
             _import_candidate_query(db, teacher)
             .filter(Question.subject_id == subject_id)
@@ -653,7 +654,12 @@ def get_question_import_candidates(
     del role_check
     _owned_exam(db, exam_id, current_user["school_id"])
     teacher = _teacher(db, current_user["school_id"])
-    authorized_query = _import_candidate_query(db, teacher)
+    allowed_subject_ids = active_subject_ids(db, teacher.school_id)
+    if subject_id:
+        require_active_subject_assignment(db, teacher.school_id, subject_id)
+    authorized_query = _import_candidate_query(db, teacher).filter(
+        Question.subject_id.in_(allowed_subject_ids)
+    )
     query = authorized_query
     if search and search.strip():
         query = query.filter(Question.question_text.ilike(f"%{search.strip()}%"))
@@ -696,13 +702,14 @@ def get_question_import_candidates(
                     db.query(Subject.subject_id, Subject.subject_name)
                     .join(Question, Question.subject_id == Subject.subject_id)
                     .filter(
+                        Question.subject_id.in_(allowed_subject_ids),
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
                                 Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
-                        )
+                        ),
                     )
                     .distinct()
                     .order_by(Subject.subject_name)
@@ -715,13 +722,14 @@ def get_question_import_candidates(
                     db.query(User.school_id, User.full_name)
                     .join(Question, Question.created_by == User.school_id)
                     .filter(
+                        Question.subject_id.in_(allowed_subject_ids),
                         or_(
                             Question.question_status == QuestionStatus.approved,
                             and_(
                                 Question.created_by == teacher.school_id,
                                 Question.question_status.in_([QuestionStatus.draft, QuestionStatus.pending]),
                             ),
-                        )
+                        ),
                     )
                     .distinct()
                     # MySQL requires every ORDER BY expression to be present in
@@ -782,6 +790,17 @@ def add_questions_to_exam_from_question_bank(
             raise HTTPException(
                 status_code=403,
                 detail="One or more questions are not authorized for import",
+            )
+        allowed_subject_ids = active_subject_ids(db, teacher.school_id)
+        unassigned_subjects = [
+            question.question_id
+            for question in questions
+            if question.subject_id not in allowed_subject_ids
+        ]
+        if unassigned_subjects:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not actively assigned to the subject for one or more questions",
             )
         existing_ids = {
             row[0]

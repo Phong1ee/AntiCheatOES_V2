@@ -224,9 +224,12 @@ class StudentExamFlowTests(unittest.TestCase):
         ):
             result = ExamController.getStudentExams("S1", "student")
 
+        # NOW() is a local naive DATETIME, like the exam schedule fields sent with it.
+        # A "Z" suffix would make the browser shift it by the local UTC offset, which
+        # moved the calendar's "today" onto the next day in positive-offset zones.
         self.assertEqual(result, {
             "success": True,
-            "serverTime": "2026-08-04T10:00:01Z",
+            "serverTime": "2026-08-04T10:00:01",
             "exams": [],
         })
 

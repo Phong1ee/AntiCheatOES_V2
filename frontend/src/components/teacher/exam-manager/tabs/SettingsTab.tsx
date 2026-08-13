@@ -1,6 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
-import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
 import {
@@ -12,12 +11,9 @@ import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
+import { SectionSaveBar } from '../SectionSaveBar';
 import type { ResultStrategy } from '../../../../types/teacher-results';
 import type { ResultVisibility } from '../../../../types/teacher-exam';
-
-export interface SettingsTabHandle {
-  save: () => Promise<void>;
-}
 
 interface SettingsTabProps {
   examId: string | null;
@@ -25,6 +21,9 @@ interface SettingsTabProps {
   expectedVersion?: number;
   onSaved: () => Promise<void>;
   onSavingChange?: (saving: boolean) => void;
+  onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
+}
 }
 
 const gradingMethods: { value: ResultStrategy; label: string}[] = [
@@ -45,8 +44,25 @@ const visibilityOptions: { value: ResultVisibility; label: string}[] = [
 const isResultVisibility = (value: string): value is ResultVisibility =>
   visibilityOptions.some((option) => option.value === value);
 
+const snapshotOf = (settings: TeacherExamSettingsPayload, resultVisibility: ResultVisibility) =>
+  JSON.stringify({ settings, resultVisibility });
+
+/** Returns a message when the payload is not safe to send, otherwise null. */
+const validateSettings = (settings: TeacherExamSettingsPayload): string | null => {
+  if (!Number.isInteger(settings.grace_period) || settings.grace_period < 0) {
+    return 'Grace period must be a non-negative integer.';
+  }
+  if (
+    settings.anti_cheat_enabled
+    && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
+  ) {
+    return 'Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.';
+  }
+  return null;
+};
+
 export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
-  { examId, resultVisibility, expectedVersion, onSaved, onSavingChange },
+  { examId, resultVisibility, expectedVersion, onSaved, onSavingChange, onResultVisibilityChange, onDirtyChange },
   ref,
 ) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
@@ -54,6 +70,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** Serialized state as last persisted; null until the first load completes. */
+  const [baseline, setBaseline] = useState<string | null>(null);
   const persistedExamId = examId && !examId.startsWith('new-') ? Number(examId) : null;
   const currentExamId = useRef<number | null>(persistedExamId);
   currentExamId.current = persistedExamId;
@@ -63,12 +82,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   }, [resultVisibility]);
 
   useEffect(() => {
-    onSavingChange?.(saving);
-  }, [saving, onSavingChange]);
-
-  useEffect(() => {
     let active = true;
     if (!persistedExamId) {
+      setBaseline(null);
       setSettings(defaultTeacherExamSettings);
       setError(null);
       setLoading(false);
@@ -76,6 +92,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         active = false;
       };
     }
+    setBaseline(null);
 
     const load = async () => {
       try {
@@ -94,7 +111,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           auto_grade: data.auto_grade,
           result_strategy: data.result_strategy,
         };
+        setBaseline(snapshotOf(mapped, resultVisibility));
         setSettings(mapped);
+        setSavedAt(null);
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load exam settings.');
       } finally {
@@ -107,6 +126,17 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
     };
   }, [persistedExamId]);
 
+  const dirty = useMemo(
+    () => baseline !== null && snapshotOf(settings, draftResultVisibility) !== baseline,
+    [baseline, settings, draftResultVisibility],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const validationError = useMemo(() => validateSettings(settings), [settings]);
+
   const setBoolean = (field: keyof TeacherExamSettingsPayload, value: boolean) => {
     setSettings((current) => ({ ...current, [field]: value }));
   };
@@ -114,10 +144,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   const setNonNegativeNumber = (field: keyof TeacherExamSettingsPayload, rawValue: string) => {
     const value = Number(rawValue);
     setSettings((current) => ({ ...current, [field]: Number.isFinite(value) ? value : 0 }));
-  };
-
-  const toggleAntiCheat = (enabled: boolean) => {
-    setBoolean('anti_cheat_enabled', enabled);
   };
 
   const updateViolationLimit = (rawValue: string) => {
@@ -131,11 +157,12 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       setError('Create the exam before saving settings.');
       return;
     }
-    const numericValues = [
-      settings.grace_period,
-    ];
-    if (numericValues.some((value) => !Number.isInteger(value) || value < 0)) {
-      setError('Grace period must be a non-negative integer.');
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (validationError) {
+      setError(validationError);
       return;
     }
     if (
@@ -154,9 +181,20 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       const targetExamId = persistedExamId;
       setSaving(true);
       setError(null);
-      const saved = await teacherExamSettingsService.update(targetExamId, payload);
+      const saved = await teacherExamSettingsService.update(targetExamId, settings);
       if (currentExamId.current !== targetExamId) return;
-      setSettings({
+      if (draftResultVisibility !== resultVisibility) {
+        await onResultVisibilityChange(draftResultVisibility);
+        if (currentExamId.current !== targetExamId) return;
+      }
+      const persisted: TeacherExamSettingsPayload = {
+        shuffle_question: saved.shuffle_question,
+        shuffle_answer_options: saved.shuffle_answer_options,
+        sequential_navigation: saved.sequential_navigation,
+        violation_limit: saved.violation_limit,
+        auto_grade: saved.auto_grade,
+        result_strategy: saved.result_strategy,
+      };
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
         sequential_navigation: saved.sequential_navigation,
@@ -167,20 +205,19 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
       });
+      setBaseline(snapshotOf(persisted, draftResultVisibility));
+      setSettings(persisted);
+      setSavedAt(Date.now());
       await onSaved();
       toast.success('Exam settings saved.');
     } catch (saveError) {
+      // Dirty state is intentionally left untouched so the teacher can retry.
       const message = saveError instanceof Error ? saveError.message : 'Unable to save exam settings.';
-      if (currentExamId.current === persistedExamId) {
-        setError(message);
-        toast.error(message);
-      }
+      if (currentExamId.current === persistedExamId) setError(message);
     } finally {
       setSaving(false);
     }
   };
-
-  useImperativeHandle(ref, () => ({ save: saveSettings }));
 
   if (!persistedExamId) {
     return <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Create the exam before configuring settings.</div>;
@@ -191,8 +228,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader>
           <CardTitle>Result Visibility</CardTitle>
@@ -211,7 +246,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
               {visibilityOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   <span className="font-medium">{option.label}</span>
-                  <span className="ml-2 text-xs text-gray-500"></span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -260,7 +294,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           <CardDescription>Set one shared limit for every recorded anti-cheat violation.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={toggleAntiCheat} /></div>
+          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={(value) => setBoolean('anti_cheat_enabled', value)} /></div>
           {settings.anti_cheat_enabled && (
             <div className="space-y-4 border-t border-gray-200 pt-4">
               <div className="space-y-2">
@@ -315,6 +349,16 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           </div>
         </CardContent>
       </Card>
+
+      <SectionSaveBar
+        label="Save Settings"
+        dirty={dirty}
+        saving={saving}
+        savedAt={savedAt}
+        error={error ?? validationError}
+        saveDisabled={validationError !== null}
+        onSave={() => void saveSettings()}
+      />
     </div>
   );
-});
+}

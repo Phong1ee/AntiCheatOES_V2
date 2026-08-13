@@ -301,12 +301,10 @@ export function ExamListSidebar({ exams, selectedExamId, onSelectExam, onCreateN
                         <FileText className="size-3" />
                         {exam.questionCount} {exam.questionCount === 1 ? 'question' : 'questions'}
                       </div>
-                      {exam.assignedStudents > 0 && (
-                        <div className="flex items-center gap-1">
-                          <Users className="size-3" />
-                          {exam.assignedStudents}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1">
+                        <Users className="size-3" />
+                        {exam.assignedStudents}
+                      </div>
                     </div>
 
                     {/* Average Score */}

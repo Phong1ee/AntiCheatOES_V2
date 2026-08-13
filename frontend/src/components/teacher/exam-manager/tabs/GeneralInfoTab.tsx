@@ -39,6 +39,8 @@ interface GeneralInfoTabProps {
   saveError: string | null;
   onCancel: () => void;
   isNewExam: boolean;
+  /** Hidden when a host (e.g. the create dialog) supplies its own footer actions. */
+  showActions?: boolean;
 }
 
 export function GeneralInfoTab({
@@ -67,6 +69,7 @@ export function GeneralInfoTab({
   saveError,
   onCancel,
   isNewExam,
+  showActions = true,
 }: GeneralInfoTabProps) {
   const subjectSelectValue = subjectId;
   const currentSubjectIsAssigned = subjects.some((item) => item.subject_id === subjectId);
@@ -325,11 +328,13 @@ export function GeneralInfoTab({
       </Card>
 
       {saveError && <p className="text-sm text-red-600">{saveError}</p>}
-      <div className="flex items-center justify-end gap-3 pt-2">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
+      {showActions && (
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      )}
 
     </div>
   );

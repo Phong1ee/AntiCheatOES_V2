@@ -132,6 +132,43 @@ class ExamAssignmentTests(unittest.TestCase):
             )
         self.assertEqual(invalid_student.exception.status_code, 422)
 
+    def test_options_and_sync_are_scoped_to_the_exams_subject(self):
+        exam = self.db.query(Exam).filter_by(manage_by="T1").one()
+        self.db.add_all(
+            [
+                User(school_id="S4", full_name="Student Four", email="s4@test", password_hash="x", role="student"),
+                Subject(subject_id="WEB", subject_name="Web", subject_description="WEB"),
+            ]
+        )
+        self.db.flush()
+        self.db.add(CourseClass(class_id=4, class_name="WEB-A", subject_id="WEB", teacher_id="T1"))
+        self.db.flush()
+        self.db.add(StudentClass(student_id="S4", class_id=4))
+        self.db.commit()
+
+        result = get_assignment_options(exam.exam_id, {"school_id": "T1"}, {}, self.db)
+        self.assertEqual({item["class_id"] for item in result["classes"]}, {1, 2})
+        self.assertEqual({item["school_id"] for item in result["students"]}, {"S1", "S2"})
+
+        with self.assertRaises(HTTPException) as wrong_subject_class:
+            sync_assignments(
+                exam.exam_id,
+                AssignmentSyncRequest(class_ids=[4]),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(wrong_subject_class.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as wrong_subject_student:
+            sync_assignments(
+                exam.exam_id,
+                AssignmentSyncRequest(student_ids=["S4"]),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(wrong_subject_student.exception.status_code, 422)
+
     def test_attempt_blocks_removal_without_deleting_history(self):
         exam = self.db.query(Exam).filter_by(manage_by="T1").one()
         self.db.add(StudentExam(exam_id=exam.exam_id, student_id="S1"))

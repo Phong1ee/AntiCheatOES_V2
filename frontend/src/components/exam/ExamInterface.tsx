@@ -13,6 +13,7 @@ import { useIncidentReporter } from "../../anti-cheat/incident-reporter";
 import { useAIAntiCheat } from "../../anti-cheat/use-ai-anti-cheat";
 import { isBrowserMonitoringActive } from "../../anti-cheat/anti-cheat-lifecycle";
 import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
+import { requestFullscreenOrThrow } from "../../utils/fullscreen";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
 interface ExamInterfaceProps {
@@ -334,12 +335,12 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     setSubmitError(null);
     try {
       // This is called only by an explicit user action from the blocking gate.
-      await document.documentElement.requestFullscreen();
+      await requestFullscreenOrThrow();
       setFullscreenLocked(false);
       setShowViolationWarning(false);
-    } catch {
+    } catch (error) {
       setFullscreenLocked(true);
-      setSubmitError("Fullscreen permission is required to continue this exam.");
+      setSubmitError(error instanceof Error ? error.message : "Fullscreen permission is required to continue this exam.");
     }
   };
 
@@ -376,7 +377,14 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     active: isBrowserMonitoringActive(antiCheatEnabled, attemptStatus, Boolean(attemptId)), examId, attemptId, mediaStream,
     reporter: incidentReporter,
     shouldIgnoreEvents: shouldIgnoreAntiCheatEvents,
-    onFullscreenLost: () => setFullscreenLocked(true),
+    // Open the dialog here rather than waiting for the violation report to resolve:
+    // answering is blocked until fullscreen returns, so a slow or failed report
+    // would otherwise leave no way back. The report still updates the counts below.
+    onFullscreenLost: () => {
+      setFullscreenLocked(true);
+      setViolationType("FULLSCREEN_EXIT");
+      setShowViolationWarning(true);
+    },
     onMediaProblem: () => {
       setFullscreenLocked(true);
       aiRuntime.fail("Camera or microphone access was lost. Restore monitoring before continuing.");
@@ -389,8 +397,6 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
 
   if (aiRuntimeActive && aiRuntime.readiness === "error") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security runtime error</h1><p className="mt-3 text-sm leading-6 text-slate-600">Anti-cheat monitoring was interrupted. Restore camera and audio monitoring to continue the exam.</p><div className="mt-6 flex gap-3"><button className="flex-1 rounded-lg border border-slate-300 px-5 py-3 font-medium text-slate-700 hover:bg-slate-50" onClick={handleNormalExit}>Return to Dashboard</button><button className="flex-1 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={aiRuntime.retry}>Retry</button></div></div></div>;
   if (aiRuntimeActive && aiRuntime.readiness === "loading") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Preparing secure exam</h1><p className="mt-3 text-sm leading-6 text-slate-600">Camera and microphone monitoring are being initialized. Please wait.</p></div></div>;
-
-  if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} /></div>;
 
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);

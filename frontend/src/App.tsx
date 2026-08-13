@@ -88,6 +88,14 @@ useEffect(() => {
   let timeout: ReturnType<typeof setTimeout>;
 
   const logout = () => {
+    // Never force-logout out from under an active exam attempt: alert() blocks
+    // the whole tab and forces the browser out of fullscreen as a side effect,
+    // which would freeze and kick the student out of their exam mid-attempt.
+    // The exam's own anti-cheat/heartbeat lifecycle owns that session instead.
+    if (localStorage.getItem("current_exam_attempt")) {
+      resetTimer();
+      return;
+    }
     alert("Your session has expired due to inactivity.");
     handleLogout();
   };

@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-import { Button } from '../../ui/button';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
@@ -13,9 +12,10 @@ import {
 } from '../../ui/select';
 import { GeneralInfoTab } from './tabs/GeneralInfoTab';
 import { QuestionsTab } from './tabs/QuestionsTab';
-import { SettingsTab, type SettingsTabHandle } from './tabs/SettingsTab';
+import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
-import { FileText, BookOpen, Clock, Hash, Settings2, Users, CheckCircle2, Save } from 'lucide-react';
+import { SectionSaveBar } from './SectionSaveBar';
+import { FileText, BookOpen, Clock, Hash, Settings2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -38,7 +38,7 @@ interface ExamEditorProps {
     version: number;
   } | null;
   subjects: TeacherSubject[];
-  initialTab?: 'general' | 'settings';
+  initialTab?: 'general' | 'questions' | 'settings';
   onClose: () => void;
   onSave: (examData: {
     id: string;
@@ -56,7 +56,11 @@ interface ExamEditorProps {
     expectedVersion?: number;
   }) => Promise<void>;
   onSaved: () => Promise<void>;
+  onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
+  onStatusChange: (examId: string, status: ExamStatus) => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
+  /** Lets the page warn before the teacher navigates away from unsaved work. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
@@ -64,7 +68,13 @@ type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
 const isExamEditorTab = (value: string): value is ExamEditorTab =>
   value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onViewInQuestionBank }: ExamEditorProps) {
+/** Minute precision on both sides so a saved exam never looks permanently edited. */
+const scheduleKey = (raw: string) => {
+  const [date = '', time = ''] = raw.split('T');
+  return date && time ? `${date}T${time.slice(0, 5)}` : '';
+};
+
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onResultVisibilityChange, onStatusChange, onViewInQuestionBank, onDirtyChange }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -80,12 +90,48 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   const [startClock, setStartClock] = useState('');
   const [endDate, setEndDate] = useState('');
   const [endClock, setEndClock] = useState('');
-  const [lastSaved, setLastSaved] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<ExamEditorTab>('general');
   const [isSaving, setIsSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const settingsTabRef = useRef<SettingsTabHandle>(null);
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  const loadedExamIdRef = useRef<string | null>(null);
+  const [statusSaving, setStatusSaving] = useState(false);
+  // Tabs stay mounted once opened so unsaved work survives tab switching.
+  const [visitedTabs, setVisitedTabs] = useState<ExamEditorTab[]>(['general']);
+  const [sectionDirty, setSectionDirty] = useState({ questions: false, settings: false, assignment: false });
+
+  useEffect(() => {
+    setVisitedTabs((current) => current.includes(activeTab) ? current : [...current, activeTab]);
+  }, [activeTab]);
+
+  const setDirtyFor = useCallback((section: 'questions' | 'settings' | 'assignment', dirty: boolean) => {
+    setSectionDirty((current) => current[section] === dirty ? current : { ...current, [section]: dirty });
+  }, []);
+  const handleQuestionsDirty = useCallback((dirty: boolean) => setDirtyFor('questions', dirty), [setDirtyFor]);
+  const handleSettingsDirty = useCallback((dirty: boolean) => setDirtyFor('settings', dirty), [setDirtyFor]);
+  const handleAssignmentDirty = useCallback((dirty: boolean) => setDirtyFor('assignment', dirty), [setDirtyFor]);
+
+  // Status is committed on selection so it is never left as pending unsaved
+  // state; this matches the exam list's status menu, which already saves directly.
+  const handleStatusSelect = async (nextStatus: ExamStatus) => {
+    if (nextStatus === status) return;
+    if (!examId || examId.startsWith('new-')) {
+      setStatus(nextStatus);
+      return;
+    }
+    try {
+      setStatusSaving(true);
+      setSaveError(null);
+      await onStatusChange(examId, nextStatus);
+      setStatus(nextStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to change the exam status.';
+      setSaveError(message);
+      toast.error(message);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
 
   // Generate unique exam code for new exams
   const generateExamCode = () => {
@@ -101,6 +147,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
     }
 
     if (!examId) {
+      loadedExamIdRef.current = null;
       // No exam selected - reset form
       setTitle('');
       setDescription('');
@@ -121,6 +168,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       return;
     }
 
+    // Saving settings or status replaces the exam object; re-hydrating then
+    // would silently throw away unsaved edits in other fields.
+    if (loadedExamIdRef.current === examId) return;
+    setSectionDirty({ questions: false, settings: false, assignment: false });
+    setVisitedTabs([initialTab ?? 'general']);
+    setSaveError(null);
+    setSavedAt(null);
+
     if (examId.startsWith('new-')) {
       // Creating new exam - use empty template with generated code
       setTitle('');
@@ -140,7 +195,8 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
       setEndClock('');
       setActiveTab('general');
     } else {
-      if (exam) {
+      if (!exam) return;
+      {
         setTitle(exam.title);
         setDescription(exam.description || '');
         setSubject(exam.subject || '');
@@ -161,15 +217,57 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         setActiveTab(initialTab ?? 'general');
       }
     }
+    loadedExamIdRef.current = examId;
   }, [examId, exam, initialTab]);
 
-  // Auto-save simulation
+  const creatingNewExam = examId?.startsWith('new-') ?? false;
+  const generalSnapshot = JSON.stringify({
+    title,
+    description,
+    subjectId,
+    duration,
+    examCode: requireExamCode ? examCode.trim() : null,
+    maxAttempt: Number(maxAttempt),
+    passingScore: Number(passingScore),
+    startTime: startDate && startClock ? `${startDate}T${startClock}` : '',
+    endTime: endDate && endClock ? `${endDate}T${endClock}` : '',
+  });
+  const savedGeneralSnapshot = exam ? JSON.stringify({
+    title: exam.title,
+    description: exam.description || '',
+    subjectId: exam.subjectId || '',
+    duration: exam.duration || 60,
+    examCode: exam.examCode,
+    maxAttempt: Number(exam.maxAttempt),
+    passingScore: Number(exam.passingScore),
+    startTime: scheduleKey(exam.startTime),
+    endTime: scheduleKey(exam.endTime),
+  }) : null;
+  const generalDirty = creatingNewExam || savedGeneralSnapshot === null
+    ? true
+    : generalSnapshot !== savedGeneralSnapshot;
+
+  const dirtySectionLabels = examId === null ? [] : [
+    generalDirty && !creatingNewExam ? 'General Info' : null,
+    sectionDirty.questions ? 'Questions' : null,
+    sectionDirty.settings ? 'Settings' : null,
+    sectionDirty.assignment ? 'Assignment' : null,
+  ].filter((label): label is string => label !== null);
+  const anyDirty = dirtySectionLabels.length > 0;
+
   useEffect(() => {
-    const timer = setInterval(() => {
-      setLastSaved(new Date());
-    }, 30000);
-    return () => clearInterval(timer);
-  }, []);
+    onDirtyChange?.(anyDirty);
+  }, [anyDirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (!anyDirty) return undefined;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [anyDirty]);
 
   if (!examId) {
     return (
@@ -200,14 +298,6 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   }
 
   const isNewExam = examId.startsWith('new-');
-
-  const getTimeSinceLastSave = () => {
-    const seconds = Math.floor((new Date().getTime() - lastSaved.getTime()) / 1000);
-    if (seconds < 60) return `${seconds} seconds ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes === 1) return '1 minute ago';
-    return `${minutes} minutes ago`;
-  };
 
   const statusConfig = {
     draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -257,14 +347,34 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         resultVisibility,
         expectedVersion: isNewExam ? undefined : exam?.version,
       });
-      setLastSaved(new Date());
+      setSavedAt(Date.now());
     } catch (error) {
+      // The form keeps its edits so the teacher can correct and retry.
       const message = error instanceof Error ? error.message : 'Unable to save the exam.';
       setSaveError(message);
-      toast.error(message);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const revertGeneral = () => {
+    if (!exam) return;
+    setTitle(exam.title);
+    setDescription(exam.description || '');
+    setSubject(exam.subject || '');
+    setSubjectId(exam.subjectId || '');
+    setDuration(exam.duration || 60);
+    setExamCode(exam.examCode ?? '');
+    setRequireExamCode(exam.examCode !== null);
+    setMaxAttempt(exam.maxAttempt);
+    setPassingScore(exam.passingScore);
+    const [savedStartDate = '', savedStartTime = ''] = exam.startTime.split('T');
+    const [savedEndDate = '', savedEndTime = ''] = exam.endTime.split('T');
+    setStartDate(savedStartDate);
+    setStartClock(savedStartTime.slice(0, 5));
+    setEndDate(savedEndDate);
+    setEndClock(savedEndTime.slice(0, 5));
+    setSaveError(null);
   };
 
   // Check if has unsaved changes
@@ -349,8 +459,15 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </div>
 
           <div className="flex flex-col items-stretch gap-2 flex-shrink-0">
-            <Select value={status} onValueChange={(value) => {
-              if (value === 'draft' || value === 'published') setStatus(value);
+            <Select value={status} disabled={statusSaving} onValueChange={(value) => {
+              if (value !== 'draft' && value !== 'published') return;
+              if (value === 'published' && dirtySectionLabels.length > 0) {
+                const message = `Save your changes before publishing: ${dirtySectionLabels.join(', ')}.`;
+                setSaveError(message);
+                toast.error(message);
+                return;
+              }
+              void handleStatusSelect(value);
             }}>
               <SelectTrigger className={`w-36 rounded-full font-medium ${statusConfig[status].color}`} aria-label="Exam status">
                 <SelectValue />
@@ -361,35 +478,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               </SelectContent>
             </Select>
 
-            {activeTab === 'general' && (
-              <Button
-                onClick={() => void handleSave()}
-                disabled={!hasRequiredData || isSaving}
-                className="w-36 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save className="mr-2 size-4" />
-                {isSaving ? 'Saving...' : isNewExam ? 'Create Exam' : 'Save Changes'}
-              </Button>
-            )}
-
-            {activeTab === 'settings' && (
-              <Button
-                onClick={() => void settingsTabRef.current?.save()}
-                disabled={settingsSaving}
-                className="w-36 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save className="mr-2 size-4" />
-                {settingsSaving ? 'Saving...' : 'Save Settings'}
-              </Button>
+            {anyDirty && (
+              <p className="w-36 text-right text-xs text-amber-600">
+                Unsaved: {dirtySectionLabels.join(', ')}
+              </p>
             )}
           </div>
         </div>
 
-        {/* Auto-save indicator */}
-        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-          <CheckCircle2 className="size-3.5 text-teal-500" />
-          <span>Auto-saved {getTimeSinceLastSave()}</span>
-        </div>
       </div>
 
       {/* Tabs */}
@@ -403,6 +499,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           >
             <FileText className="size-4" />
             General Info
+            {generalDirty && !isNewExam && <span className="text-amber-500" title="Unsaved changes">&bull;</span>}
           </TabsTrigger>
           <TabsTrigger
             value="questions"
@@ -410,6 +507,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           >
             <BookOpen className="size-4" />
             Questions
+            {sectionDirty.questions && <span className="text-amber-500" title="Unsaved changes">&bull;</span>}
           </TabsTrigger>
           <TabsTrigger
             value="settings"
@@ -417,6 +515,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           >
             <Settings2 className="size-4" />
             Settings
+            {sectionDirty.settings && <span className="text-amber-500" title="Unsaved changes">&bull;</span>}
           </TabsTrigger>
           <TabsTrigger
             value="assignment"
@@ -424,11 +523,12 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           >
             <Users className="size-4" />
             Assignment
+            {sectionDirty.assignment && <span className="text-amber-500" title="Unsaved changes">&bull;</span>}
           </TabsTrigger>
         </TabsList>
 
         <div className={`flex-1 min-h-0 ${activeTab === 'questions' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <TabsContent value="general" className="m-0 p-6">
+          <TabsContent value="general" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
             <GeneralInfoTab
               subject={subject}
               subjectId={subjectId}
@@ -460,37 +560,62 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               onStartTimeChange={setStartClock}
               onEndDateChange={setEndDate}
               onEndTimeChange={setEndClock}
-              saveError={saveError}
+              saveError={null}
               onCancel={onClose}
               isNewExam={isNewExam}
+              showActions={false}
             />
+            <div className="mx-auto mt-6 max-w-4xl">
+              <SectionSaveBar
+                label={isNewExam ? 'Create Exam' : 'Save Changes'}
+                dirty={generalDirty}
+                saving={isSaving}
+                savedAt={savedAt}
+                error={saveError}
+                saveDisabled={!hasRequiredData}
+                onSave={() => void handleSave()}
+                onDiscard={isNewExam ? undefined : revertGeneral}
+              />
+            </div>
           </TabsContent>
 
-          <TabsContent value="questions" className="m-0 h-full p-0">
-            <QuestionsTab
-              examId={examId}
-              subjectId={subjectId}
-              expectedVersion={exam?.version}
-              canCreateContent={subjects.some((item) => item.subject_id === subjectId)}
-              onSaved={onSaved}
-              onViewInQuestionBank={onViewInQuestionBank}
-            />
-          </TabsContent>
+          {visitedTabs.includes('questions') && (
+            <TabsContent value="questions" forceMount className="m-0 h-full p-0 data-[state=inactive]:hidden">
+              <QuestionsTab
+                examId={examId}
+                subjectId={subjectId}
+                expectedVersion={exam?.version}
+                canCreateContent={subjects.some((item) => item.subject_id === subjectId)}
+                onSaved={onSaved}
+                onViewInQuestionBank={onViewInQuestionBank}
+                onDirtyChange={handleQuestionsDirty}
+              />
+            </TabsContent>
+          )}
 
-          <TabsContent value="settings" className="m-0 p-6">
-            <SettingsTab
-              ref={settingsTabRef}
-              examId={examId}
-              resultVisibility={resultVisibility}
-              expectedVersion={exam?.version}
-              onSavingChange={setSettingsSaving}
-              onSaved={onSaved}
-            />
-          </TabsContent>
+          {visitedTabs.includes('settings') && (
+            <TabsContent value="settings" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
+              <SettingsTab
+                ref={settingsTabRef}
+                examId={examId}
+                resultVisibility={resultVisibility}
+                expectedVersion={exam?.version}
+                onResultVisibilityChange={async (nextVisibility) => {
+                  await onResultVisibilityChange(examId, nextVisibility);
+                  setResultVisibility(nextVisibility);
+                }}
+                onSavingChange={setSettingsSaving}
+                onSaved={onSaved}
+                onDirtyChange={handleSettingsDirty}
+              />
+            </TabsContent>
+          )}
 
-          <TabsContent value="assignment" className="m-0 p-6">
-            <AssignmentTab examId={examId} expectedVersion={exam?.version} onSaved={onSaved} />
-          </TabsContent>
+          {visitedTabs.includes('assignment') && (
+            <TabsContent value="assignment" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
+              <AssignmentTab examId={examId} expectedVersion={exam?.version} onSaved={onSaved} onDirtyChange={handleAssignmentDirty} />
+            </TabsContent>
+          )}
 
         </div>
       </Tabs>

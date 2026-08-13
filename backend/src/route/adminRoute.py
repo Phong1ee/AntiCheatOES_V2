@@ -18,6 +18,7 @@ from src.a_db_config import (
     Chapter,
     ChapterLO,
     ChapterQuestion,
+    CourseClass,
     ExamPoolQuestion,
     ExamQuestion,
     LO,
@@ -27,6 +28,7 @@ from src.a_db_config import (
     Question,
     QuestionRevision,
     QuestionStatus,
+    StudentClass,
     Subject,
     TeacherSubject,
     User,
@@ -2213,3 +2215,454 @@ def revoke_teacher_permission(teacher_school_id: str, subject_id: str, current_u
         item.is_active = False; db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
+
+
+# --------------------------------------------------------------------------
+# Subject classes
+#
+# A class carries its own subject_id and teacher_id (there is no join table),
+# and those two columns are exactly what gates teacher-side student assignment
+# in getExamsRoute._assignment_options. Editing a class here therefore changes
+# who a teacher may assign, so payloads are validated against real users and
+# subjects rather than trusted from the client.
+# --------------------------------------------------------------------------
+
+
+class ClassTeacherPayload(BaseModel):
+    teacher_school_id: str = Field(min_length=1, max_length=30)
+
+
+class ClassStudentsPayload(BaseModel):
+    student_ids: list[str] = Field(min_length=1)
+
+
+def _class_or_404(db: Session, class_id: int) -> CourseClass:
+    course_class = db.get(CourseClass, class_id)
+    if not course_class:
+        raise HTTPException(status_code=404, detail="Class not found")
+    return course_class
+
+
+def _class_teacher(db: Session, school_id: str) -> User:
+    teacher = db.query(User).filter(User.school_id == school_id).first()
+    if not teacher or (_value(teacher.role) or "").lower() != "teacher":
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    if getattr(teacher, "deleted_at", None) is not None:
+        raise HTTPException(status_code=422, detail="A deleted account cannot be assigned to a class")
+    return teacher
+
+
+def _account_status(user: User) -> str:
+    if getattr(user, "deleted_at", None) is not None or getattr(user, "is_locked", False):
+        return "inactive"
+    return "active"
+
+
+def _person(user: User | None) -> dict | None:
+    if not user:
+        return None
+    return {
+        "school_id": user.school_id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "status": _account_status(user),
+    }
+
+
+def _serialize_class(course_class: CourseClass, student_count: int) -> dict:
+    return {
+        "class_id": course_class.class_id,
+        "class_name": course_class.class_name,
+        "subject_id": course_class.subject_id,
+        "subject_name": course_class.subject.subject_name if course_class.subject else None,
+        "teacher": _person(course_class.teacher),
+        "student_count": student_count,
+    }
+
+
+def _subject_enrolment_map(db: Session, subject_id: str, exclude_class_id: int) -> dict[str, CourseClass]:
+    """Student -> the other class of this subject they already sit in.
+
+    A student may only attend one class per subject, and the schema cannot
+    express that (the subject lives on class, not on student_class), so it is
+    enforced here and surfaced to the UI.
+    """
+    rows = (
+        db.query(StudentClass.student_id, CourseClass)
+        .join(CourseClass, CourseClass.class_id == StudentClass.class_id)
+        .filter(
+            CourseClass.subject_id == subject_id,
+            CourseClass.class_id != exclude_class_id,
+        )
+        .all()
+    )
+    return {student_id: course_class for student_id, course_class in rows}
+
+
+def _ensure_subject_permission(db: Session, teacher_school_id: str, subject_id: str, admin: User) -> bool:
+    """Owning a class implies working with that subject's question bank, so the
+    teacher_subject grant is created (or reactivated) alongside the assignment.
+
+    Returns True when this call actually changed something. Does not commit.
+    """
+    item = (
+        db.query(TeacherSubject)
+        .filter(
+            TeacherSubject.teacher_id == teacher_school_id,
+            TeacherSubject.subject_id == subject_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if item and item.is_active:
+        return False
+    if not item:
+        item = TeacherSubject(teacher_id=teacher_school_id, subject_id=subject_id)
+        db.add(item)
+    item.is_active = True
+    item.assigned_by = admin.school_id
+    item.assigned_at = datetime.now()
+    return True
+
+
+def _active_subject_teacher_ids(db: Session, subject_id: str) -> set[str]:
+    """Teachers who also hold question-bank access for the subject (teacher_subject)."""
+    return {
+        row[0]
+        for row in db.query(TeacherSubject.teacher_id)
+        .filter(TeacherSubject.subject_id == subject_id, TeacherSubject.is_active.is_(True))
+        .all()
+    }
+
+
+@router.get("/classes")
+def list_classes(
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    counts = dict(
+        db.query(StudentClass.class_id, func.count(StudentClass.student_id))
+        .group_by(StudentClass.class_id)
+        .all()
+    )
+    classes = (
+        db.query(CourseClass)
+        .options(selectinload(CourseClass.subject), selectinload(CourseClass.teacher))
+        .order_by(CourseClass.subject_id, CourseClass.class_name, CourseClass.class_id)
+        .all()
+    )
+    return {"items": [_serialize_class(item, counts.get(item.class_id, 0)) for item in classes]}
+
+
+@router.get("/classes/teachers")
+def list_class_teachers(
+    subject_id: str | None = None,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Assignable teachers, flagged with whether they also hold the subject question-bank access."""
+    del role_check
+    _management_admin(db, current_user)
+    permitted = _active_subject_teacher_ids(db, subject_id) if subject_id else set()
+    teachers = (
+        db.query(User)
+        .filter(User.role == UserRole.teacher, User.deleted_at.is_(None))
+        .order_by(User.full_name, User.school_id)
+        .all()
+    )
+    return [
+        {
+            **_person(teacher),
+            "has_subject_permission": teacher.school_id in permitted if subject_id else None,
+        }
+        for teacher in teachers
+    ]
+
+
+@router.get("/classes/{class_id}")
+def get_class_detail(
+    class_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    course_class = _class_or_404(db, class_id)
+    students = (
+        db.query(User)
+        .join(StudentClass, StudentClass.student_id == User.school_id)
+        .filter(StudentClass.class_id == class_id, User.role == UserRole.student)
+        .order_by(User.full_name, User.school_id)
+        .all()
+    )
+    return {
+        **_serialize_class(course_class, len(students)),
+        "teacher_has_subject_permission": (
+            course_class.teacher_id in _active_subject_teacher_ids(db, course_class.subject_id)
+        ),
+        "students": [_person(student) for student in students],
+    }
+
+
+@router.get("/classes/{class_id}/available-students")
+def list_available_students(
+    class_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    course_class = _class_or_404(db, class_id)
+    enrolled = [
+        row[0] for row in db.query(StudentClass.student_id).filter(StudentClass.class_id == class_id).all()
+    ]
+    query = db.query(User).filter(User.role == UserRole.student, User.deleted_at.is_(None))
+    if enrolled:
+        query = query.filter(~User.school_id.in_(enrolled))
+    taken = _subject_enrolment_map(db, course_class.subject_id, class_id)
+    return [
+        {
+            **_person(student),
+            "conflict_class_name": (
+                taken[student.school_id].class_name if student.school_id in taken else None
+            ),
+        }
+        for student in query.order_by(User.full_name, User.school_id).all()
+    ]
+
+
+@router.patch("/classes/{class_id}/teacher")
+def change_class_teacher(
+    class_id: int,
+    payload: ClassTeacherPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        course_class = _class_or_404(db, class_id)
+        teacher = _class_teacher(db, payload.teacher_school_id)
+        course_class.teacher_id = teacher.school_id
+        granted = _ensure_subject_permission(db, teacher.school_id, course_class.subject_id, admin)
+        db.commit()
+        db.refresh(course_class)
+        count = db.query(StudentClass).filter(StudentClass.class_id == class_id).count()
+        return {**_serialize_class(course_class, count), "granted_subject_permission": granted}
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The class teacher could not be updated") from exc
+
+
+@router.post("/classes/{class_id}/students", status_code=status.HTTP_201_CREATED)
+def add_class_students(
+    class_id: int,
+    payload: ClassStudentsPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        course_class = _class_or_404(db, class_id)
+        requested = [school_id.strip() for school_id in payload.student_ids if school_id.strip()]
+        if not requested:
+            raise HTTPException(status_code=400, detail="At least one student is required")
+        found = {
+            user.school_id
+            for user in db.query(User).filter(
+                User.school_id.in_(requested),
+                User.role == UserRole.student,
+                User.deleted_at.is_(None),
+            )
+        }
+        missing = sorted(set(requested) - found)
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "One or more students were not found", "student_ids": missing},
+            )
+        already = {
+            row[0]
+            for row in db.query(StudentClass.student_id)
+            .filter(StudentClass.class_id == class_id, StudentClass.student_id.in_(requested))
+            .all()
+        }
+        added = sorted(found - already)
+        # One class per subject per student. Checked inside the request rather
+        # than trusting the dialog, which only greys the offenders out.
+        taken = _subject_enrolment_map(db, course_class.subject_id, class_id)
+        clashes = [(school_id, taken[school_id]) for school_id in added if school_id in taken]
+        if clashes:
+            names = {
+                user.school_id: user.full_name
+                for user in db.query(User).filter(User.school_id.in_([item[0] for item in clashes]))
+            }
+            listed = ", ".join(
+                f"{names.get(school_id, school_id)} (already in {other.class_name})"
+                for school_id, other in clashes
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A student can only attend one {course_class.subject_id} class. "
+                    f"Remove them from the other class first: {listed}."
+                ),
+            )
+        db.add_all(StudentClass(class_id=class_id, student_id=school_id) for school_id in added)
+        db.commit()
+        return {"added_count": len(added), "skipped_count": len(already), "student_ids": added}
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="One or more students are already enrolled") from exc
+
+
+@router.delete("/classes/{class_id}/students/{student_school_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_class_student(
+    class_id: int,
+    student_school_id: str,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Drops class membership only; existing exam assignments are left untouched."""
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        _class_or_404(db, class_id)
+        membership = (
+            db.query(StudentClass)
+            .filter(StudentClass.class_id == class_id, StudentClass.student_id == student_school_id)
+            .first()
+        )
+        if not membership:
+            raise HTTPException(status_code=404, detail="Student is not enrolled in this class")
+        db.delete(membership)
+        db.commit()
+        return None
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+class CreateClassPayload(BaseModel):
+    class_name: str = Field(min_length=1, max_length=100)
+    subject_id: str = Field(min_length=1, max_length=20)
+    teacher_school_id: str = Field(min_length=1, max_length=30)
+
+
+class RenameClassPayload(BaseModel):
+    class_name: str = Field(min_length=1, max_length=100)
+
+
+def _reject_duplicate_class_name(db: Session, subject_id: str, class_name: str, exclude_id: int | None = None) -> None:
+    """The schema has no unique key here, so guard against confusing same-name siblings."""
+    query = db.query(CourseClass).filter(
+        CourseClass.subject_id == subject_id,
+        func.lower(CourseClass.class_name) == class_name.lower(),
+    )
+    if exclude_id is not None:
+        query = query.filter(CourseClass.class_id != exclude_id)
+    if query.first():
+        raise HTTPException(status_code=409, detail="A class with this name already exists for the subject")
+
+
+@router.post("/classes", status_code=status.HTTP_201_CREATED)
+def create_class(
+    payload: CreateClassPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    try:
+        admin = _management_admin(db, current_user)
+        class_name = payload.class_name.strip()
+        if not class_name:
+            raise HTTPException(status_code=400, detail="Class name is required")
+        _permission_subject(db, payload.subject_id)
+        teacher = _class_teacher(db, payload.teacher_school_id)
+        _reject_duplicate_class_name(db, payload.subject_id, class_name)
+        course_class = CourseClass(
+            class_name=class_name,
+            subject_id=payload.subject_id,
+            teacher_id=teacher.school_id,
+        )
+        db.add(course_class)
+        granted = _ensure_subject_permission(db, teacher.school_id, payload.subject_id, admin)
+        db.commit()
+        db.refresh(course_class)
+        return {**_serialize_class(course_class, 0), "granted_subject_permission": granted}
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The class could not be created") from exc
+
+
+@router.patch("/classes/{class_id}")
+def rename_class(
+    class_id: int,
+    payload: RenameClassPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Only the name is editable: moving a class to another subject would strand
+    the roster against exams already assigned under the original subject."""
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        course_class = _class_or_404(db, class_id)
+        class_name = payload.class_name.strip()
+        if not class_name:
+            raise HTTPException(status_code=400, detail="Class name is required")
+        _reject_duplicate_class_name(db, course_class.subject_id, class_name, exclude_id=class_id)
+        course_class.class_name = class_name
+        db.commit()
+        db.refresh(course_class)
+        count = db.query(StudentClass).filter(StudentClass.class_id == class_id).count()
+        return _serialize_class(course_class, count)
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@router.delete("/classes/{class_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_class(
+    class_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Removes the class and its memberships. Exam assignments already made from
+    this roster live in student_exam and are deliberately left untouched."""
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        _class_or_404(db, class_id)
+        db.query(StudentClass).filter(StudentClass.class_id == class_id).delete(synchronize_session=False)
+        db.query(CourseClass).filter(CourseClass.class_id == class_id).delete(synchronize_session=False)
+        db.commit()
+        return None
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The class is still referenced and cannot be deleted") from exc

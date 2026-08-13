@@ -63,6 +63,12 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<EditorTab | undefined>(initialTab);
+  const [editorDirty, setEditorDirty] = useState(false);
+
+  /** Leaving the open exam would drop whatever has not been saved yet. */
+  const confirmLeaveEditor = () =>
+    !editorDirty
+    || window.confirm('This exam has unsaved changes that will be lost. Leave anyway?');
 
   const loadManagerData = async () => {
     try {
@@ -213,7 +219,12 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
         <ExamListSidebar
           exams={exams}
           selectedExamId={selectedExamId}
-          onSelectExam={(id) => { setEditorTab(undefined); setSelectedExamId(id); }}
+          onSelectExam={(id) => {
+            if (id === selectedExamId || !confirmLeaveEditor()) return;
+            setEditorDirty(false);
+            setEditorTab(undefined);
+            setSelectedExamId(id);
+          }}
           onCreateNew={handleCreateNew}
           onDeleteExam={handleDeleteExam}
           onDuplicateExam={handleDuplicateExam}
@@ -226,7 +237,8 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           exam={selectedExam}
           subjects={subjects}
           initialTab={editorTab}
-          onClose={() => setSelectedExamId(null)}
+          onClose={() => { if (confirmLeaveEditor()) { setEditorDirty(false); setSelectedExamId(null); } }}
+          onDirtyChange={setEditorDirty}
           onSave={handleSaveExam}
           onResultVisibilityChange={handleResultVisibilityChange}
           onStatusChange={handleStatusChange}

@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Info, Loader2, Shuffle, Users } from 'lucide-react';
-import { toast } from 'sonner';
 
 import {
   questionService,
@@ -15,11 +14,21 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader } from '../../ui/card';
 import { Input } from '../../ui/input';
 
+/** Pool configuration the teacher has composed but not yet persisted. */
+export interface PoolDraft {
+  fixed_randomization: boolean;
+  rules: PoolRulePayload[];
+}
+
 interface PoolConfigurationBuilderProps {
   examId: number;
   subjectId: string;
   initialConfig: PoolConfig | null;
-  onSaved: (config: PoolConfig) => Promise<void>;
+  /** Draft held by the host so reopening the modal keeps unsaved edits. */
+  draft: PoolDraft | null;
+  onDraftChange: (draft: PoolDraft | null) => void;
+  /** Closes the modal. Persisting happens from the Questions section save bar. */
+  onDone: () => void;
 }
 
 type RuleCounts = Record<string, number>;
@@ -35,41 +44,51 @@ const difficultyStyle: Record<QuestionDifficulty, string> = {
   hard: 'bg-red-100 text-red-700',
 };
 
+/** Order-independent serialization so drafts can be compared with the saved config. */
+export const serializePoolDraft = (draft: PoolDraft) => JSON.stringify({
+  fixed_randomization: draft.fixed_randomization,
+  rules: [...draft.rules]
+    .map((rule) => ({ ...rule, key: ruleKey(rule) }))
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map(({ key, ...rule }) => { void key; return rule; }),
+});
+
+export const poolConfigAsDraft = (config: PoolConfig | null): PoolDraft => ({
+  fixed_randomization: config?.fixed_randomization ?? false,
+  rules: (config?.rules ?? []).map((rule) => ({
+    chapter_id: rule.chapter_id,
+    lo_id: rule.lo_id,
+    difficulty: rule.difficulty,
+    draw_count: rule.draw_count,
+    max_score_per_question: rule.max_score_per_question,
+  })),
+});
+
 export function PoolConfigurationBuilder({
   examId,
   subjectId,
   initialConfig,
-  onSaved,
+  draft,
+  onDraftChange,
+  onDone,
 }: PoolConfigurationBuilderProps) {
   const [availability, setAvailability] = useState<PoolAvailabilityRow[]>([]);
   const [counts, setCounts] = useState<RuleCounts>({});
   const [maxScores, setMaxScores] = useState<RuleMaxScores>({});
-  const [fixedRandomization, setFixedRandomization] = useState(
-    initialConfig?.fixed_randomization ?? false,
-  );
+  const [fixedRandomization, setFixedRandomization] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const seededRef = useRef(false);
 
+  // Seed once: an in-progress draft wins over whatever is currently persisted.
   useEffect(() => {
-    setFixedRandomization(initialConfig?.fixed_randomization ?? false);
-    setCounts(
-      Object.fromEntries(
-        (initialConfig?.rules ?? []).map((rule) => [
-          `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`,
-          rule.draw_count,
-        ]),
-      ),
-    );
-    setMaxScores(
-      Object.fromEntries(
-        (initialConfig?.rules ?? []).map((rule) => [
-          `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`,
-          rule.max_score_per_question,
-        ]),
-      ),
-    );
-  }, [initialConfig]);
+    if (seededRef.current) return;
+    seededRef.current = true;
+    const source = draft ?? poolConfigAsDraft(initialConfig);
+    setFixedRandomization(source.fixed_randomization);
+    setCounts(Object.fromEntries(source.rules.map((rule) => [ruleKey(rule), rule.draw_count])));
+    setMaxScores(Object.fromEntries(source.rules.map((rule) => [ruleKey(rule), rule.max_score_per_question])));
+  }, [draft, initialConfig]);
 
   useEffect(() => {
     let active = true;
@@ -148,41 +167,26 @@ export function PoolConfigurationBuilder({
     }));
   };
 
-  const save = async () => {
-    if (rules.length === 0) {
-      setError('Enter how many questions to draw from at least one topic.');
-      return;
-    }
-    if (invalidRows.length > 0) {
-      setError('Some topics ask for more questions than the question bank has available.');
-      return;
-    }
-    if (invalidMaxScore) {
-      setError('Every topic you draw from needs points per question greater than 0.');
-      return;
-    }
-    try {
-      setSaving(true);
-      setError(null);
-      const saved = await questionService.savePoolConfig(examId, {
-        subject_id: subjectId,
-        fixed_randomization: fixedRandomization,
-        rules,
-      });
-      await onSaved(saved);
-      toast.success(
-        fixedRandomization
-          ? 'Saved. Every student will get the same randomly drawn set.'
-          : 'Saved. Each student will get their own randomly drawn set.',
-      );
-    } catch (saveError) {
-      const message = saveError instanceof Error ? saveError.message : 'Unable to save pool configuration.';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const persistedSnapshot = useMemo(
+    () => serializePoolDraft(poolConfigAsDraft(initialConfig)),
+    [initialConfig],
+  );
+
+  // Nothing is sent from here: the composed draft is handed to the Questions
+  // section, which owns the single "Save Question Pool" action.
+  useEffect(() => {
+    if (loading) return;
+    const current: PoolDraft = { fixed_randomization: fixedRandomization, rules };
+    onDraftChange(serializePoolDraft(current) === persistedSnapshot ? null : current);
+  }, [rules, fixedRandomization, persistedSnapshot, loading, onDraftChange]);
+
+  const draftError = rules.length === 0
+    ? 'Enter how many questions to draw from at least one topic.'
+    : invalidRows.length > 0
+      ? 'Some topics ask for more questions than the question bank has available.'
+      : invalidMaxScore
+        ? 'Every topic you draw from needs points per question greater than 0.'
+        : null;
 
   if (loading) {
     return <div className="flex min-h-64 items-center justify-center gap-2 text-gray-600"><Loader2 className="size-5 animate-spin" /> Checking how many questions are available...</div>;
@@ -340,7 +344,6 @@ export function PoolConfigurationBuilder({
                 type="button"
                 role="radio"
                 aria-checked={!fixedRandomization}
-                disabled={saving}
                 onClick={() => setFixedRandomization(false)}
                 className={`rounded-xl border-2 p-4 text-left transition ${!fixedRandomization ? 'border-teal-500 bg-teal-50' : 'border-gray-200 hover:border-gray-300'}`}
               >
@@ -358,7 +361,6 @@ export function PoolConfigurationBuilder({
                 type="button"
                 role="radio"
                 aria-checked={fixedRandomization}
-                disabled={saving}
                 onClick={() => setFixedRandomization(true)}
                 className={`rounded-xl border-2 p-4 text-left transition ${fixedRandomization ? 'border-teal-500 bg-teal-50' : 'border-gray-200 hover:border-gray-300'}`}
               >
@@ -377,13 +379,18 @@ export function PoolConfigurationBuilder({
       )}
 
       <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t bg-white py-3">
-        <div className="text-sm text-gray-600">
-          <span className="font-medium text-gray-800">{totalQuestions} question{totalQuestions === 1 ? '' : 's'}</span> per attempt
-          {totalQuestions > 0 && <span className="text-gray-500"> · {Number(totalPoints.toFixed(2))} raw points total</span>}
+        <div className="min-w-0 text-sm text-gray-600">
+          <div>
+            <span className="font-medium text-gray-800">{totalQuestions} question{totalQuestions === 1 ? '' : 's'}</span> per attempt
+            {totalQuestions > 0 && <span className="text-gray-500"> · {Number(totalPoints.toFixed(2))} raw points total</span>}
+          </div>
+          <p className="text-xs text-gray-500">
+            {draftError ?? 'Nothing is saved yet — use "Save Question Pool" in the Questions tab to apply this.'}
+          </p>
         </div>
-        <Button onClick={() => void save()} disabled={saving || totalQuestions === 0 || invalidRows.length > 0 || invalidMaxScore}>
-          {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}
-          {saving ? 'Saving...' : 'Save Question Pool'}
+        <Button onClick={onDone} disabled={draftError !== null}>
+          <CheckCircle2 className="mr-2 size-4" />
+          Done
         </Button>
       </div>
     </div>

@@ -1,6 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { CheckCircle, CheckCircle2, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
-import { toast } from 'sonner';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
 import {
@@ -12,18 +11,15 @@ import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import { Switch } from '../../../ui/switch';
+import { SectionSaveBar } from '../SectionSaveBar';
 import type { ResultStrategy } from '../../../../types/teacher-results';
 import type { ResultVisibility } from '../../../../types/teacher-exam';
-
-export interface SettingsTabHandle {
-  save: () => Promise<void>;
-}
 
 interface SettingsTabProps {
   examId: string | null;
   resultVisibility: ResultVisibility;
   onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
-  onSavingChange?: (saving: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const gradingMethods: { value: ResultStrategy; label: string}[] = [
@@ -61,17 +57,15 @@ const validateSettings = (settings: TeacherExamSettingsPayload): string | null =
   return null;
 };
 
-export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
-  { examId, resultVisibility, onResultVisibilityChange, onSavingChange },
-  ref,
-) {
+export function SettingsTab({ examId, resultVisibility, onResultVisibilityChange, onDirtyChange }: SettingsTabProps) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
   const [draftResultVisibility, setDraftResultVisibility] = useState<ResultVisibility>(resultVisibility);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const lastSavedRef = useRef<string | null>(null);
+  /** Serialized state as last persisted; null until the first load completes. */
+  const [baseline, setBaseline] = useState<string | null>(null);
   const persistedExamId = examId && !examId.startsWith('new-') ? Number(examId) : null;
   const currentExamId = useRef<number | null>(persistedExamId);
   currentExamId.current = persistedExamId;
@@ -81,13 +75,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
   }, [resultVisibility]);
 
   useEffect(() => {
-    onSavingChange?.(saving);
-  }, [saving, onSavingChange]);
-
-  useEffect(() => {
     let active = true;
     if (!persistedExamId) {
-      lastSavedRef.current = null;
+      setBaseline(null);
       setSettings(defaultTeacherExamSettings);
       setError(null);
       setLoading(false);
@@ -95,7 +85,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         active = false;
       };
     }
-    lastSavedRef.current = null;
+    setBaseline(null);
 
     const load = async () => {
       try {
@@ -114,9 +104,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           auto_grade: data.auto_grade,
           result_strategy: data.result_strategy,
         };
-        // Baseline for the auto-save effect: freshly loaded state is already persisted.
-        lastSavedRef.current = snapshotOf(mapped, resultVisibility);
+        setBaseline(snapshotOf(mapped, resultVisibility));
         setSettings(mapped);
+        setSavedAt(null);
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load exam settings.');
       } finally {
@@ -129,6 +119,17 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
     };
   }, [persistedExamId]);
 
+  const dirty = useMemo(
+    () => baseline !== null && snapshotOf(settings, draftResultVisibility) !== baseline,
+    [baseline, settings, draftResultVisibility],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const validationError = useMemo(() => validateSettings(settings), [settings]);
+
   const setBoolean = (field: keyof TeacherExamSettingsPayload, value: boolean) => {
     setSettings((current) => ({ ...current, [field]: value }));
   };
@@ -138,32 +139,26 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
     setSettings((current) => ({ ...current, [field]: Number.isFinite(value) ? value : 0 }));
   };
 
-  const toggleAntiCheat = (enabled: boolean) => {
-    setBoolean('anti_cheat_enabled', enabled);
-  };
-
   const updateViolationLimit = (rawValue: string) => {
     const value = Number(rawValue);
     const violation_limit = rawValue.trim() === '' || !Number.isFinite(value) ? Number.NaN : value;
     setSettings((current) => ({ ...current, violation_limit }));
   };
 
-  const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
+  const saveSettings = async () => {
     if (!persistedExamId) {
       setError('Create the exam before saving settings.');
       return;
     }
-    const validationError = validateSettings(settings);
     if (validationError) {
       setError(validationError);
       return;
     }
-    const payload: TeacherExamSettingsPayload = settings;
     try {
       const targetExamId = persistedExamId;
       setSaving(true);
       setError(null);
-      const saved = await teacherExamSettingsService.update(targetExamId, payload);
+      const saved = await teacherExamSettingsService.update(targetExamId, settings);
       if (currentExamId.current !== targetExamId) return;
       if (draftResultVisibility !== resultVisibility) {
         await onResultVisibilityChange(draftResultVisibility);
@@ -180,41 +175,17 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
       };
-      // Record what the server now holds so the auto-save effect does not fire
-      // again for the state it just wrote back.
-      lastSavedRef.current = snapshotOf(persisted, draftResultVisibility);
+      setBaseline(snapshotOf(persisted, draftResultVisibility));
       setSettings(persisted);
       setSavedAt(Date.now());
-      if (!silent) toast.success('Exam settings saved.');
     } catch (saveError) {
+      // Dirty state is intentionally left untouched so the teacher can retry.
       const message = saveError instanceof Error ? saveError.message : 'Unable to save exam settings.';
-      if (currentExamId.current === persistedExamId) {
-        setError(message);
-        toast.error(message);
-      }
+      if (currentExamId.current === persistedExamId) setError(message);
     } finally {
       setSaving(false);
     }
   };
-
-  // Settings are independent toggles, so they are committed as they change
-  // instead of behind a separate save button.
-  useEffect(() => {
-    if (!persistedExamId || loading) return undefined;
-    const snapshot = snapshotOf(settings, draftResultVisibility);
-    if (lastSavedRef.current === null || snapshot === lastSavedRef.current) return undefined;
-    const validationError = validateSettings(settings);
-    if (validationError) {
-      // Hold the invalid value on screen rather than sending a request that fails.
-      setError(validationError);
-      return undefined;
-    }
-    setError(null);
-    const timer = window.setTimeout(() => { void saveSettings({ silent: true }); }, 700);
-    return () => window.clearTimeout(timer);
-  }, [settings, draftResultVisibility, persistedExamId, loading]);
-
-  useImperativeHandle(ref, () => ({ save: () => saveSettings() }));
 
   if (!persistedExamId) {
     return <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Create the exam before configuring settings.</div>;
@@ -225,20 +196,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-end gap-1.5 text-xs text-gray-500" aria-live="polite">
-        {saving ? (
-          <><Loader2 className="size-3.5 animate-spin" />Saving changes...</>
-        ) : error ? (
-          <span className="text-red-600">Not saved</span>
-        ) : savedAt ? (
-          <><CheckCircle2 className="size-3.5 text-teal-500" />All changes saved</>
-        ) : (
-          <span>Changes save automatically</span>
-        )}
-      </div>
-
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
       <Card className="rounded-2xl border-0 shadow-md">
         <CardHeader>
           <CardTitle>Result Visibility</CardTitle>
@@ -257,7 +214,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
               {visibilityOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   <span className="font-medium">{option.label}</span>
-                  <span className="ml-2 text-xs text-gray-500"></span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -306,7 +262,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           <CardDescription>Set one shared limit for every recorded anti-cheat violation.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={toggleAntiCheat} /></div>
+          <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={(value) => setBoolean('anti_cheat_enabled', value)} /></div>
           {settings.anti_cheat_enabled && (
             <div className="space-y-4 border-t border-gray-200 pt-4">
               <div className="space-y-2">
@@ -361,6 +317,16 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
           </div>
         </CardContent>
       </Card>
+
+      <SectionSaveBar
+        label="Save Settings"
+        dirty={dirty}
+        saving={saving}
+        savedAt={savedAt}
+        error={error ?? validationError}
+        saveDisabled={validationError !== null}
+        onSave={() => void saveSettings()}
+      />
     </div>
   );
-});
+}

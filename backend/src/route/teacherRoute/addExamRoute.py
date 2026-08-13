@@ -25,6 +25,7 @@ from src.a_db_config import (
     User,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
+from src.route.teacherRoute.getExamsRoute import _question_count
 from src.models.teacher.requestModel.TeacherExamRequest import (
     TeacherExamRequest,
     TeacherResultVisibilityRequest,
@@ -56,7 +57,7 @@ def _validate_subject(db: Session, subject_id: str) -> None:
         raise HTTPException(status_code=404, detail="Subject not found")
 
 
-def _serialize(exam: Exam) -> dict:
+def _serialize(db: Session, exam: Exam) -> dict:
     now = datetime.now()
     schedule_status = (
         "upcoming" if exam.start_time and now < exam.start_time
@@ -78,6 +79,9 @@ def _serialize(exam: Exam) -> dict:
         "manage_by": exam.manage_by,
         "subject": exam.subject.subject_name if exam.subject else None,
         "totalStudents": len(exam.student_exams),
+        # Kept in step with getExamsRoute so a status/duplicate response does not
+        # reset the exam card's question count to zero.
+        "question_count": _question_count(db, exam),
         "status": exam.status.value if hasattr(exam.status, "value") else exam.status,
         "schedule_status": schedule_status,
         "total_points": 100,
@@ -228,7 +232,7 @@ def add_exam_to_database(
             _validate_publishable(db, exam)
         db.commit()
         db.refresh(exam)
-        return _serialize(exam)
+        return _serialize(db, exam)
     except HTTPException:
         db.rollback()
         raise
@@ -270,7 +274,7 @@ def update_exam_in_database(
         exam.passing_score = request.passing_score
         db.commit()
         db.refresh(exam)
-        return _serialize(exam)
+        return _serialize(db, exam)
     except HTTPException:
         db.rollback()
         raise
@@ -325,7 +329,7 @@ def duplicate_exam(
 
         db.commit()
         db.refresh(duplicate)
-        return _serialize(duplicate)
+        return _serialize(db, duplicate)
     except HTTPException:
         db.rollback()
         raise
@@ -353,7 +357,7 @@ def update_exam_status(
         exam.status = request.status
         db.commit()
         db.refresh(exam)
-        return _serialize(exam)
+        return _serialize(db, exam)
     except HTTPException:
         db.rollback()
         raise

@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -13,6 +13,7 @@ from database import get_db
 from src.a_db_config import (
     Attempt,
     AttemptQuestion,
+    BackgroundJobStatus,
     Exam,
     ExamQuestion,
     ExamPoolConfig,
@@ -45,6 +46,15 @@ from src.service.scoring_service import (
     validate_awarded_score,
     validate_max_score,
 )
+from src.service.audit_service import record_audit
+from src.service.cache_invalidation_contract import deliver_invalidation, teacher_grading_finalized
+from src.service.outbox_publisher import enqueue_outbox_event
+from src.service.report_job_service import (
+    REPORT_TYPE_EXAM_RESULTS,
+    report_artifact_path,
+    report_job_summary,
+    request_exam_results_report,
+)
 
 router = APIRouter()
 
@@ -57,6 +67,10 @@ class GradeEssayRequest(BaseModel):
 
 class UpdateStrategyRequest(BaseModel):
     strategy: ResultStrategy
+
+
+class CreateReportJobRequest(BaseModel):
+    request_id: str = Field(alias="requestId", min_length=1, max_length=64)
 
 
 def _score_value(value):
@@ -748,6 +762,7 @@ def grade_essay_answer(
         db.query(EssayAnswer)
         .join(Attempt, Attempt.attempt_id == EssayAnswer.attempt_id)
         .filter(EssayAnswer.essay_answer_id == essay_answer_id, Attempt.exam_id == exam_id)
+        .with_for_update()
         .first()
     )
     if not essay:
@@ -758,6 +773,7 @@ def grade_essay_answer(
     attempt_question = (
         db.query(AttemptQuestion)
         .filter(AttemptQuestion.attempt_id == essay.attempt_id, AttemptQuestion.question_id == essay.question_id)
+        .with_for_update()
         .first()
     )
     if attempt_question is None:
@@ -773,7 +789,39 @@ def grade_essay_answer(
         attempt = _recompute_attempt_score(db, essay.attempt_id)
         exam = db.get(Exam, exam_id)
         final_score = sync_student_final_score(db, exam, attempt.student_id)
+        record_audit(
+            db,
+            actor_school_id=teacher.school_id,
+            actor_role=teacher.role,
+            action="ESSAY_GRADED",
+            entity_type="essay_answer",
+            entity_id=essay.essay_answer_id,
+            metadata={
+                "exam_id": exam_id,
+                "attempt_id": attempt.attempt_id,
+                "result_finalized": final_score is not None,
+                "invalidation": teacher_grading_finalized(exam_id).as_event_metadata(),
+            },
+        )
+        if final_score is not None:
+            record_audit(
+                db,
+                actor_school_id=teacher.school_id,
+                actor_role=teacher.role,
+                action="RESULT_FINALIZED",
+                entity_type="student_exam",
+                entity_id=f"{attempt.student_id}:{exam_id}",
+                metadata={"exam_id": exam_id, "attempt_id": attempt.attempt_id},
+            )
+        enqueue_outbox_event(
+            db,
+            event_type="grading.essay_graded",
+            aggregate_type="attempt",
+            aggregate_id=attempt.attempt_id,
+            metadata={"exam_id": exam_id, "essay_answer_id": essay.essay_answer_id, "result_finalized": final_score is not None},
+        )
         db.commit()
+        deliver_invalidation(teacher_grading_finalized(exam_id))
         return {
             "essayAnswerId": essay.essay_answer_id,
             "currentScore": essay.score,
@@ -785,6 +833,84 @@ def grade_essay_answer(
     except Exception:
         db.rollback()
         raise
+
+
+def _owned_report_job(db: Session, job_id: int, teacher_school_id: str):
+    from src.a_db_config import BackgroundJob, BackgroundJobType
+
+    job = db.get(BackgroundJob, job_id)
+    if not job or job.job_type != BackgroundJobType.report_export:
+        raise HTTPException(status_code=404, detail="Report job not found")
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    if metadata.get("report_type") != REPORT_TYPE_EXAM_RESULTS:
+        raise HTTPException(status_code=404, detail="Report job not found")
+    try:
+        exam_id = int(metadata["exam_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="Report job metadata is invalid") from exc
+    _owned_exam(db, exam_id, teacher_school_id)
+    return job
+
+
+@router.post("/results/exams/{exam_id}/report-jobs", status_code=202)
+def create_exam_results_report_job(
+    exam_id: int,
+    payload: CreateReportJobRequest,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Queue an idempotent XLSX export; RabbitMQ delivery occurs after commit."""
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    _owned_exam(db, exam_id, teacher.school_id)
+    try:
+        job, duplicate = request_exam_results_report(
+            db,
+            exam_id=exam_id,
+            requested_by=teacher.school_id,
+            request_id=payload.request_id,
+        )
+        db.commit()
+        db.refresh(job)
+        return {**report_job_summary(job), "duplicate": duplicate}
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.get("/results/report-jobs/{job_id}")
+def get_exam_results_report_job(
+    job_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    return report_job_summary(_owned_report_job(db, job_id, teacher.school_id))
+
+
+@router.get("/results/report-jobs/{job_id}/download")
+def download_exam_results_report_job(
+    job_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    job = _owned_report_job(db, job_id, teacher.school_id)
+    if job.status != BackgroundJobStatus.completed:
+        raise HTTPException(status_code=409, detail="Report job is not complete")
+    artifact = report_artifact_path(job.job_id)
+    if not artifact.is_file():
+        raise HTTPException(status_code=409, detail="Report artifact is not available")
+    return FileResponse(
+        artifact,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"exam_results_{job.job_id}.xlsx",
+    )
 
 
 @router.get("/results/exams/{exam_id}/export.xlsx")

@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -16,6 +17,7 @@ from src.route.adminRoute import (
     revoke_teacher_permission,
     replace_teacher_permissions,
 )
+from src.service.teacher_subject_service import active_subject_ids, has_active_subject_assignment
 
 
 class TeacherPermissionTests(unittest.TestCase):
@@ -77,3 +79,52 @@ class TeacherPermissionTests(unittest.TestCase):
         removed = replace_teacher_permissions(self.teacher.school_id, ReplaceTeacherPermissionsPayload(subject_ids=[]), self.current_admin, None, self.db)
         self.assertEqual(removed["permissions"], [])
         self.assertEqual(self.db.query(User).filter_by(school_id=self.teacher.school_id).count(), 1)
+
+    def test_injected_permission_replacement_failure_rolls_back_grants_and_revokes(self):
+        self.db.add(Subject(subject_id="WEB", subject_name="Web", subject_description="Web"))
+        self.db.commit()
+        replace_teacher_permissions(
+            self.teacher.school_id,
+            ReplaceTeacherPermissionsPayload(subject_ids=["DB"]),
+            self.current_admin,
+            None,
+            self.db,
+        )
+
+        with patch.object(self.db, "commit", side_effect=RuntimeError("simulated permission write failure")):
+            with self.assertRaisesRegex(RuntimeError, "permission write failure"):
+                replace_teacher_permissions(
+                    self.teacher.school_id,
+                    ReplaceTeacherPermissionsPayload(subject_ids=["WEB"]),
+                    self.current_admin,
+                    None,
+                    self.db,
+                )
+
+        self.db.expire_all()
+        active = {
+            item.subject_id
+            for item in self.db.query(TeacherSubject).filter_by(teacher_id=self.teacher.school_id, is_active=True).all()
+        }
+        self.assertEqual(active, {"DB"})
+
+    def test_final_set_updates_are_deterministic_and_revoke_server_access(self):
+        self.db.add(Subject(subject_id="WEB", subject_name="Web", subject_description="Web"))
+        self.db.commit()
+        replace_teacher_permissions(
+            self.teacher.school_id,
+            ReplaceTeacherPermissionsPayload(subject_ids=["DB"]),
+            self.current_admin,
+            None,
+            self.db,
+        )
+        replace_teacher_permissions(
+            self.teacher.school_id,
+            ReplaceTeacherPermissionsPayload(subject_ids=["WEB"]),
+            self.current_admin,
+            None,
+            self.db,
+        )
+
+        self.assertEqual(active_subject_ids(self.db, self.teacher.school_id), {"WEB"})
+        self.assertFalse(has_active_subject_assignment(self.db, self.teacher.school_id, "DB"))

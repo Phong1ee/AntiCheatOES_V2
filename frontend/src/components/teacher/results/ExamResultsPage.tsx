@@ -61,10 +61,23 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
   const handleExportExcel = async () => {
     if (!examId || !overview) return;
     try {
-      await teacherResultsService.exportExcel(examId, overview.examName);
-      toast.success('Results exported to Excel');
+      const { jobId } = await teacherResultsService.requestExcelExport(examId);
+      toast.success('Report export queued. Preparing your download...');
+      for (let poll = 0; poll < 60; poll += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const job = await teacherResultsService.getExcelExportJob(jobId);
+        if (job.status === 'COMPLETED') {
+          await teacherResultsService.downloadExcelExport(jobId, overview.examName);
+          toast.success('Results exported to Excel');
+          return;
+        }
+        if (job.status === 'FAILED') {
+          throw new Error(job.error || 'Report export failed');
+        }
+      }
+      toast.info('Report is still running. Please try the export again shortly.');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to export results');
+      toast.error(err instanceof Error ? err.message : 'Failed to queue report export');
     }
   };
 

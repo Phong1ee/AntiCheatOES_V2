@@ -14,5 +14,5 @@ export const teacherPermissionService = {
     const { data } = await apiClient.patch(`/api/admin/teachers/${teacherSchoolId}/permissions`, { subject_ids: subjectIds });
     return data;
   },
-  async removeAllAccess(teacherId: number) { return this.updateTeacherPermissions(teacherId, []); },
+  async removeAllAccess(teacherSchoolId: string) { return this.updateTeacherPermissions(teacherSchoolId, []); },
 };

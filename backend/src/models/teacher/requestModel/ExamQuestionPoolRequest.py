@@ -16,10 +16,12 @@ class PoolConfigRequest(BaseModel):
     subject_id: str = Field(min_length=1, max_length=20)
     fixed_randomization: bool = False
     rules: list[PoolRuleRequest] = Field(min_length=1)
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class PoolCandidateSelectionRequest(BaseModel):
     included_question_ids: list[int]
+    expected_version: int | None = Field(default=None, ge=1)
 
     @field_validator("included_question_ids")
     @classmethod
@@ -33,6 +35,7 @@ class PoolCandidateSelectionRequest(BaseModel):
 
 class BulkQuestionIdsRequest(BaseModel):
     question_ids: list[int] = Field(min_length=1)
+    expected_version: int | None = Field(default=None, ge=1)
 
     @field_validator("question_ids")
     @classmethod

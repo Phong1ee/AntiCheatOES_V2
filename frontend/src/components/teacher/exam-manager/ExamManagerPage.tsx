@@ -24,6 +24,7 @@ interface Exam {
   maxAttempt: number;
   passingScore: number;
   resultVisibility: ResultVisibility;
+  version: number;
 }
 
 const toManagerExam = (exam: TeacherExamApi): Exam => ({
@@ -44,6 +45,7 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   maxAttempt: exam.max_attempt ?? 1,
   passingScore: exam.passing_score,
   resultVisibility: exam.result_visibility ?? "hidden",
+  version: exam.version,
 });
 
 interface ExamManagerPageProps {
@@ -105,6 +107,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
     endTime: string;
     status: ExamStatus;
     resultVisibility: ResultVisibility;
+    expectedVersion?: number;
   }) => {
     const payload = {
       title: examData.title.trim(),
@@ -119,6 +122,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
       subject_id: examData.subjectId,
       total_points: 100 as const,
       passing_score: examData.passingScore,
+      expected_version: examData.expectedVersion,
     };
 
     const saved = examData.id.startsWith("new-")
@@ -129,15 +133,10 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
     toast.success(examData.id.startsWith("new-") ? "Exam created successfully." : "Exam updated successfully.");
   };
 
-  const handleResultVisibilityChange = async (examId: string, resultVisibility: ResultVisibility) => {
-    const saved = await teacherExamService.updateResultVisibility(Number(examId), resultVisibility);
-    setExams((current) => current.map((exam) => (
-      exam.id === examId ? { ...exam, resultVisibility: saved.result_visibility } : exam
-    )));
-  };
+  const refreshExam = async () => { await loadManagerData(); };
 
   const handleDeleteExam = async (examId: string) => {
-    await teacherExamService.delete(Number(examId));
+    await teacherExamService.delete(Number(examId), exams.find((exam) => exam.id === examId)?.version);
     const remaining = exams.filter((exam) => exam.id !== examId);
     setExams(remaining);
     setSelectedExamId((current) => current === examId ? remaining[0]?.id ?? null : current);
@@ -153,7 +152,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
   };
 
   const handleStatusChange = async (examId: string, status: ExamStatus) => {
-    const updated = await teacherExamService.updateStatus(Number(examId), status);
+    const updated = await teacherExamService.updateStatus(Number(examId), status, exams.find((exam) => exam.id === examId)?.version);
     const mappedUpdated = toManagerExam(updated);
     setExams((current) => current.map((exam) => exam.id === examId ? mappedUpdated : exam));
     setSelectedExamId((current) => current && current !== examId ? current : mappedUpdated.id);
@@ -196,7 +195,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           initialTab={initialTab}
           onClose={() => setSelectedExamId(null)}
           onSave={handleSaveExam}
-          onResultVisibilityChange={handleResultVisibilityChange}
+          onSaved={refreshExam}
           onViewInQuestionBank={onViewInQuestionBank}
         />
       </div>

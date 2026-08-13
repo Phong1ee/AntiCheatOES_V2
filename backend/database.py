@@ -16,7 +16,29 @@ SQL_ECHO = os.getenv("SQL_ECHO", "false").strip().lower() in {"1", "true", "yes"
 
 URL_DATABASE = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
 
-engine = create_engine(URL_DATABASE, echo=SQL_ECHO)
+
+def _positive_int_env(name: str, default: int) -> int:
+    value = os.getenv(name, str(default))
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return parsed
+
+
+# SQLAlchemy routes use this engine while legacy routes use mysql-connector.
+# Keep both pool budgets explicitly configurable so two API instances do not
+# silently retain the small development default under a load-test profile.
+engine = create_engine(
+    URL_DATABASE,
+    echo=SQL_ECHO,
+    pool_size=_positive_int_env("DB_SQL_POOL_SIZE", 5),
+    max_overflow=_positive_int_env("DB_SQL_MAX_OVERFLOW", 10),
+    pool_timeout=_positive_int_env("DB_SQL_POOL_TIMEOUT", 30),
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

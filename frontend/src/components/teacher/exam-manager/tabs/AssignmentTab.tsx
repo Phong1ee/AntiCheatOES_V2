@@ -25,9 +25,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 interface AssignmentTabProps {
   examId: string | null;
+  expectedVersion?: number;
+  onSaved: () => Promise<void>;
 }
 
-export function AssignmentTab({ examId }: AssignmentTabProps) {
+export function AssignmentTab({ examId, expectedVersion, onSaved }: AssignmentTabProps) {
   const [data, setData] = useState<AssignmentOptions | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [originalIds, setOriginalIds] = useState<Set<string>>(new Set());
@@ -111,11 +113,12 @@ export function AssignmentTab({ examId }: AssignmentTabProps) {
     if (!examId) return;
     try {
       setSaving(true);
-      const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds]);
+      const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds], expectedVersion);
       toast.success(
         `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
       );
       setConfirmRemoval(false);
+      await onSaved();
       await load();
     } catch (saveError) {
       toast.error(saveError instanceof Error ? saveError.message : 'Unable to save assignments.');

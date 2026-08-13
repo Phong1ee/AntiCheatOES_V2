@@ -19,7 +19,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.get("/me")
-async def get_profile_me(current_user: dict = Depends(verify_token)):
+def get_profile_me(current_user: dict = Depends(verify_token)):
     """Get current user profile."""
     try:
         return ProfileController.getProfile(current_user["school_id"])
@@ -31,7 +31,7 @@ async def get_profile_me(current_user: dict = Depends(verify_token)):
 
 
 @router.put("/me")
-async def update_profile_me(
+def update_profile_me(
     request: UpdateProfileRequest,
     current_user: dict = Depends(verify_token),
 ):
@@ -51,7 +51,7 @@ async def update_profile_me(
 
 
 @router.put("/change-password")
-async def change_password(
+def change_password(
     request: ChangePasswordRequest,
     current_user: dict = Depends(verify_token),
 ):

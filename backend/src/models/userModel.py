@@ -72,17 +72,21 @@ def generate_school_id(role):
     """Generate a unique school ID"""
     cnx = get_db_connection()
     cursor = cnx.cursor()
-    if role == "student":
-        prefix = "S"
-    elif role == "teacher":
-        prefix = "T"
-    elif role == "admin":
-        prefix = "A"
-    else:
-        raise Exception("Invalid role")
+    try:
+        if role == "student":
+            prefix = "S"
+        elif role == "teacher":
+            prefix = "T"
+        elif role == "admin":
+            prefix = "A"
+        else:
+            raise Exception("Invalid role")
 
-    query = "SELECT COUNT(*) FROM user WHERE role = %s"
-    cursor.execute(query, (role,))
-    count = cursor.fetchone()[0] + 1
-    postfix = f"{count:06d}"
-    return f"{prefix}{postfix}"
+        query = "SELECT COUNT(*) FROM user WHERE role = %s"
+        cursor.execute(query, (role,))
+        count = cursor.fetchone()[0] + 1
+        postfix = f"{count:06d}"
+        return f"{prefix}{postfix}"
+    finally:
+        cursor.close()
+        cnx.close()

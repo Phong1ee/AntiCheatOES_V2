@@ -35,6 +35,7 @@ interface ExamEditorProps {
     maxAttempt: number;
     passingScore: number;
     resultVisibility: ResultVisibility;
+    version: number;
   } | null;
   subjects: TeacherSubject[];
   initialTab?: 'general' | 'settings';
@@ -52,8 +53,9 @@ interface ExamEditorProps {
     endTime: string;
     status: ExamStatus;
     resultVisibility: ResultVisibility;
+    expectedVersion?: number;
   }) => Promise<void>;
-  onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
+  onSaved: () => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
@@ -62,7 +64,7 @@ type ExamEditorTab = 'general' | 'questions' | 'settings' | 'assignment';
 const isExamEditorTab = (value: string): value is ExamEditorTab =>
   value === 'general' || value === 'questions' || value === 'settings' || value === 'assignment';
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onResultVisibilityChange, onViewInQuestionBank }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onViewInQuestionBank }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -253,6 +255,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         endTime,
         status,
         resultVisibility,
+        expectedVersion: isNewExam ? undefined : exam?.version,
       });
       setLastSaved(new Date());
     } catch (error) {
@@ -467,7 +470,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
             <QuestionsTab
               examId={examId}
               subjectId={subjectId}
+              expectedVersion={exam?.version}
               canCreateContent={subjects.some((item) => item.subject_id === subjectId)}
+              onSaved={onSaved}
               onViewInQuestionBank={onViewInQuestionBank}
             />
           </TabsContent>
@@ -477,16 +482,14 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
               ref={settingsTabRef}
               examId={examId}
               resultVisibility={resultVisibility}
+              expectedVersion={exam?.version}
               onSavingChange={setSettingsSaving}
-              onResultVisibilityChange={async (nextVisibility) => {
-                await onResultVisibilityChange(examId, nextVisibility);
-                setResultVisibility(nextVisibility);
-              }}
+              onSaved={onSaved}
             />
           </TabsContent>
 
           <TabsContent value="assignment" className="m-0 p-6">
-            <AssignmentTab examId={examId} />
+            <AssignmentTab examId={examId} expectedVersion={exam?.version} onSaved={onSaved} />
           </TabsContent>
 
         </div>

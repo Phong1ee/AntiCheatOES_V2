@@ -22,7 +22,8 @@ export interface SettingsTabHandle {
 interface SettingsTabProps {
   examId: string | null;
   resultVisibility: ResultVisibility;
-  onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
+  expectedVersion?: number;
+  onSaved: () => Promise<void>;
   onSavingChange?: (saving: boolean) => void;
 }
 
@@ -45,7 +46,7 @@ const isResultVisibility = (value: string): value is ResultVisibility =>
   visibilityOptions.some((option) => option.value === value);
 
 export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
-  { examId, resultVisibility, onResultVisibilityChange, onSavingChange },
+  { examId, resultVisibility, expectedVersion, onSaved, onSavingChange },
   ref,
 ) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
@@ -144,17 +145,17 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       setError('Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.');
       return;
     }
-    const payload: TeacherExamSettingsPayload = settings;
+    const payload: TeacherExamSettingsPayload = {
+      ...settings,
+      result_visibility: draftResultVisibility,
+      expected_version: expectedVersion,
+    };
     try {
       const targetExamId = persistedExamId;
       setSaving(true);
       setError(null);
       const saved = await teacherExamSettingsService.update(targetExamId, payload);
       if (currentExamId.current !== targetExamId) return;
-      if (draftResultVisibility !== resultVisibility) {
-        await onResultVisibilityChange(draftResultVisibility);
-        if (currentExamId.current !== targetExamId) return;
-      }
       setSettings({
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
@@ -166,6 +167,7 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
       });
+      await onSaved();
       toast.success('Exam settings saved.');
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : 'Unable to save exam settings.';

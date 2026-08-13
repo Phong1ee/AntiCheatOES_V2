@@ -77,6 +77,11 @@ export const adminUserService = {
     await apiClient.delete(`/api/admin/users/${userId}`);
   },
 
+  async restore(userId: number): Promise<AdminManagedUser> {
+    const { data } = await apiClient.post<AdminManagedUser>(`/api/admin/users/${userId}/restore`);
+    return data;
+  },
+
   async changeOwnPassword(payload: ChangeOwnAdminPasswordRequest): Promise<{ success: boolean; message: string }> {
     const { data } = await apiClient.put<{ success: boolean; message: string }>("/api/admin/me/password", payload);
     return data;

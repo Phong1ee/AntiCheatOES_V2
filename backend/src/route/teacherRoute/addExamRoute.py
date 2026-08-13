@@ -1,7 +1,7 @@
 from datetime import datetime
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +31,9 @@ from src.models.teacher.requestModel.TeacherExamRequest import (
     TeacherExamStatusRequest,
 )
 from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.exam_version_service import claim_exam_version
+from src.service.audit_service import record_audit
+from src.service.cache_invalidation_contract import deliver_invalidation, teacher_exam_updated
 
 router = APIRouter()
 
@@ -88,6 +91,7 @@ def _serialize(exam: Exam) -> dict:
             if hasattr(exam.question_selection_mode, "value")
             else exam.question_selection_mode
         ),
+        "version": exam.version,
     }
 
 
@@ -226,7 +230,20 @@ def add_exam_to_database(
         db.flush()
         if request.status == "published":
             _validate_publishable(db, exam)
+        record_audit(
+            db,
+            actor_school_id=teacher.school_id,
+            actor_role=teacher.role,
+            action="EXAM_PUBLISHED" if request.status == "published" else "EXAM_UPDATED",
+            entity_type="exam",
+            entity_id=exam.exam_id,
+            metadata={
+                "status": request.status,
+                "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata(),
+            },
+        )
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam.exam_id))
         db.refresh(exam)
         return _serialize(exam)
     except HTTPException:
@@ -247,7 +264,7 @@ def update_exam_in_database(
 ):
     del role_check
     try:
-        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         _validate_subject(db, request.subject_id)
         if request.subject_id != exam.subject_id:
             require_active_subject_assignment(
@@ -268,7 +285,17 @@ def update_exam_in_database(
         exam.status = request.status
         exam.total_points = 100
         exam.passing_score = request.passing_score
+        record_audit(
+            db,
+            actor_school_id=current_user["school_id"],
+            actor_role=current_user.get("role"),
+            action="EXAM_PUBLISHED" if request.status == "published" else "EXAM_UPDATED",
+            entity_type="exam",
+            entity_id=exam.exam_id,
+            metadata={"status": request.status, "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata()},
+        )
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam.exam_id))
         db.refresh(exam)
         return _serialize(exam)
     except HTTPException:
@@ -347,11 +374,21 @@ def update_exam_status(
 ):
     del role_check
     try:
-        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         if request.status == "published":
             _validate_publishable(db, exam)
         exam.status = request.status
+        record_audit(
+            db,
+            actor_school_id=current_user["school_id"],
+            actor_role=current_user.get("role"),
+            action="EXAM_PUBLISHED" if request.status == "published" else "EXAM_UPDATED",
+            entity_type="exam",
+            entity_id=exam.exam_id,
+            metadata={"status": request.status, "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata()},
+        )
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam.exam_id))
         db.refresh(exam)
         return _serialize(exam)
     except HTTPException:
@@ -372,7 +409,7 @@ def update_result_visibility(
 ):
     del role_check
     try:
-        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         exam.result_visibility = request.result_visibility
         db.commit()
         db.refresh(exam)
@@ -394,11 +431,12 @@ def delete_exam_from_database(
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
+    expected_version: int | None = Query(default=None, ge=1),
 ):
     """Delete an owned exam and attempt data while retaining reusable questions/options."""
     del role_check
     try:
-        exam = _exam_for_mutation(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         attempt_ids = [row[0] for row in db.query(Attempt.attempt_id).filter(Attempt.exam_id == exam_id).all()]
         if attempt_ids:
             db.query(MCQAnswer).filter(MCQAnswer.attempt_id.in_(attempt_ids)).delete(synchronize_session=False)
@@ -409,7 +447,17 @@ def delete_exam_from_database(
         db.query(StudentExam).filter(StudentExam.exam_id == exam_id).delete(synchronize_session=False)
         db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam_id).delete(synchronize_session=False)
         db.delete(exam)
+        record_audit(
+            db,
+            actor_school_id=current_user["school_id"],
+            actor_role=current_user.get("role"),
+            action="EXAM_DELETED",
+            entity_type="exam",
+            entity_id=exam_id,
+            metadata={"invalidation": teacher_exam_updated(exam_id).as_event_metadata()},
+        )
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam_id))
         return {"success": True, "message": "Exam deleted"}
     except HTTPException:
         db.rollback()

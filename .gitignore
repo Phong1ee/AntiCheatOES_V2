@@ -4,9 +4,16 @@
 backend/.env
 frontend/.env
 .env.local
+.env.compose
+deploy/loadtest/results/*.csv
 
 # Virtual Environments (Python)
 .venv/
+.pytest_cache/
+**/.pytest_cache/
+**/.venv/
+.uv-cache-capacity/
+.pytest-capacity-tmp/
 venv/
 ENV/
 
@@ -30,3 +37,13 @@ build/
 
 redis-docker-compose.yml
 test_redis_connection.py
+
+# Không theo dõi toàn bộ báo cáo triển khai
+docs/
+
+# Test/cache temporary files
+.pytest-*
+.pytest_cache/
+.tmp/
+__pycache__/
+*.pyc

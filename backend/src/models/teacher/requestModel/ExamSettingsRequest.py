@@ -1,6 +1,6 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictBool
 
 from src.a_db_config import ResultStrategy
 
@@ -21,6 +21,10 @@ class ExamSettingsRequest(BaseModel):
     violation_limit: ViolationLimit = 5
     auto_grade: bool = True
     result_strategy: ResultStrategy = ResultStrategy.highest
+    # Result visibility is saved with settings so the tab's single Save is atomic.
+    result_visibility: Literal["hidden", "score-only", "full"] | None = None
+    expected_version: int | None = Field(default=None, ge=1, validation_alias=AliasChoices("expected_version", "expectedVersion"))
 
 class ExamSettingsResponse(ExamSettingsRequest):
     exam_id: int
+    version: int

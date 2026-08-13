@@ -20,6 +20,7 @@ import { Switch } from '../../ui/switch';
 interface PoolConfigurationBuilderProps {
   examId: number;
   subjectId: string;
+  expectedVersion?: number;
   initialConfig: PoolConfig | null;
   onSaved: (config: PoolConfig) => Promise<void>;
 }
@@ -34,6 +35,7 @@ const ruleKey = (row: Pick<PoolAvailabilityRow, 'chapter_id' | 'lo_id' | 'diffic
 export function PoolConfigurationBuilder({
   examId,
   subjectId,
+  expectedVersion,
   initialConfig,
   onSaved,
 }: PoolConfigurationBuilderProps) {
@@ -152,6 +154,7 @@ export function PoolConfigurationBuilder({
         subject_id: subjectId,
         fixed_randomization: fixedRandomization,
         rules,
+        expected_version: expectedVersion,
       });
       await onSaved(saved);
       toast.success(

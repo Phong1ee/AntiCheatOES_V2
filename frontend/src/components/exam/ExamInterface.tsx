@@ -7,6 +7,7 @@ import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { WebcamMonitor } from "./WebcamMonitor";
 import { studentExamService } from "../../services/student-exam.service";
+import { attemptSessionStorage } from "../../services/attempt-session.storage";
 import { useAntiCheatMonitoring } from "../../hooks/useAntiCheatMonitoring";
 import { useIncidentReporter } from "../../anti-cheat/incident-reporter";
 import { useAIAntiCheat } from "../../anti-cheat/use-ai-anti-cheat";
@@ -62,6 +63,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const persistedAnsweredRef = useRef(new Set<number>());
   const dirtyRef = useRef(new Set<number>());
   const sequenceRef = useRef(new Map<number, number>());
+  const revisionRef = useRef(new Map<number, number>());
   const essayTimersRef = useRef(new Map<number, number>());
   const expiresAtRef = useRef(0);
   const serverOffsetRef = useRef(0);
@@ -120,10 +122,18 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     if (!answer) return false;
     const sequence = (sequenceRef.current.get(questionId) ?? 0) + 1;
     sequenceRef.current.set(questionId, sequence);
+    const revision = (revisionRef.current.get(questionId) ?? 0) + 1;
+    revisionRef.current.set(questionId, revision);
     setSaveStatus("Saving");
     try {
-      const result = await studentExamService.saveAnswer(examId, attemptId, questionId, answer);
+      const result = await studentExamService.saveAnswer(examId, attemptId, questionId, answer, revision);
       if (sequenceRef.current.get(questionId) === sequence) {
+        if (result.stale) {
+          revisionRef.current.set(questionId, Math.max(revisionRef.current.get(questionId) ?? 0, result.storedRevision));
+          dirtyRef.current.add(questionId);
+          setSaveStatus("Changes pending");
+          return false;
+        }
         dirtyRef.current.delete(questionId);
         if (isAnswered(answer)) persistedAnsweredRef.current.add(questionId);
         else persistedAnsweredRef.current.delete(questionId);
@@ -166,7 +176,8 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     setSubmitError(null);
     await flushDirty();
     try {
-      const result = await studentExamService.submit(examId, attemptId, answersRef.current);
+      const submitRequestId = attemptSessionStorage.getOrCreateSubmitRequestId(attemptId);
+      const result = await studentExamService.submit(examId, attemptId, answersRef.current, submitRequestId);
       localStorage.removeItem(attemptKey);
       localStorage.removeItem(draftKey(attemptId));
       localStorage.removeItem(markedQuestionsKey(attemptId));
@@ -196,6 +207,9 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
         persistedAnsweredRef.current = new Set(
           restored.questions.filter((question) => isAnswered(saved[question.id])).map((question) => question.id),
+        );
+        revisionRef.current = new Map(
+          restored.questions.map((question) => [question.id, question.savedAnswer?.revision ?? 0]),
         );
         const local = localStorage.getItem(draftKey(restored.attempt.attemptId));
         const draft = local ? JSON.parse(local) as StudentAnswers : {};

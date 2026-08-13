@@ -1,0 +1,155 @@
+# Final-verification overlay. Always run with `-p oes-verify` so these named
+# volumes and containers cannot overlap the external-MySQL development stack.
+services:
+  mysql-test:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: online_exam_test
+      MYSQL_USER: oes_test
+      MYSQL_PASSWORD: oes_test_password
+      MYSQL_ROOT_PASSWORD: oes_test_root_password
+    volumes:
+      - oes-verification-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uoes_test -poes_test_password --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [oes]
+
+  nginx:
+    ports: !override
+      - "${OES_TEST_HTTP_PORT:-18080}:80"
+
+  rabbitmq:
+    # Broker remains internal to this disposable verification topology.
+    ports: !override []
+
+  api-1: &test-api
+    environment: &test-api-environment
+      DB_HOST: mysql-test
+      DB_PORT: 3306
+      DB_NAME: online_exam_test
+      DB_USER: oes_test
+      DB_PASSWORD: oes_test_password
+      SECRET_KEY: verification-only-secret-not-for-production
+      # Capacity defaults inherit the main Compose profile. Experiments may
+      # override the same generic variables through the environment.
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      DB_POOL_NAME: oes_verify_api_1_pool
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-16}
+      DB_POOL_ACQUIRE_TIMEOUT: ${DB_POOL_ACQUIRE_TIMEOUT:-5}
+      DB_SQL_POOL_SIZE: ${DB_SQL_POOL_SIZE:-4}
+      DB_SQL_MAX_OVERFLOW: ${DB_SQL_MAX_OVERFLOW:-0}
+      DB_SQL_POOL_TIMEOUT: ${DB_SQL_POOL_TIMEOUT:-10}
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REPORT_EXPORT_DIR: /var/oes/reports
+      IMPORT_STAGING_DIR: /var/oes/imports
+
+  api-2:
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_api_2_pool
+
+  outbox-publisher:
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_outbox_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+
+  worker-report:
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_report_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+
+  worker-import:
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_import_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+
+  worker-grading:
+    build: ./backend
+    command: python -m src.service.grading_worker
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_grading_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks: [oes]
+
+  worker-notification:
+    build: ./backend
+    command: python -m src.service.notification_worker
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_notification_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks: [oes]
+
+  worker-analytics:
+    build: ./backend
+    command: python -m src.service.analytics_worker
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_analytics_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks: [oes]
+
+  worker-anti-cheat:
+    build: ./backend
+    command: python -m src.service.anti_cheat_worker
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_anti_cheat_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks: [oes]
+
+  migrate:
+    build: ./backend
+    command: ["/opt/venv/bin/alembic", "upgrade", "head"]
+    environment:
+      <<: *test-api-environment
+      DB_POOL_NAME: oes_verify_migrate_pool
+      DB_POOL_SIZE: 2
+      DB_SQL_POOL_SIZE: 2
+      DB_SQL_MAX_OVERFLOW: 0
+    # Live verification runs enqueue staged imports from this disposable
+    # container, so it must share the same artifact volumes as API/workers.
+    volumes:
+      - report-artifacts:/var/oes/reports
+      - import-artifacts:/var/oes/imports
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    networks: [oes]
+
+volumes:
+  oes-verification-mysql-data:

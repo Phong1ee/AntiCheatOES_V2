@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -36,6 +37,8 @@ from src.route.teacherRoute.questionBankRoute import (
     submit_question,
     update_question,
 )
+from src.route.teacherRoute import questionBankRoute
+from src.route.adminRoute import revoke_teacher_permission
 
 
 def option(text: str, correct: bool = False, option_id: int | None = None) -> QuestionOptionPayload:
@@ -158,6 +161,83 @@ class TeacherQuestionBankTests(unittest.TestCase):
             update_question(created["question_id"], self._payload(lo_ids=[12]), self._current(), {}, self.db)
         self.assertEqual(raised.exception.status_code, 400)
         self.assertEqual(sorted(link.lo_id for link in self.db.get(Question, created["question_id"]).lo_questions), [10, 13])
+
+    def test_learning_objective_mapping_failure_rolls_back_the_entire_question_edit(self):
+        created = self._create()
+        question_id = created["question_id"]
+        original_replace_taxonomy = questionBankRoute._replace_taxonomy
+
+        def fail_after_taxonomy_write(db, question, chapters, los):
+            original_replace_taxonomy(db, question, chapters, los)
+            db.flush()
+            raise RuntimeError("simulated LO mapping failure")
+
+        with patch.object(questionBankRoute, "_replace_taxonomy", side_effect=fail_after_taxonomy_write):
+            with self.assertRaisesRegex(RuntimeError, "LO mapping failure"):
+                update_question(
+                    question_id,
+                    self._payload(
+                        question_text="This must not persist",
+                        chapter_ids=[2],
+                        lo_ids=[11],
+                        options=[option("Changed answer", True), option("Changed distractor")],
+                    ),
+                    self._current(), {}, self.db,
+                )
+
+        self.db.expire_all()
+        question = self.db.get(Question, question_id)
+        self.assertEqual(question.question_text, "What is normalization?")
+        self.assertEqual([link.chapter_id for link in question.chapter_questions], [1])
+        self.assertEqual([link.lo_id for link in question.lo_questions], [10])
+        self.assertEqual(sorted(item.options_text for item in question.options), ["Duplicating data", "Reducing redundancy"])
+
+    def test_foreign_option_id_rejects_the_edit_without_any_partial_update(self):
+        created = self._create()
+        foreign = self._create(self._payload(question_text="Other question"))
+        foreign_option_id = self.db.get(Question, foreign["question_id"]).options[0].options_id
+
+        with self.assertRaises(HTTPException) as raised:
+            update_question(
+                created["question_id"],
+                self._payload(question_text="This must not persist", options=[option("Foreign", True, foreign_option_id)]),
+                self._current(), {}, self.db,
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.db.expire_all()
+        question = self.db.get(Question, created["question_id"])
+        self.assertEqual(question.question_text, "What is normalization?")
+        self.assertEqual(sorted(item.options_text for item in question.options), ["Duplicating data", "Reducing redundancy"])
+
+    def test_revoked_subject_permission_rejects_the_next_question_mutation_without_changes(self):
+        created = self._create()
+        self.db.query(TeacherSubject).filter_by(teacher_id="T1", subject_id="DB").update({"is_active": False})
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            update_question(created["question_id"], self._payload(question_text="Blocked"), self._current(), {}, self.db)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.db.expire_all()
+        self.assertEqual(self.db.get(Question, created["question_id"]).question_text, "What is normalization?")
+
+    def test_admin_permission_revoke_blocks_the_next_teacher_mutation(self):
+        created = self._create()
+        revoke_teacher_permission(
+            "T1",
+            "DB",
+            {"school_id": "A1", "role": "admin"},
+            {},
+            self.db,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            update_question(created["question_id"], self._payload(question_text="Blocked after API revoke"), self._current(), {}, self.db)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.db.expire_all()
+        self.assertEqual(self.db.get(Question, created["question_id"]).question_text, "What is normalization?")
 
     def test_submit_and_pending_owner_permissions_allow_edit_delete(self):
         created = self._pending()

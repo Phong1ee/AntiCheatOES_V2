@@ -1,6 +1,7 @@
 import src.models.teacher.examModel as examModel
 import src.models.userModel as userModel
 from datetime import timedelta
+from src.service.cache_service import cache_aside, student_exam_list_key
 
 
 class ExamController:
@@ -113,18 +114,27 @@ class ExamController:
         return exam, attempt
 
     @staticmethod
-    def _expire_if_needed(exam: dict, attempt: dict, attempt_id: int, exam_id: int) -> bool:
+    def _expire_if_needed(
+        exam: dict, attempt: dict, attempt_id: int, exam_id: int, submit_request_id: str | None = None,
+    ) -> bool:
         if ExamController._timer_payload(exam, attempt, examModel.get_database_now())["remainingSeconds"] > 0:
             return False
         settings = examModel.getExamSettings(exam_id)
         if settings.get("auto_submit_on_expire", True):
-            examModel.finalizeAttempt(attempt_id, exam_id, [])
+            if submit_request_id:
+                examModel.finalizeAttempt(attempt_id, exam_id, [], submit_request_id=submit_request_id)
+            else:
+                examModel.finalizeAttempt(attempt_id, exam_id, [])
         return True
 
     @staticmethod
     def getStudentExams(school_id: str, role: str):
         """Get all exams assigned to a student."""
-        exams = examModel.getStudentExams(school_id)
+        exams = cache_aside(
+            student_exam_list_key(school_id),
+            30,
+            lambda: examModel.getStudentExams(school_id),
+        )
         server_time = examModel.get_database_now()
         return {
             "success": True,
@@ -210,10 +220,23 @@ class ExamController:
 
             attempt_no = attempts_used + 1
             session_token = examModel.create_attempt_session_token()
-            attempt_id = examModel.createAttempt(exam_id, user.get("school_id", school_id), attempt_no, device_id, session_token)
+            attempt_id = examModel.createAttempt(
+                exam_id,
+                user.get("school_id", school_id),
+                attempt_no,
+                device_id,
+                session_token,
+                code,
+            )
             attempt = examModel.getAttemptById(attempt_id)
             if not attempt:
                 raise Exception("Attempt not found")
+            if attempt.get("session_token_hash") != examModel._sha256(session_token):
+                if not device_id:
+                    return ExamController._start_response(
+                        exam, attempt, resumed=True, database_now=examModel.get_database_now()
+                    )
+                raise Exception("Open attempt must be resumed")
             return ExamController._start_response(exam, attempt, resumed=False, database_now=examModel.get_database_now(), session_token=session_token)
         except Exception as e:
             raise e
@@ -279,7 +302,10 @@ class ExamController:
         }
 
     @staticmethod
-    def submitExam(school_id: str, role: str, exam_id: int, attempt_id: int, answers: list, device_id: str = "", session_token: str = ""):
+    def submitExam(
+        school_id: str, role: str, exam_id: int, attempt_id: int, answers: list,
+        device_id: str = "", session_token: str = "", submit_request_id: str | None = None,
+    ):
         """Submit an attempt, save MCQ and essay answers, and close the attempt."""
         try:
             exam, attempt = ExamController._owned_attempt(school_id, role, exam_id, attempt_id)
@@ -287,8 +313,12 @@ class ExamController:
                 examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
             if attempt["status"] not in {"in_progress", "submitted", "terminated"}:
                 raise Exception("Attempt is no longer in progress")
-            expired = ExamController._expire_if_needed(exam, attempt, attempt_id, exam_id)
-            result = examModel.finalizeAttempt(attempt_id, exam_id, [] if expired else answers)
+            expired = ExamController._expire_if_needed(
+                exam, attempt, attempt_id, exam_id, submit_request_id=submit_request_id
+            )
+            result = examModel.finalizeAttempt(
+                attempt_id, exam_id, [] if expired else answers, submit_request_id=submit_request_id
+            )
 
             return {
                 "success": True,
@@ -298,6 +328,7 @@ class ExamController:
                 "essayPending": result["essayPending"],
                 "resultVisibility": str(exam.get("result_visibility") or "hidden"),
                 "status": result["status"],
+                "submitRequestId": result.get("submitRequestId"),
             }
         except Exception as e:
             raise e
@@ -311,12 +342,14 @@ class ExamController:
             raise Exception("Attempt is no longer in progress")
         if ExamController._expire_if_needed(exam, attempt, attempt_id, exam_id):
             raise Exception("Attempt has expired")
-        saved_at = examModel.saveAttemptAnswer(attempt_id, exam_id, question_id, answer)
+        save_result = examModel.saveAttemptAnswer(attempt_id, exam_id, question_id, answer)
         return {
             "success": True,
             "attemptId": attempt_id,
             "questionId": question_id,
-            "savedAt": saved_at,
+            "savedAt": save_result["savedAt"],
+            "stale": save_result["stale"],
+            "storedRevision": save_result["storedRevision"],
         }
 
     @staticmethod

@@ -1,6 +1,6 @@
 import { apiClient } from "./api-client";
 import { attemptSessionStorage } from "./attempt-session.storage";
-import type { StudentAnswer, StudentAnswers, StudentExamAttempt, StudentExamSettings, StudentQuestion } from "../types/student-exam";
+import type { AutoSaveResult, StudentAnswer, StudentAnswers, StudentExamAttempt, StudentExamSettings, StudentQuestion } from "../types/student-exam";
 
 interface RawQuestion {
   id: number;
@@ -96,6 +96,7 @@ export interface SubmitExamResult {
   essayPending: boolean;
   resultVisibility: "hidden" | "score-only" | "full";
   status: string;
+  submitRequestId?: string | null;
 }
 
 export interface AntiCheatEventResult {
@@ -211,17 +212,22 @@ export const studentExamService = {
     };
   },
 
-  async saveAnswer(examId: string | number, attemptId: number, questionId: number, answer: StudentAnswer) {
-    const { data } = await apiClient.put<{ savedAt: string }>(`/api/exams/${examId}/attempts/${attemptId}/answers/${questionId}`, answer, { headers: attemptSessionStorage.headers(attemptId) });
+  async saveAnswer(examId: string | number, attemptId: number, questionId: number, answer: StudentAnswer, revision: number): Promise<AutoSaveResult> {
+    const { revision: _savedRevision, ...payload } = answer;
+    const { data } = await apiClient.put<AutoSaveResult>(`/api/exams/${examId}/attempts/${attemptId}/answers/${questionId}`, { ...payload, revision }, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },
 
-  async submit(examId: string | number, attemptId: number, answers: StudentAnswers): Promise<SubmitExamResult> {
+  async submit(examId: string | number, attemptId: number, answers: StudentAnswers, submitRequestId: string): Promise<SubmitExamResult> {
     const payload = Object.entries(answers)
       .filter(([, answer]) => !("answerText" in answer) || Boolean(answer.answerText.trim()))
-      .map(([questionId, answer]) => ({ questionId: Number(questionId), ...answer }));
-    const { data } = await apiClient.post<SubmitExamResult>(`/api/exams/${examId}/submit`, { attemptId, answers: payload }, { headers: attemptSessionStorage.headers(attemptId) });
+      .map(([questionId, answer]) => {
+        const { revision: _savedRevision, ...submitAnswer } = answer;
+        return { questionId: Number(questionId), ...submitAnswer };
+      });
+    const { data } = await apiClient.post<SubmitExamResult>(`/api/exams/${examId}/submit`, { attemptId, answers: payload, submitRequestId }, { headers: attemptSessionStorage.headers(attemptId) });
     attemptSessionStorage.clearSessionToken(attemptId);
+    attemptSessionStorage.clearSubmitRequestId(attemptId);
     return data;
   },
 

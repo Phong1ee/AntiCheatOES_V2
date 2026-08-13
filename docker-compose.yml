@@ -1,0 +1,199 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${OES_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks: [oes]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    networks: [oes]
+
+  api-1: &api
+    build: ./backend
+    environment: &api-environment
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      DB_POOL_NAME: oes_api_1_pool
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-16}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      DB_POOL_ACQUIRE_TIMEOUT: ${DB_POOL_ACQUIRE_TIMEOUT:-5}
+      DB_SQL_POOL_SIZE: ${DB_SQL_POOL_SIZE:-4}
+      DB_SQL_MAX_OVERFLOW: ${DB_SQL_MAX_OVERFLOW:-0}
+      DB_SQL_POOL_TIMEOUT: ${DB_SQL_POOL_TIMEOUT:-10}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-10}
+      REDIS_CONNECT_TIMEOUT: ${REDIS_CONNECT_TIMEOUT:-0.2}
+      REDIS_SOCKET_TIMEOUT: ${REDIS_SOCKET_TIMEOUT:-0.2}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_SOCKET_TIMEOUT: ${RABBITMQ_SOCKET_TIMEOUT:-1}
+      RABBITMQ_BLOCKED_TIMEOUT: ${RABBITMQ_BLOCKED_TIMEOUT:-2}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REPORT_EXPORT_DIR: /var/oes/reports
+      IMPORT_STAGING_DIR: /var/oes/imports
+    volumes:
+      - report-artifacts:/var/oes/reports
+      - import-artifacts:/var/oes/imports
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks: [oes]
+
+  api-2:
+    <<: *api
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_api_2_pool
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [oes]
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "${OES_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [oes]
+
+  outbox-publisher:
+    <<: *api
+    command: python -m src.service.outbox_publisher
+    # Reconnect by recreating this process after an optional broker outage.
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_outbox_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-report:
+    <<: *api
+    command: python -m src.service.report_worker
+    # A broker shutdown closes the manual-ack consumer connection.
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_report_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-import:
+    <<: *api
+    command: python -m src.service.import_worker
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_import_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-grading:
+    <<: *api
+    command: python -m src.service.grading_worker
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_grading_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-notification:
+    <<: *api
+    command: python -m src.service.notification_worker
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_notification_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-analytics:
+    <<: *api
+    command: python -m src.service.analytics_worker
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_analytics_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+  worker-anti-cheat:
+    <<: *api
+    command: python -m src.service.anti_cheat_worker
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      DB_POOL_NAME: oes_anti_cheat_worker_pool
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-2}
+      DB_SQL_POOL_SIZE: ${WORKER_DB_SQL_POOL_SIZE:-2}
+      DB_SQL_MAX_OVERFLOW: ${WORKER_DB_SQL_MAX_OVERFLOW:-0}
+    healthcheck:
+      disable: true
+
+volumes:
+  redis-data:
+  rabbitmq-data:
+  report-artifacts:
+  import-artifacts:
+
+networks:
+  oes:
+    driver: bridge

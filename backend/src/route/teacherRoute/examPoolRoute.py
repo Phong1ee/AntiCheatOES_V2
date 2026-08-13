@@ -44,6 +44,7 @@ from src.service.exam_pool_service import (
     validate_rule_taxonomy,
 )
 from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.exam_version_service import claim_exam_version
 
 router = APIRouter()
 
@@ -57,6 +58,7 @@ def _teacher_and_exam(db: Session, exam_id: int, school_id: str) -> tuple[User, 
         raise HTTPException(status_code=404, detail="Exam not found")
     if exam.manage_by != school_id:
         raise HTTPException(status_code=403, detail="You do not manage this exam")
+    require_active_subject_assignment(db, school_id, exam.subject_id)
     return teacher, exam
 
 
@@ -204,7 +206,8 @@ def put_pool_config(
 ):
     del role_check
     try:
-        teacher, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        teacher, _ = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         if exam.subject_id and request.subject_id != exam.subject_id:
             raise HTTPException(status_code=422, detail="Pool subject must match the exam subject")
         rule_keys = [
@@ -321,10 +324,12 @@ def delete_pool_config(
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
+    expected_version: int | None = Query(default=None, ge=1),
 ):
     del role_check
     try:
         _, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         config = _config_query(db, exam_id).first()
         if config:
             db.delete(config)
@@ -456,6 +461,7 @@ def replace_pool_rule_candidates(
     del role_check
     try:
         teacher, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         mode = (
             exam.question_selection_mode.value
             if hasattr(exam.question_selection_mode, "value")
@@ -585,6 +591,7 @@ def update_pool_candidate(
     del role_check
     try:
         teacher, _ = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         config = _config_query(db, exam_id).first()
         if not config:
             raise HTTPException(status_code=404, detail="Pool configuration not found")
@@ -740,10 +747,12 @@ def exit_pool_mode(
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
+    expected_version: int | None = Query(default=None, ge=1),
 ):
     del role_check
     try:
         _, exam = _teacher_and_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         config = _config_query(db, exam_id).first()
         if not config:
             raise HTTPException(status_code=404, detail="Pool configuration not found")

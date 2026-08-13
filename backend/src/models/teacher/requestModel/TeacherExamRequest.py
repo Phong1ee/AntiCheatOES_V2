@@ -10,10 +10,16 @@ ExamStatusValue = Literal["draft", "published"]
 
 class TeacherExamStatusRequest(BaseModel):
     status: ExamStatusValue
+    expected_version: int | None = Field(default=None, ge=1, validation_alias=AliasChoices("expected_version", "expectedVersion"))
 
 
 class TeacherResultVisibilityRequest(BaseModel):
     result_visibility: Literal["hidden", "score-only", "full"]
+    expected_version: int | None = Field(default=None, ge=1, validation_alias=AliasChoices("expected_version", "expectedVersion"))
+
+
+class TeacherExamVersionRequest(BaseModel):
+    expected_version: int | None = Field(default=None, ge=1, validation_alias=AliasChoices("expected_version", "expectedVersion"))
 
 
 class TeacherExamRequest(BaseModel):
@@ -37,6 +43,7 @@ class TeacherExamRequest(BaseModel):
 
     total_points: Literal[100] = Field(default=100, description="Deprecated fixed grading scale.")
     passing_score: Decimal = Field(default=Decimal("50.00"), ge=0, le=100, max_digits=5, decimal_places=2)
+    expected_version: int | None = Field(default=None, ge=1, validation_alias=AliasChoices("expected_version", "expectedVersion"))
 
     @model_validator(mode="after")
     def validate_score_range(self):

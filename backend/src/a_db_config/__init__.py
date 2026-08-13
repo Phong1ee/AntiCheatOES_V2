@@ -49,6 +49,32 @@ class AttemptStatus(str, enum.Enum):
     terminated = "terminated"
 
 
+class BackgroundJobType(str, enum.Enum):
+    user_import = "USER_IMPORT"
+    question_import = "QUESTION_IMPORT"
+    report_export = "REPORT_EXPORT"
+
+
+class BackgroundJobStatus(str, enum.Enum):
+    pending = "PENDING"
+    running = "RUNNING"
+    completed = "COMPLETED"
+    failed = "FAILED"
+
+
+background_job_type_enum = Enum(
+    BackgroundJobType,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="backgroundjobtype",
+)
+
+background_job_status_enum = Enum(
+    BackgroundJobStatus,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="backgroundjobstatus",
+)
+
+
 attempt_status_enum = Enum(
     AttemptStatus,
     values_callable=lambda enum_class: [item.value for item in enum_class],
@@ -410,6 +436,10 @@ class Exam(Base):
     subject_id: Mapped[Optional[str]] = mapped_column(
         String(20), ForeignKey("subject.subject_id")
     )
+    # Shared compare-and-swap token for Teacher Exam Manager mutations.
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     manager: Mapped[Optional["User"]] = relationship(
         back_populates="managed_exams",
@@ -571,6 +601,95 @@ class Attempt(Base):
     device_id_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     session_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    submit_request_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox_event"
+    __table_args__ = (UniqueConstraint("event_id", name="uq_outbox_event_event_id"),)
+
+    outbox_event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ProcessedEvent(Base):
+    """Durable idempotency marker for a specific shared worker consumer."""
+
+    __tablename__ = "processed_event"
+    __table_args__ = (UniqueConstraint("consumer_name", "event_id", name="uq_processed_event_consumer_event"),)
+
+    processed_event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    consumer_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class BackgroundJob(Base):
+    __tablename__ = "background_job"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_type",
+            "requested_by",
+            "business_key_hash",
+            name="uq_background_job_request_key",
+        ),
+        Index("ix_background_job_status_created", "status", "created_at"),
+    )
+
+    job_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[BackgroundJobType] = mapped_column(background_job_type_enum, nullable=False)
+    status: Mapped[BackgroundJobStatus] = mapped_column(
+        background_job_status_enum,
+        nullable=False,
+        default=BackgroundJobStatus.pending,
+        server_default=text("'PENDING'"),
+    )
+    requested_by: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="RESTRICT"), nullable=False
+    )
+    # Keep only a fixed-size digest so retry keys remain index-safe and do not expose import contents.
+    business_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    success_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    failed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    result_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class AuditLog(Base):
+    """Shared, append-only record of security-relevant cross-role mutations."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_actor_created", "actor_school_id", "created_at"),
+        Index("ix_audit_log_entity_created", "entity_type", "entity_id", "created_at"),
+    )
+
+    audit_log_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_school_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    actor_role: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Prompt 15 will populate this from request middleware when it is available.
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
 
 
 class AttemptQuestion(Base):
@@ -724,11 +843,6 @@ class MCQAnswer(Base):
                 "attempt_question.question_id",
             ],
         ),
-        Index(
-            "ix_mcq_answers_attempt_question",
-            "attempt_id",
-            "question_id",
-        ),
         UniqueConstraint(
             "attempt_id",
             "question_id",
@@ -743,6 +857,9 @@ class MCQAnswer(Base):
     question_id: Mapped[Optional[int]] = mapped_column(Integer)
     selected_option_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("options.options_id")
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
     )
 
     attempt_question: Mapped[Optional["AttemptQuestion"]] = relationship(
@@ -771,6 +888,9 @@ class EssayAnswer(Base):
     question_id: Mapped[Optional[int]] = mapped_column(Integer)
     answer_text: Mapped[Optional[str]] = mapped_column(Text)
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     attempt_question: Mapped[Optional["AttemptQuestion"]] = relationship(
         back_populates="essay_answer",

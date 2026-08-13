@@ -1,10 +1,10 @@
 from fastapi import HTTPException, Header, Depends, status
 import jwt
-from sqlalchemy.orm import Session
 
-from database import get_db
+from database import SessionLocal
 from src.a_db_config import User
 from src.middleware.constant import SECRET_KEY, ALGORITHM
+from src.service.observability_service import update_context
 
 def _role_value(role: object) -> str:
     return role.value if hasattr(role, "value") else str(role or "")
@@ -12,9 +12,14 @@ def _role_value(role: object) -> str:
 
 def verify_token(
     authorization: str = Header(None),
-    db: Session = Depends(get_db),
 ):
-    """Verify a token and resolve the account's current database state."""
+    """Verify a token and resolve the account's current database state.
+
+    The application still has legacy request handlers using mysql-connector.
+    Release this short-lived SQLAlchemy lookup before those handlers borrow
+    their own connection instead of retaining two database connections for one
+    request.
+    """
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing authorization header")
     
@@ -29,17 +34,24 @@ def verify_token(
         if not school_id:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        user = db.query(User).filter(User.school_id == school_id).first()
-        if not user or user.deleted_at is not None or user.is_locked:
-            raise HTTPException(status_code=401, detail="Account is unavailable")
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.school_id == school_id).first()
+            if not user or user.deleted_at is not None or user.is_locked:
+                raise HTTPException(status_code=401, detail="Account is unavailable")
 
-        return {
-            "id": user.id,
-            "school_id": user.school_id,
-            # Never trust a role claim after the token has been issued.
-            "role": _role_value(user.role).lower(),
-            "exp": payload.get("exp")
-        }
+            # Copy only scalar identity values before releasing the session.
+            authenticated_user = {
+                "id": user.id,
+                "school_id": user.school_id,
+                # Never trust a role claim after the token has been issued.
+                "role": _role_value(user.role).lower(),
+                "exp": payload.get("exp")
+            }
+        finally:
+            db.close()
+        update_context(role=authenticated_user["role"], school_id=authenticated_user["school_id"])
+        return authenticated_user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:

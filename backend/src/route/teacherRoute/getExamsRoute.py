@@ -22,7 +22,11 @@ from src.a_db_config import (
     UserRole,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
+from src.service.exam_version_service import claim_exam_version
 from src.service.teacher_subject_service import active_subject_ids
+from src.service.audit_service import record_audit
+from src.service.cache_invalidation_contract import deliver_invalidation, teacher_assignment_changed
+from src.service.cache_service import invalidate_student_exam_lists
 
 router = APIRouter()
 
@@ -31,6 +35,7 @@ class AssignmentSyncRequest(BaseModel):
     class_ids: list[int] = Field(default_factory=list)
     student_ids: list[str] = Field(default_factory=list)
     excluded_student_ids: list[str] = Field(default_factory=list)
+    expected_version: int | None = Field(default=None, ge=1)
 
     @field_validator("class_ids", "student_ids", "excluded_student_ids")
     @classmethod
@@ -151,6 +156,7 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
             if hasattr(exam.question_selection_mode, "value")
             else exam.question_selection_mode
         ),
+        "version": exam.version,
     }
 
 
@@ -265,7 +271,7 @@ def sync_assignments(
     del role_check
     teacher_school_id = current_user["school_id"]
     try:
-        _owned_exam(db, exam_id, teacher_school_id)
+        claim_exam_version(db, exam_id, teacher_school_id, request.expected_version)
         owned_classes = (
             db.query(CourseClass)
             .filter(
@@ -336,13 +342,29 @@ def sync_assignments(
             StudentExam(exam_id=exam_id, student_id=student_id)
             for student_id in sorted(added_ids)
         )
+        record_audit(
+            db,
+            actor_school_id=teacher_school_id,
+            actor_role=current_user.get("role"),
+            action="EXAM_ASSIGNMENT_UPDATED",
+            entity_type="exam",
+            entity_id=exam_id,
+            metadata={
+                "added_count": len(added_ids),
+                "removed_count": len(removed_ids),
+                "invalidation": teacher_assignment_changed(exam_id).as_event_metadata(),
+            },
+        )
         db.commit()
+        invalidate_student_exam_lists(existing_ids | desired_ids)
+        deliver_invalidation(teacher_assignment_changed(exam_id))
         return {
             "added_count": len(added_ids),
             "removed_count": len(removed_ids),
             "unchanged_count": len(existing_ids & desired_ids),
             "final_count": len(desired_ids),
             "student_ids": sorted(desired_ids),
+            "version": db.get(Exam, exam_id).version,
         }
     except HTTPException:
         db.rollback()

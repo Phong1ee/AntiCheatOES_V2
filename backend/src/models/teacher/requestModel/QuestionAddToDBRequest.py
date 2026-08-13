@@ -17,6 +17,7 @@ class QuestionAddToDBRequest(BaseModel):
     question_status: Literal["draft", "pending", "approved", "rejected"] = "draft"
     options: list[QuestionOptionsRequest] = Field(default_factory=list)
     exam_id: int | None = None
+    expected_version: int | None = Field(default=None, ge=1)
     question_point: Decimal | None = Field(
         default=None,
         validation_alias=AliasChoices("max_score", "question_point"),

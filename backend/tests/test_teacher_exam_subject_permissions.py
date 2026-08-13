@@ -245,31 +245,25 @@ class TeacherExamSubjectPermissionTests(unittest.TestCase):
             )
         self.assertEqual(missing.exception.status_code, 404)
 
-    def test_legacy_exam_can_keep_revoked_subject_but_cannot_change_to_unassigned(self):
+    def test_revoked_subject_blocks_legacy_exam_mutation(self):
         exam = self.db.query(Exam).filter_by(examcode="T1-EXAM").one()
         self.db.query(TeacherSubject).filter_by(
             teacher_id="T1", subject_id="DB"
         ).update({"is_active": False})
         self.db.commit()
 
-        unchanged = update_exam_in_database(
-            exam.exam_id,
-            self._exam_request("DB", "T1-EXAM"),
-            {"school_id": "T1"},
-            {},
-            self.db,
-        )
-        self.assertEqual(unchanged["subject_id"], "DB")
-
         with self.assertRaises(HTTPException) as forbidden:
             update_exam_in_database(
                 exam.exam_id,
-                self._exam_request("WEB", "T1-EXAM"),
+                self._exam_request("DB", "T1-EXAM"),
                 {"school_id": "T1"},
                 {},
                 self.db,
             )
         self.assertEqual(forbidden.exception.status_code, 403)
+        self.db.expire_all()
+        persisted = self.db.get(Exam, exam.exam_id)
+        self.assertEqual((persisted.subject_id, persisted.version), ("DB", 1))
 
     def test_unassigned_shared_question_allows_points_only_without_content_mutation(self):
         exam, question = self._attach_shared_web_question()

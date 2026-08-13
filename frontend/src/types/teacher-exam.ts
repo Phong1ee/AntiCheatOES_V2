@@ -29,6 +29,7 @@ export interface TeacherExamApi {
   grading_scale: 100;
   passing_score: number;
   question_selection_mode: "manual" | "fixed_randomization" | "pool";
+  version: number;
 }
 
 export interface TeacherExamRequest {
@@ -45,10 +46,16 @@ export interface TeacherExamRequest {
   /** Deprecated compatibility field; the backend fixes this to 100. */
   total_points?: 100;
   passing_score: number;
+  expected_version?: number;
+}
+
+export interface TeacherExamVersionRequest {
+  expected_version?: number;
 }
 
 export interface TeacherResultVisibilityRequest {
   result_visibility: ResultVisibility;
+  expected_version?: number;
 }
 
 export interface TeacherResultVisibilityResponse {
@@ -84,4 +91,5 @@ export interface AssignmentSyncResult {
   unchanged_count: number;
   final_count: number;
   student_ids: string[];
+  version: number;
 }

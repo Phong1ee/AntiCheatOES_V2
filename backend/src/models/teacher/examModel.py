@@ -2,6 +2,7 @@ import json
 import hashlib
 import hmac
 import secrets
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -289,7 +290,9 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
         aq.question_point_snapshot,
         aq.options_snapshot,
         ma.selected_option_id,
-        ea.answer_text
+        ma.revision AS mcq_revision,
+        ea.answer_text,
+        ea.revision AS essay_revision
     FROM attempt_question aq
     JOIN attempt a
         ON a.attempt_id = aq.attempt_id
@@ -368,9 +371,15 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
             }
             if attempt_id is not None:
                 if row.get("selected_option_id") is not None:
-                    question["savedAnswer"] = {"selectedOptionId": row["selected_option_id"]}
+                    question["savedAnswer"] = {
+                        "selectedOptionId": row["selected_option_id"],
+                        "revision": int(row.get("mcq_revision") or 0),
+                    }
                 elif row.get("answer_text") is not None:
-                    question["savedAnswer"] = {"answerText": row["answer_text"]}
+                    question["savedAnswer"] = {
+                        "answerText": row["answer_text"],
+                        "revision": int(row.get("essay_revision") or 0),
+                    }
             questions.append(question)
 
         return questions
@@ -520,8 +529,15 @@ def getOpenAttempt(exam_id: int, student_id: str):
         cnx.close()
 
 
-def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str = "internal", session_token: str = "internal"):
-    """Create an attempt and immutable question/point snapshot in one transaction."""
+def createAttempt(
+    exam_id: int,
+    student_id: str,
+    attempt_no: int,
+    device_id: str = "internal",
+    session_token: str = "internal",
+    exam_code: str | None = None,
+):
+    """Atomically create or return an attempt and its immutable question snapshot."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
     insert_attempt = """
@@ -542,6 +558,46 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
     """
     try:
         cnx.start_transaction()
+        # The assignment row is the stable per-student/exam lock, including when
+        # no Attempt row exists yet. It serializes simultaneous Start requests.
+        cursor.execute(
+            """
+            SELECT student_id
+            FROM student_exam
+            WHERE student_id = %s AND exam_id = %s
+            FOR UPDATE
+            """,
+            (student_id, exam_id),
+        )
+        if not cursor.fetchone():
+            raise Exception("Exam not assigned to student")
+
+        cursor.execute(
+            """
+            SELECT exam_id, examcode, max_attempt, start_time, end_time, question_selection_mode
+            FROM exam
+            WHERE exam_id = %s
+            FOR UPDATE
+            """,
+            (exam_id,),
+        )
+        exam_row = cursor.fetchone()
+        if not exam_row:
+            raise Exception("Exam not found")
+
+        cursor.execute("SELECT NOW()")
+        database_now_row = cursor.fetchone()
+        database_now = database_now_row[0] if database_now_row else None
+        start_time, end_time = exam_row[3], exam_row[4]
+        if database_now is not None and start_time and database_now < start_time:
+            raise Exception("Exam is not open yet")
+        if database_now is not None and end_time and database_now > end_time:
+            raise Exception("Exam has closed")
+
+        required_code = exam_row[1]
+        if required_code and str(required_code).strip().lower() != (exam_code or "").strip().lower():
+            raise Exception("Incorrect exam code")
+
         cursor.execute(
             """
             SELECT attempt_id
@@ -560,18 +616,28 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
             cnx.commit()
             return int(existing[0])
 
+        cursor.execute(
+            """
+            SELECT COUNT(attempt_id)
+            FROM attempt
+            WHERE exam_id = %s AND student_id = %s
+            """,
+            (exam_id, student_id),
+        )
+        attempts_used_row = cursor.fetchone()
+        attempts_used = int((attempts_used_row or [0])[0] or 0)
+        max_attempt = exam_row[2]
+        if max_attempt is not None and int(max_attempt) > 0 and attempts_used >= int(max_attempt):
+            raise Exception("Maximum attempts exceeded")
+
+        # Derive the number under the assignment lock instead of trusting a
+        # preflight count taken by a concurrent request.
+        attempt_no = attempts_used + 1
         cursor.execute(insert_attempt, (exam_id, student_id, attempt_no, _sha256(device_id), _sha256(session_token)))
         attempt_id = cursor.lastrowid
+        mode = str(exam_row[5] or "manual")
         cursor.execute(
-            "SELECT question_selection_mode FROM exam WHERE exam_id = %s FOR UPDATE",
-            (exam_id,),
-        )
-        exam_row = cursor.fetchone()
-        if not exam_row:
-            raise Exception("Exam not found")
-        mode = str(exam_row[0] or "manual")
-        cursor.execute(
-            "SELECT shuffle_question, shuffle_answer_options FROM exam_setting WHERE exam_id = %s",
+            "SELECT shuffle_question, shuffle_answer_options FROM exam_setting WHERE exam_id = %s FOR UPDATE",
             (exam_id,),
         )
         setting_row = cursor.fetchone()
@@ -598,6 +664,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
                 FROM exam_pool_rule
                 WHERE pool_config_id = %s
                 ORDER BY rule_id
+                FOR UPDATE
                 """,
                 (config[0],),
             )
@@ -614,6 +681,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
                     FROM exam_pool_question
                     WHERE rule_id = %s
                     ORDER BY question_id
+                    FOR UPDATE
                     """,
                     (rule_id,),
                 )
@@ -652,6 +720,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
                 FROM exam_question
                 WHERE exam_id = %s
                 ORDER BY question_id
+                FOR UPDATE
                 """,
                 (exam_id,),
             )
@@ -672,7 +741,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
         options_snapshot_map: dict[int, list[dict[str, object]]] = {}
         for question_id in selected_ids:
             cursor.execute(
-                "SELECT question_text, question_type FROM question WHERE question_id = %s",
+                "SELECT question_text, question_type FROM question WHERE question_id = %s FOR UPDATE",
                 (question_id,),
             )
             question_row = cursor.fetchone()
@@ -680,7 +749,7 @@ def createAttempt(exam_id: int, student_id: str, attempt_no: int, device_id: str
                 raise Exception(f"Question {question_id} not found")
             question_snapshot_map[question_id] = (question_row[0], question_row[1])
             cursor.execute(
-                "SELECT options_id, options_text, is_correct FROM options WHERE question_id = %s ORDER BY options_id ASC",
+                "SELECT options_id, options_text, is_correct FROM options WHERE question_id = %s ORDER BY options_id ASC FOR UPDATE",
                 (question_id,),
             )
             option_snapshot = [
@@ -833,7 +902,22 @@ def _valid_snapshot_option(cursor, question: dict, option_id: int) -> dict | Non
     return cursor.fetchone()
 
 
-def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
+def _stored_answer_revision(cursor, attempt_id: int, question: dict) -> int:
+    if _question_type(question) == "essay":
+        cursor.execute(
+            "SELECT revision FROM essay_answers WHERE attempt_id = %s AND question_id = %s FOR UPDATE",
+            (attempt_id, question["question_id"]),
+        )
+    else:
+        cursor.execute(
+            "SELECT revision FROM mcq_answers WHERE attempt_id = %s AND question_id = %s FOR UPDATE",
+            (attempt_id, question["question_id"]),
+        )
+    stored = cursor.fetchone()
+    return int(stored["revision"] or 0) if stored else 0
+
+
+def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict, revision: int | None = None):
     question_type = _question_type(question)
     selected_option_id = answer.get("selectedOptionId")
     answer_text = answer.get("answerText")
@@ -842,14 +926,24 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
             raise Exception("Essay questions do not accept selectedOptionId")
         normalized_answer = "" if answer_text is None or not str(answer_text).strip() else str(answer_text)
         score = 0 if normalized_answer == "" else None
-        cursor.execute(
-            """
-            INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
-            VALUES (%s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = VALUES(score)
-            """,
-            (attempt_id, question["question_id"], normalized_answer, score),
-        )
+        if revision is None:
+            cursor.execute(
+                """
+                INSERT INTO essay_answers (attempt_id, question_id, answer_text, score)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = VALUES(score)
+                """,
+                (attempt_id, question["question_id"], normalized_answer, score),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO essay_answers (attempt_id, question_id, answer_text, score, revision)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE answer_text = VALUES(answer_text), score = VALUES(score), revision = VALUES(revision)
+                """,
+                (attempt_id, question["question_id"], normalized_answer, score, revision),
+            )
         return
 
     if selected_option_id is None:
@@ -859,14 +953,24 @@ def _upsert_answer(cursor, attempt_id: int, question: dict, answer: dict):
     option = _valid_snapshot_option(cursor, question, int(selected_option_id))
     if not option:
         raise Exception("Selected option does not belong to the attempt snapshot")
-    cursor.execute(
-        """
-        INSERT INTO mcq_answers (attempt_id, question_id, selected_option_id)
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id)
-        """,
-        (attempt_id, question["question_id"], int(selected_option_id)),
-    )
+    if revision is None:
+        cursor.execute(
+            """
+            INSERT INTO mcq_answers (attempt_id, question_id, selected_option_id)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id)
+            """,
+            (attempt_id, question["question_id"], int(selected_option_id)),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO mcq_answers (attempt_id, question_id, selected_option_id, revision)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id), revision = VALUES(revision)
+            """,
+            (attempt_id, question["question_id"], int(selected_option_id), revision),
+        )
 
 
 def _answered_question_ids(cursor, attempt_id: int) -> set[int]:
@@ -1057,7 +1161,7 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         cnx.start_transaction()
         cursor.execute(
             """
-            SELECT a.status, a.submitted_at, a.end_time, a.start_time,
+            SELECT a.status, a.submitted_at, a.end_time, a.start_time, a.last_saved_at,
                    e.duration_minutes, e.end_time AS exam_end_time
             FROM attempt a JOIN exam e ON e.exam_id = a.exam_id
             WHERE a.attempt_id = %s FOR UPDATE
@@ -1083,12 +1187,23 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         settings = cursor.fetchone()
         if settings and settings["sequential_navigation"]:
             _validate_sequential_save(questions, _answered_question_ids(cursor, attempt_id), question_id)
-        _upsert_answer(cursor, attempt_id, question, answer)
+        revision = answer.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            raise Exception("Autosave revision must be at least 1")
+        stored_revision = _stored_answer_revision(cursor, attempt_id, question)
+        if revision <= stored_revision:
+            cnx.commit()
+            return {
+                "savedAt": attempt.get("last_saved_at"),
+                "stale": True,
+                "storedRevision": stored_revision,
+            }
+        _upsert_answer(cursor, attempt_id, question, answer, revision)
         cursor.execute("UPDATE attempt SET last_saved_at = NOW() WHERE attempt_id = %s", (attempt_id,))
         cursor.execute("SELECT last_saved_at FROM attempt WHERE attempt_id = %s", (attempt_id,))
         saved_at = cursor.fetchone()["last_saved_at"]
         cnx.commit()
-        return saved_at
+        return {"savedAt": saved_at, "stale": False, "storedRevision": revision}
     except Exception:
         cnx.rollback()
         raise
@@ -1097,14 +1212,17 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         cnx.close()
 
 
-def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = "submitted", reason: str | None = None):
+def finalizeAttempt(
+    attempt_id: int, exam_id: int, answers: list, status: str = "submitted",
+    reason: str | None = None, submit_request_id: str | None = None,
+):
     """Upsert supplied answers, grade snapshot MCQs, and close an attempt once."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
         cnx.start_transaction()
         cursor.execute(
-            "SELECT status, submitted_at, end_time, score, student_id FROM attempt WHERE attempt_id = %s FOR UPDATE",
+            "SELECT status, submitted_at, end_time, score, student_id, submit_request_id FROM attempt WHERE attempt_id = %s FOR UPDATE",
             (attempt_id,),
         )
         attempt = cursor.fetchone()
@@ -1123,6 +1241,7 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
                 "essayPending": essay_pending,
                 "status": attempt["status"],
                 "idempotent": True,
+                "submitRequestId": attempt.get("submit_request_id"),
             }
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
@@ -1148,14 +1267,17 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         else:
             total_score = normalize_score(raw_earned, raw_possible)
         essay_pending = _essay_pending(cursor, attempt_id)
+        persisted_submit_request_id = submit_request_id if status == "submitted" else None
+        if status == "submitted" and not persisted_submit_request_id:
+            persisted_submit_request_id = str(uuid.uuid4())
         cursor.execute(
             """
             UPDATE attempt
             SET score = %s, end_time = NOW(), submitted_at = NOW(), status = %s,
-                termination_reason = %s, score_scale_version = 3
+                termination_reason = %s, score_scale_version = 3, submit_request_id = %s
             WHERE attempt_id = %s
             """,
-            (total_score, status, reason, attempt_id),
+            (total_score, status, reason, persisted_submit_request_id, attempt_id),
         )
         if status == "terminated":
             cursor.execute(
@@ -1173,6 +1295,24 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
                 """,
                 (attempt_id,),
             )
+            cursor.execute(
+                """
+                INSERT INTO outbox_event
+                    (event_id, event_type, aggregate_type, aggregate_id, payload_json, created_at, published_at, retry_count, last_error)
+                VALUES (%s, %s, 'attempt', %s, %s, NOW(), NULL, 0, NULL)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    "attempt.submitted",
+                    str(attempt_id),
+                    json.dumps({
+                        "attemptId": attempt_id,
+                        "examId": exam_id,
+                        "studentId": attempt["student_id"],
+                        "submitRequestId": persisted_submit_request_id,
+                    }),
+                ),
+            )
         _sync_student_final_score(cursor, exam_id, attempt["student_id"])
         cnx.commit()
         return {
@@ -1183,6 +1323,7 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
             "essayPending": essay_pending,
             "status": status,
             "idempotent": False,
+            "submitRequestId": persisted_submit_request_id,
         }
     except Exception:
         cnx.rollback()
@@ -1192,9 +1333,9 @@ def finalizeAttempt(attempt_id: int, exam_id: int, answers: list, status: str = 
         cnx.close()
 
 
-def submitAttempt(attempt_id: int, exam_id: int, answers: list):
+def submitAttempt(attempt_id: int, exam_id: int, answers: list, submit_request_id: str | None = None):
     """Backward-compatible entry point; the active atomic finalizer owns scoring."""
-    return finalizeAttempt(attempt_id, exam_id, answers)
+    return finalizeAttempt(attempt_id, exam_id, answers, submit_request_id=submit_request_id)
 
 
 def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str) -> tuple[dict, str, bool]:
@@ -1364,6 +1505,30 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             )
             attempt.update(status="terminated", score=Decimal("0.00"), submitted_at=True, end_time=True)
             _sync_student_final_score(cursor, exam_id, student_id)
+
+        if is_violation:
+            # Analytics is emitted through the existing outbox in this same
+            # transaction; RabbitMQ never participates in enforcement.
+            cursor.execute(
+                """
+                INSERT INTO outbox_event
+                    (event_id, event_type, aggregate_type, aggregate_id, payload_json, created_at, published_at, retry_count, last_error)
+                VALUES (%s, %s, 'attempt', %s, %s, NOW(), NULL, 0, NULL)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    "exam.violation.recorded",
+                    str(attempt["attempt_id"]),
+                    json.dumps({
+                        "attemptId": attempt["attempt_id"],
+                        "examId": exam_id,
+                        "eventType": event_type,
+                        "source": event_source,
+                        "violationCount": int(attempt["violation_count"] or 0),
+                        "terminated": attempt["status"] == "terminated",
+                    }),
+                ),
+            )
 
         cnx.commit()
         return _event_response(attempt, enabled, limit, event_accepted=True, duplicate=False)

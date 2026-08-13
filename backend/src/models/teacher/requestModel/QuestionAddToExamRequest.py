@@ -17,3 +17,4 @@ class QuestionAddToExamRequest(BaseModel):
         description="The raw maximum score assigned to the question in this exam.",
     )
     options: list[QuestionOptionsRequest] = Field(default_factory=list)
+    expected_version: int | None = Field(default=None, ge=1)

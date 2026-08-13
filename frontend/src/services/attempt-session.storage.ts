@@ -2,6 +2,7 @@ const DEVICE_ID_KEY = "oes_device_id";
 const SESSION_PREFIX = "oes_attempt_session_";
 const REFRESH_EVENT_PREFIX = "oes_page_refresh_event_";
 const PENDING_REFRESH_PREFIX = "oes_pending_refresh_";
+const SUBMIT_REQUEST_PREFIX = "oes_submit_request_";
 
 const requireBrowser = () => {
   if (typeof window === "undefined") throw new Error("Attempt session storage is unavailable.");
@@ -64,6 +65,21 @@ export const attemptSessionStorage = {
     requireBrowser();
     window.localStorage.removeItem(`${PENDING_REFRESH_PREFIX}${attemptId}`);
     this.clearPageRefreshEventId(attemptId);
+  },
+
+  getOrCreateSubmitRequestId(attemptId: number): string {
+    requireBrowser();
+    const key = `${SUBMIT_REQUEST_PREFIX}${attemptId}`;
+    const existing = window.sessionStorage.getItem(key);
+    if (existing) return existing;
+    const submitRequestId = window.crypto.randomUUID();
+    window.sessionStorage.setItem(key, submitRequestId);
+    return submitRequestId;
+  },
+
+  clearSubmitRequestId(attemptId: number): void {
+    requireBrowser();
+    window.sessionStorage.removeItem(`${SUBMIT_REQUEST_PREFIX}${attemptId}`);
   },
 
   headers(attemptId: number): Record<string, string> {

@@ -25,6 +25,7 @@ class QuestionUpdateRequest(BaseModel):
     question_status: Literal["draft", "pending", "approved", "rejected"] | None = None
     options: list[QuestionOptionsRequest] | None = None
     chapter_id: int | None = Field(default=None, exclude=True)
+    expected_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def normalize_legacy_chapter(self):

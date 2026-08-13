@@ -1,13 +1,12 @@
-import asyncio
 import unittest
-from decimal import Decimal
 from datetime import datetime, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from fastapi import HTTPException
 from src.controller.teacherController.examController import ExamController
 from src.models.teacher import examModel
-from src.route.studentRoute.examRoute import AutoSaveAnswerRequest, save_answer
+from src.route.studentRoute.examRoute import AutoSaveAnswerRequest, SubmitExamRequest, save_answer
 
 
 class _Cursor:
@@ -51,10 +50,16 @@ class _CreateCursor:
         self.inserted_rows = list(rows)
 
     def fetchone(self):
+        if "FROM student_exam" in self.last_query:
+            return ("S1",)
+        if "SELECT exam_id, examcode, max_attempt" in self.last_query:
+            return (5, None, None, None, None, "manual")
+        if "SELECT NOW()" in self.last_query:
+            return (datetime(2026, 8, 10, 10, 0),)
+        if "COUNT(attempt_id)" in self.last_query:
+            return (0,)
         if "FROM attempt" in self.last_query:
             return None
-        if "question_selection_mode" in self.last_query:
-            return ("manual", 3)
         if "FROM exam_setting" in self.last_query:
             return None
         if "SELECT question_text" in self.last_query:
@@ -110,10 +115,16 @@ class _SelectionCursor:
         self.inserted_rows = list(rows)
 
     def fetchone(self):
+        if "FROM student_exam" in self.last_query:
+            return ("S1",)
+        if "SELECT exam_id, examcode, max_attempt" in self.last_query:
+            return (5, None, None, None, None, self.mode)
+        if "SELECT NOW()" in self.last_query:
+            return (datetime(2026, 8, 10, 10, 0),)
+        if "COUNT(attempt_id)" in self.last_query:
+            return (0,)
         if "FROM attempt" in self.last_query:
             return None
-        if "question_selection_mode" in self.last_query:
-            return (self.mode, 10)
         if "FROM exam_setting" in self.last_query:
             return (self.shuffle_questions, self.shuffle_options)
         if "SELECT pool_config_id, version" in self.last_query:
@@ -161,6 +172,16 @@ class _SelectionConnection:
 
 
 class StudentExamFlowTests(unittest.TestCase):
+    def test_submit_request_requires_a_uuid(self):
+        request = SubmitExamRequest(
+            attemptId=10, answers=[], submitRequestId="123E4567-E89B-12D3-A456-426614174000"
+        )
+        self.assertEqual(request.submitRequestId, "123e4567-e89b-12d3-a456-426614174000")
+        with self.assertRaises(ValueError):
+            SubmitExamRequest(attemptId=10, answers=[])
+        with self.assertRaises(ValueError):
+            SubmitExamRequest(attemptId=10, answers=[], submitRequestId="not-a-uuid")
+
     def test_code_free_exam_allows_omitted_code_and_protected_exam_rejects_wrong_code(self):
         base_exam = {
             "exam_id": 5,
@@ -295,6 +316,7 @@ class StudentExamFlowTests(unittest.TestCase):
             "status": "in_progress",
             "start_time": datetime(2026, 8, 10, 10, 0),
             "violation_count": 0,
+            "session_token_hash": examModel._sha256("session-token"),
         }
         validated = {
             "user": {"school_id": "S1"},
@@ -313,7 +335,7 @@ class StudentExamFlowTests(unittest.TestCase):
         ):
             result = ExamController.startExam("S1", "student", 5, None, "browser-device")
 
-        create_attempt.assert_called_once_with(5, "S1", 1, "browser-device", "session-token")
+        create_attempt.assert_called_once_with(5, "S1", 1, "browser-device", "session-token", None)
         self.assertEqual(result["attemptId"], 10)
         self.assertEqual(result["serverTime"], "2026-08-10T10:00:00")
         self.assertEqual(result["remainingSeconds"], 3600)
@@ -337,7 +359,7 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(questions[0]["text"], "Snapshot text")
         self.assertEqual(questions[0]["points"], 3)
         self.assertEqual(questions[0]["options"], [{"id": 101, "text": "A"}])
-        self.assertEqual(questions[0]["savedAnswer"], {"selectedOptionId": 101})
+        self.assertEqual(questions[0]["savedAnswer"], {"selectedOptionId": 101, "revision": 0})
         self.assertNotIn("isCorrect", str(questions))
 
     def test_start_creates_question_snapshots_for_every_selected_question(self):
@@ -536,14 +558,12 @@ class StudentExamFlowTests(unittest.TestCase):
             side_effect=Exception("Complete the current question before moving to the next question"),
         ):
             with self.assertRaises(HTTPException) as raised:
-                asyncio.run(
-                    save_answer(
-                        5,
-                        10,
-                        30,
-                        AutoSaveAnswerRequest(selectedOptionId=101),
-                        {"school_id": "S1", "role": "student"},
-                    )
+                save_answer(
+                    5,
+                    10,
+                    30,
+                    AutoSaveAnswerRequest(selectedOptionId=101, revision=1),
+                    {"school_id": "S1", "role": "student"},
                 )
         self.assertEqual(raised.exception.status_code, 409)
 
@@ -559,9 +579,13 @@ class StudentExamFlowTests(unittest.TestCase):
             patch.object(examModel, "finalizeAttempt", return_value=finalized) as finalize,
             patch.object(examModel, "get_database_now", return_value=attempt["start_time"]),
         ):
-            result = ExamController.submitExam("S1", "student", 5, 10, [])
+            result = ExamController.submitExam(
+                "S1", "student", 5, 10, [], submit_request_id="123e4567-e89b-12d3-a456-426614174000"
+            )
 
-        finalize.assert_called_once_with(10, 5, [])
+        finalize.assert_called_once_with(
+            10, 5, [], submit_request_id="123e4567-e89b-12d3-a456-426614174000"
+        )
         self.assertEqual((result["score"], result["status"]), (3, "submitted"))
 
     def test_expired_attempt_does_not_save_new_answer(self):

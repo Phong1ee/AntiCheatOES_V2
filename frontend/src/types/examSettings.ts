@@ -46,10 +46,13 @@ export interface TeacherExamSettingsPayload {
   violation_limit: number;
   auto_grade: boolean;
   result_strategy: ResultStrategy;
+  result_visibility?: 'hidden' | 'score-only' | 'full';
+  expected_version?: number;
 }
 
 export interface TeacherExamSettingsApi extends TeacherExamSettingsPayload {
   exam_id: number;
+  version: number;
 }
 
 export const defaultTeacherExamSettings: TeacherExamSettingsPayload = {

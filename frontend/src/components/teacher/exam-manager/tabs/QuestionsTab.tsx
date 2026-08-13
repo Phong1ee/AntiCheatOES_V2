@@ -80,11 +80,13 @@ interface Question {
 interface QuestionsTabProps {
   examId: string | null;
   subjectId: string;
+  expectedVersion?: number;
   canCreateContent: boolean;
+  onSaved: () => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
 }
 
-export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQuestionBank }: QuestionsTabProps) {
+export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateContent, onSaved, onViewInQuestionBank }: QuestionsTabProps) {
   // Load questions based on examId
   const initialQuestions: Question[] = [];
 
@@ -286,7 +288,8 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
     try {
       setIsDeleting(true);
       if (!questionToDelete.id.startsWith('new-') && examId) {
-        await questionService.removeFromExam(Number(examId), Number(questionToDelete.id));
+        await questionService.removeFromExam(Number(examId), Number(questionToDelete.id), expectedVersion);
+        await onSaved();
       }
       const remaining = questions.filter((question) => question.id !== questionToDelete.id);
       setQuestions(remaining);
@@ -358,8 +361,10 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
         Number(examId),
         activePoolRuleId,
         [...includedCandidateIds],
+        expectedVersion,
       );
       setPoolConfig(updated);
+      await onSaved();
       await loadPoolRuleCandidates(activePoolRuleId);
       toast.success('Candidate selection saved.');
     } catch (error) {
@@ -394,7 +399,8 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
     try {
       setBulkBusy(true);
       if (persistedIds.length > 0) {
-        await questionService.bulkRemove(Number(examId), persistedIds);
+        await questionService.bulkRemove(Number(examId), persistedIds, expectedVersion);
+        await onSaved();
       }
       const remaining = questions.filter((question) => !selectedIds.has(question.id));
       const unsavedRemaining = remaining.filter((question) => question.id.startsWith('new-'));
@@ -420,7 +426,8 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
     if (!examId) return;
     try {
       setBulkBusy(true);
-      const result = await questionService.exitPoolMode(Number(examId));
+      const result = await questionService.exitPoolMode(Number(examId), expectedVersion);
+      await onSaved();
       setExitPoolOpen(false);
       setPoolConfig(null);
       setIsPoolMode(false);
@@ -522,6 +529,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
           options,
           exam_id: Number(examId),
           max_score: selectedQ.maxScore,
+          expected_version: expectedVersion,
         });
         await loadQuestions(String(questionId));
       } else {
@@ -535,6 +543,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
           question_status: selectedQ.status ?? 'draft',
           max_score: selectedQ.maxScore,
           options,
+          expected_version: expectedVersion,
         };
         if (isPoolMode && activePoolRuleId !== null) {
           const result = await questionService.updatePoolCandidate(
@@ -545,6 +554,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
           );
           await loadPoolRuleCandidates(activePoolRuleId);
           await loadPoolConfig();
+          await onSaved();
         } else {
           const result = await questionService.updateInExam(
             Number(examId),
@@ -552,6 +562,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
             payload,
           );
           await loadQuestions(String(result.question_id));
+          await onSaved();
         }
       }
       toast.success('Question saved successfully.');
@@ -798,11 +809,13 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
             examId={Number(examId)}
             existingQuestionIds={[]}
             subjectId={subjectId}
+            expectedVersion={expectedVersion}
             initialPoolConfig={poolConfig}
             onClose={() => setShowQuestionPool(false)}
             onImported={async () => undefined}
             onPoolSaved={async (config) => {
               await handleAddPoolConfig(config);
+              await onSaved();
               setShowQuestionPool(false);
             }}
           />
@@ -1414,6 +1427,7 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
           examId={Number(examId)}
           existingQuestionIds={questions.filter((question) => !question.id.startsWith('new-')).map((question) => Number(question.id))}
           subjectId={subjectId}
+          expectedVersion={expectedVersion}
           initialPoolConfig={poolConfig}
           onClose={() => setShowQuestionPool(false)}
           onImported={async () => {
@@ -1421,7 +1435,10 @@ export function QuestionsTab({ examId, subjectId, canCreateContent, onViewInQues
             setPoolConfig(null);
             await loadQuestions();
           }}
-          onPoolSaved={handleAddPoolConfig}
+          onPoolSaved={async (config) => {
+            await handleAddPoolConfig(config);
+            await onSaved();
+          }}
         />
       )}
       <AlertDialog open={questionToDelete !== null} onOpenChange={(open) => { if (!open && !isDeleting) setQuestionToDelete(null); }}>

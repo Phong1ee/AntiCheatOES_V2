@@ -25,7 +25,12 @@ from src.a_db_config import (
     User,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
-from src.service.teacher_subject_service import active_subject_ids as _active_subject_ids
+from src.service.teacher_subject_service import (
+    active_subject_ids as _active_subject_ids,
+    require_active_subject_assignment,
+)
+from src.service.audit_service import record_audit
+from src.service.cache_service import cache_aside, invalidate_teacher_question_bank, teacher_question_bank_key
 
 router = APIRouter(prefix="/question-bank")
 
@@ -81,8 +86,7 @@ def _teacher(db: Session, school_id: str) -> User:
 
 
 def _require_subject_permission(db: Session, teacher: User, subject_id: str | None) -> None:
-    if not subject_id or subject_id not in _active_subject_ids(db, teacher.school_id):
-        raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
+    require_active_subject_assignment(db, teacher.school_id, subject_id)
 
 
 def _subject_summary(subject: Subject | None) -> dict | None:
@@ -440,10 +444,15 @@ def list_approved_question_bank(
     subject_ids = _active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
-    query = _apply_filters(_base_question_query(db).filter(Question.question_status == QuestionStatus.approved), subject_id, chapter_id, lo_id, search, question_type, difficulty)
-    query = query.filter(Question.subject_id.in_(subject_ids))
-    questions, total = _list_questions(query, page, page_size)
-    return {"items": [_serialize_item(item, teacher, True, db, subject_ids) for item in questions], "total": total, "page": page, "page_size": page_size}
+    filters = {"subject_id": subject_id, "chapter_id": chapter_id, "lo_id": lo_id, "search": search, "question_type": question_type, "difficulty": difficulty, "page": page, "page_size": page_size}
+
+    def load() -> dict:
+        query = _apply_filters(_base_question_query(db).filter(Question.question_status == QuestionStatus.approved), subject_id, chapter_id, lo_id, search, question_type, difficulty)
+        query = query.filter(Question.subject_id.in_(subject_ids))
+        questions, total = _list_questions(query, page, page_size)
+        return {"items": [_serialize_item(item, teacher, True, db, subject_ids) for item in questions], "total": total, "page": page, "page_size": page_size}
+
+    return cache_aside(teacher_question_bank_key(teacher.school_id, "approved", filters), 30, load)
 
 
 @router.get("/mine")
@@ -610,6 +619,9 @@ def create_draft_question(payload: QuestionBankPayload, current_user: dict = Dep
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Question could not be created") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.put("/{question_id}")
@@ -651,7 +663,17 @@ def update_question(
                 db.add(QuestionRevision(question_id=question.question_id, version_number=next_version, question_status="pending", edited_by=teacher.school_id, approved_by=None, approved_at=None, rejection_reason=None, **values))
         else:
             raise HTTPException(status_code=409, detail="Question cannot be edited")
+        record_audit(
+            db,
+            actor_school_id=teacher.school_id,
+            actor_role=teacher.role,
+            action="QUESTION_EDITED",
+            entity_type="question",
+            entity_id=question.question_id,
+            metadata={"question_status": question_status},
+        )
         db.commit()
+        invalidate_teacher_question_bank()
         db.expire_all()
         return _serialize_detail(_refresh_question(db, question_id), teacher, db)
     except HTTPException:
@@ -660,6 +682,9 @@ def update_question(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Question could not be updated because it changed concurrently") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/{question_id}/submit")
@@ -718,7 +743,17 @@ def delete_question(
         db.flush()
         db.expire(question, ["options", "chapter_questions", "lo_questions"])
         db.delete(question)
+        record_audit(
+            db,
+            actor_school_id=teacher.school_id,
+            actor_role=teacher.role,
+            action="QUESTION_DELETED",
+            entity_type="question",
+            entity_id=question_id,
+            metadata={"question_status": question_status},
+        )
         db.commit()
+        invalidate_teacher_question_bank()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         db.rollback()
@@ -726,6 +761,9 @@ def delete_question(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Question is referenced and cannot be deleted") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.delete("/{question_id}/pending-revision", status_code=status.HTTP_204_NO_CONTENT)
@@ -752,3 +790,6 @@ def delete_pending_revision(question_id: int, current_user: dict = Depends(verif
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Pending revision could not be deleted") from exc
+    except Exception:
+        db.rollback()
+        raise

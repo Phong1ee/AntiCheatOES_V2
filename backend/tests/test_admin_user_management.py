@@ -1,5 +1,6 @@
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -23,9 +24,11 @@ from src.route.adminRoute import (
     get_user_detail,
     list_users,
     lock_user,
+    restore_user,
     unlock_user,
     update_user,
 )
+from src.service import cache_service
 
 
 class AdminUserManagementTests(unittest.TestCase):
@@ -83,6 +86,15 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertEqual(response["total"], 1)
         self.assertEqual(response["items"][0]["school_id"], self.student.school_id)
         self.assertNotIn("password_hash", response["items"][0])
+
+    def test_teacher_permission_list_uses_cache_aside_without_becoming_authorization_state(self):
+        from src.route.adminRoute import list_teacher_permissions
+
+        memory = type("Memory", (), {"values": {}, "get": lambda self, key: self.values.get(key), "set": lambda self, key, value, ex: self.values.__setitem__(key, value), "delete": lambda self, *keys: [self.values.pop(key, None) for key in keys], "scan_iter": lambda self, match, count: iter([key for key in self.values if key.startswith(match[:-1])])})()
+        with patch("src.service.cache_service.get_cache_client", return_value=memory):
+            first = list_teacher_permissions(current_user=self.current_admin, role_check=None, db=self.db)
+            second = list_teacher_permissions(current_user=self.current_admin, role_check=None, db=self.db)
+        self.assertEqual(first, second)
 
     def test_create_duplicate_and_detail(self):
         created = create_user(
@@ -252,14 +264,15 @@ class AdminUserManagementTests(unittest.TestCase):
 
     def test_lock_unlock_and_old_token_enforcement(self):
         token = AuthController.create_token(self.student.school_id, "student")
-        verified = verify_token(authorization=f"Bearer {token}", db=self.db)
-        self.assertEqual(verified["id"], self.student.id)
-        locked = lock_user(self.student.id, self.current_admin, None, self.db)
-        self.assertTrue(locked["is_locked"])
-        self._expect_http_error(401, lambda: verify_token(authorization=f"Bearer {token}", db=self.db))
-        unlocked = unlock_user(self.student.id, self.current_admin, None, self.db)
-        self.assertFalse(unlocked["is_locked"])
-        self.assertEqual(verify_token(authorization=f"Bearer {token}", db=self.db)["role"], "student")
+        with patch("src.middleware.authMiddleware.SessionLocal", side_effect=self.Session):
+            verified = verify_token(authorization=f"Bearer {token}")
+            self.assertEqual(verified["id"], self.student.id)
+            locked = lock_user(self.student.id, self.current_admin, None, self.db)
+            self.assertTrue(locked["is_locked"])
+            self._expect_http_error(401, lambda: verify_token(authorization=f"Bearer {token}"))
+            unlocked = unlock_user(self.student.id, self.current_admin, None, self.db)
+            self.assertFalse(unlocked["is_locked"])
+            self.assertEqual(verify_token(authorization=f"Bearer {token}")["role"], "student")
 
     def test_soft_delete_deactivates_teacher_permissions_and_blocks_old_token(self):
         subject = Subject(subject_id="PHY", subject_name="Physics", subject_description="Physics subject")
@@ -274,9 +287,27 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertTrue(self.teacher.is_locked)
         self.assertFalse(self.db.query(TeacherSubject).one().is_active)
         self.assertEqual(self.db.query(User).filter(User.id == self.teacher.id).count(), 1)
-        self._expect_http_error(401, lambda: verify_token(authorization=f"Bearer {token}", db=self.db))
+        with patch("src.middleware.authMiddleware.SessionLocal", side_effect=self.Session):
+            self._expect_http_error(401, lambda: verify_token(authorization=f"Bearer {token}"))
         active = list_users(current_user=self.current_admin, role_check=None, db=self.db)
         self.assertNotIn(self.teacher.id, [item["id"] for item in active["items"]])
+
+    def test_restore_keeps_a_deleted_teacher_locked_and_permissions_revoked(self):
+        subject = Subject(subject_id="BIO", subject_name="Biology", subject_description="Biology subject")
+        self.db.add(subject)
+        self.db.flush()
+        self.db.add(TeacherSubject(teacher_id=self.teacher.school_id, subject_id=subject.subject_id, is_active=True))
+        self.db.commit()
+
+        delete_user(self.teacher.id, self.current_admin, None, self.db)
+        restored = restore_user(self.teacher.id, self.current_admin, None, self.db)
+
+        self.assertEqual(restored["status"], "locked")
+        self.db.refresh(self.teacher)
+        self.assertIsNone(self.teacher.deleted_at)
+        self.assertTrue(self.teacher.is_locked)
+        self.assertFalse(self.db.query(TeacherSubject).one().is_active)
+        self._expect_http_error(409, lambda: restore_user(self.teacher.id, self.current_admin, None, self.db))
 
     def test_cannot_self_manage_or_remove_last_active_admin(self):
         self._expect_http_error(409, lambda: lock_user(self.admin.id, self.current_admin, None, self.db))

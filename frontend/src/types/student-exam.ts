@@ -13,8 +13,14 @@ export interface StudentQuestion {
 }
 
 export type StudentAnswer =
-  | { selectedOptionId: number }
-  | { answerText: string };
+  | { selectedOptionId: number; revision?: number }
+  | { answerText: string; revision?: number };
+
+export interface AutoSaveResult {
+  savedAt: string | null;
+  stale: boolean;
+  storedRevision: number;
+}
 
 export type StudentAnswers = Record<number, StudentAnswer>;
 

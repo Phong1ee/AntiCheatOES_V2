@@ -68,8 +68,23 @@ export const teacherResultsService = {
     return data;
   },
 
-  async exportExcel(examId: number, examName: string): Promise<void> {
-    const { data } = await apiClient.get(`/api/teacher/results/exams/${examId}/export.xlsx`, {
+  async requestExcelExport(examId: number): Promise<{ jobId: number }> {
+    const requestId = crypto.randomUUID();
+    const { data } = await apiClient.post<{ jobId: number }>(`/api/teacher/results/exams/${examId}/report-jobs`, {
+      requestId,
+    });
+    return data;
+  },
+
+  async getExcelExportJob(jobId: number): Promise<{ status: string; error?: string | null }> {
+    const { data } = await apiClient.get<{ status: string; error?: string | null }>(
+      `/api/teacher/results/report-jobs/${jobId}`,
+    );
+    return data;
+  },
+
+  async downloadExcelExport(jobId: number, examName: string): Promise<void> {
+    const { data } = await apiClient.get(`/api/teacher/results/report-jobs/${jobId}/download`, {
       responseType: "blob",
     });
     const safeName = examName.replace(/[^a-z0-9_-]+/gi, "_");

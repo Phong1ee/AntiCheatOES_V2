@@ -144,7 +144,7 @@ class ExamDataMigrationTests(unittest.TestCase):
 
         config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_heads(), ["d14c8a1e9f02"])
+        self.assertEqual(script.get_heads(), ["d2f6a4b9c8e0"])
 
 
 if __name__ == "__main__":

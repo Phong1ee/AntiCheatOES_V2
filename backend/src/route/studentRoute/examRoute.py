@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
 import json
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from src.controller.teacherController.examController import ExamController
@@ -42,13 +43,23 @@ class SubmitExamRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     attemptId: int = Field(alias="attempt_id")
+    submitRequestId: str = Field(min_length=36, max_length=36)
     answers: list[SubmitAnswerRequest]
     timeSpentSeconds: int | None = None
+
+    @field_validator("submitRequestId")
+    @classmethod
+    def validate_submit_request_id(cls, value: str) -> str:
+        try:
+            return str(UUID(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("submitRequestId must be a UUID") from exc
 
 
 class AutoSaveAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    revision: int = Field(ge=1)
     selectedOptionId: int | None = None
     answerText: str | None = None
 
@@ -110,7 +121,7 @@ def _contains_raw_media_metadata(value: object) -> bool:
 
 
 @router.get("")
-async def get_student_exams_root(current_user: dict = Depends(verify_token)):
+def get_student_exams_root(current_user: dict = Depends(verify_token)):
     """Get all exams assigned to the current student."""
     try:
         result = ExamController.getStudentExams(
@@ -125,7 +136,7 @@ async def get_student_exams_root(current_user: dict = Depends(verify_token)):
 
 
 @router.get("/student")
-async def get_student_exams(current_user: dict = Depends(verify_token), role_check: dict = Depends(STUDENT_ONLY)):
+def get_student_exams(current_user: dict = Depends(verify_token), role_check: dict = Depends(STUDENT_ONLY)):
     """Get all exams assigned to the current student."""
     result = ExamController.getStudentExams(
         current_user["school_id"],
@@ -136,7 +147,7 @@ async def get_student_exams(current_user: dict = Depends(verify_token), role_che
 
 
 @router.post("/{exam_id}/verify-code")
-async def verify_exam_code(
+def verify_exam_code(
     exam_id: int,
     request: VerifyCodeRequest,
     current_user: dict = Depends(verify_token)
@@ -161,7 +172,7 @@ async def verify_exam_code(
 
 
 @router.post("/{exam_id}/start")
-async def start_exam(
+def start_exam(
     exam_id: int,
     request: StartExamRequest,
     current_user: dict = Depends(verify_token)
@@ -186,7 +197,7 @@ async def start_exam(
 
 
 @router.post("/{exam_id}/submit")
-async def submit_exam(
+def submit_exam(
     exam_id: int,
     request: SubmitExamRequest,
     current_user: dict = Depends(verify_token),
@@ -200,7 +211,8 @@ async def submit_exam(
             current_user["role"],
             exam_id,
             request.attemptId,
-            [answer.model_dump() for answer in request.answers], device_id, attempt_session
+            [answer.model_dump() for answer in request.answers], device_id, attempt_session,
+            request.submitRequestId,
         )
     except Exception as e:
         detail = str(e)
@@ -214,7 +226,7 @@ async def submit_exam(
 
 
 @router.post("/{exam_id}/events")
-async def record_anti_cheat_event(
+def record_anti_cheat_event(
     exam_id: int,
     request: AntiCheatEventRequest,
     current_user: dict = Depends(verify_token),
@@ -237,7 +249,7 @@ async def record_anti_cheat_event(
 
 
 @router.put("/{exam_id}/attempts/{attempt_id}/answers/{question_id}")
-async def save_answer(
+def save_answer(
     exam_id: int,
     attempt_id: int,
     question_id: int,
@@ -264,7 +276,7 @@ async def save_answer(
 
 
 @router.post("/{exam_id}/attempts/{attempt_id}/terminate")
-async def terminate_attempt(
+def terminate_attempt(
     exam_id: int,
     attempt_id: int,
     request: TerminateAttemptRequest,
@@ -290,7 +302,7 @@ async def terminate_attempt(
 
 
 @router.get("/{exam_id}/attempts/{attempt_id}")
-async def restore_attempt(
+def restore_attempt(
     exam_id: int,
     attempt_id: int,
     current_user: dict = Depends(verify_token),
@@ -315,7 +327,7 @@ async def restore_attempt(
 
 
 @router.post("/{exam_id}/attempts/{attempt_id}/resume")
-async def resume_attempt(
+def resume_attempt(
     exam_id: int,
     attempt_id: int,
     request: ResumeAttemptRequest,
@@ -334,7 +346,7 @@ async def resume_attempt(
 
 
 @router.post("/{exam_id}/attempts/{attempt_id}/heartbeat")
-async def heartbeat_attempt(
+def heartbeat_attempt(
     exam_id: int,
     attempt_id: int,
     current_user: dict = Depends(verify_token),
@@ -348,7 +360,7 @@ async def heartbeat_attempt(
 
 
 @router.get("/{exam_id}")
-async def get_exam(
+def get_exam(
     exam_id: int,
     attempt_id: int | None = None,
     current_user: dict = Depends(verify_token),
@@ -371,7 +383,7 @@ async def get_exam(
         raise HTTPException(status_code=400, detail=detail)
 
 @router.get("/{student_id}/exams")
-async def get_student_exams_by_id(student_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY)):
+def get_student_exams_by_id(student_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY)):
     """Get all exams assigned to a specific student by their school ID."""
     result = ExamController.getStudentExams(
         student_id,

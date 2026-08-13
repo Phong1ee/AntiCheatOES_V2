@@ -1,6 +1,7 @@
 import os
-import redis
-from fastapi import FastAPI
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from src.route.authRoute import router as auth_router
@@ -12,11 +13,22 @@ from src.route.teacherRoute import router as teacher_router
 from src.route.adminRoute import router as admin_router
 from sqlalchemy.orm import Session
 import src.a_db_config  
+from src.service.cache_service import close_cache_client
+from src.middleware.observabilityMiddleware import ObservabilityMiddleware
+from src.service.health_service import readiness
 
 UVICORN_ACCESS_LOG = os.getenv("UVICORN_ACCESS_LOG", "true").strip().lower() in {"1", "true", "yes", "on"}
 
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    yield
+    close_cache_client()
+
+
 # Initialize FastAPI app
-app = FastAPI(title="Online Examination System API", version="0.1.0")
+app = FastAPI(title="Online Examination System API", version="0.1.0", lifespan=app_lifespan)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(message)s")
+app.add_middleware(ObservabilityMiddleware)
 
 # Configure CORS to allow frontend communication
 app.add_middleware(
@@ -43,6 +55,21 @@ app.add_middleware(
 def read_root():
     """Health check endpoint"""
     return {"status": "Backend is running"}
+
+
+@app.get("/health/live")
+def health_live():
+    """Liveness intentionally checks only that this API process can respond."""
+    return {"status": "live"}
+
+
+@app.get("/health/ready")
+def health_ready(response: Response):
+    """MySQL is critical; Redis and RabbitMQ are reported as optional degradation."""
+    payload = readiness()
+    if payload["status"] != "ready":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return payload
 
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

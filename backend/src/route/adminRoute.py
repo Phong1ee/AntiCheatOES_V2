@@ -6,10 +6,12 @@ import tempfile
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
 
 from database import get_db
 from src.a_db_config import (
@@ -20,6 +22,7 @@ from src.a_db_config import (
     ChapterQuestion,
     ExamPoolQuestion,
     ExamQuestion,
+    Exam,
     LO,
     LOQuestion,
     MCQAnswer,
@@ -31,8 +34,22 @@ from src.a_db_config import (
     TeacherSubject,
     User,
     UserRole,
+    BackgroundJob,
+    BackgroundJobStatus,
+    BackgroundJobType,
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token, TEACHER_ONLY
+from src.service.audit_service import record_audit
+from src.service.cache_invalidation_contract import admin_permission_updated, deliver_invalidation
+from src.service.cache_service import admin_teacher_permissions_key, cache_aside
+from src.service.outbox_publisher import enqueue_outbox_event
+from src.service.report_job_service import REPORT_TYPE_EXAM_RESULTS, report_artifact_path, report_job_summary, request_exam_results_report
+from src.service.import_job_service import (
+    delete_staged_source,
+    import_job_summary,
+    queue_import_job,
+    should_background_import,
+)
 from src.service.question_bank_import_parser import (
     ParsedQuestionBank,
     QuestionBankParseError,
@@ -50,6 +67,10 @@ QuestionDifficultyLiteral = Literal["easy", "medium", "hard"]
 
 class RejectPayload(BaseModel):
     reason: str = Field(max_length=500)
+
+
+class CreateReportJobPayload(BaseModel):
+    request_id: str = Field(alias="requestId", min_length=1, max_length=64)
 
 
 class RevisionOptionPayload(BaseModel):
@@ -593,10 +614,10 @@ def build_question_bank_import_preview(
     }
 
 
-async def _parse_question_bank_upload(file: UploadFile) -> ParsedQuestionBank:
-    """Read one supported upload into parser data, deleting its temporary file."""
+def _parse_question_bank_content(filename: str | None, content: bytes) -> ParsedQuestionBank:
+    """Parse a staged document away from the async request event loop."""
 
-    suffix = Path(file.filename or "").suffix.casefold()
+    suffix = Path(filename or "").suffix.casefold()
     if suffix not in {".docx", ".pdf"}:
         raise HTTPException(status_code=400, detail="Only .docx and text-based .pdf files are supported")
 
@@ -604,13 +625,20 @@ async def _parse_question_bank_upload(file: UploadFile) -> ParsedQuestionBank:
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temporary_file:
             temp_path = Path(temporary_file.name)
-            temporary_file.write(await file.read())
+            temporary_file.write(content)
         return parse_question_bank_document(temp_path)
     except QuestionBankParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
+
+
+async def _parse_question_bank_upload(file: UploadFile) -> ParsedQuestionBank:
+    """Read the async upload, then offload file parsing and temporary-file I/O."""
+
+    content = await file.read()
+    return await run_in_threadpool(_parse_question_bank_content, file.filename, content)
 
 
 @router.post("/question-bank/import/preview")
@@ -624,7 +652,8 @@ async def preview_question_bank_import(
     """Parse and preview an import file. This route never writes DB rows."""
 
     del role_check
-    return build_question_bank_import_preview(await _parse_question_bank_upload(file), subject_id, current_user, db)
+    parsed = await _parse_question_bank_upload(file)
+    return await run_in_threadpool(build_question_bank_import_preview, parsed, subject_id, current_user, db)
 
 
 def build_new_subject_import_preview(parsed: ParsedQuestionBank, current_user: dict, db: Session) -> dict:
@@ -703,7 +732,8 @@ async def preview_new_subject_question_bank_import(
     """Preview a document whose Subject does not yet exist in the database."""
 
     del role_check
-    return build_new_subject_import_preview(await _parse_question_bank_upload(file), current_user, db)
+    parsed = await _parse_question_bank_upload(file)
+    return await run_in_threadpool(build_new_subject_import_preview, parsed, current_user, db)
 
 
 def _persist_imported_question_bank(
@@ -828,6 +858,8 @@ def import_question_bank_data(
     subject_id: str,
     current_user: dict,
     db: Session,
+    *,
+    commit: bool = True,
 ) -> dict:
     """Persist one validated import in a single all-or-nothing transaction."""
 
@@ -854,18 +886,22 @@ def import_question_bank_data(
                 ),
             )
         result = _persist_imported_question_bank(parsed, selected_subject_id, current_user, db)
-        db.commit()
+        if commit:
+            db.commit()
     except HTTPException:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
     except IntegrityError as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise HTTPException(
             status_code=409,
             detail="Import could not be completed because question bank data changed concurrently. No data was imported.",
         ) from exc
     except Exception as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise HTTPException(status_code=500, detail="Import failed. No data was imported.") from exc
 
     return {"subject_id": selected_subject_id, **result}
@@ -876,6 +912,8 @@ def import_new_subject_question_bank_data(
     confirmed: bool,
     current_user: dict,
     db: Session,
+    *,
+    commit: bool = True,
 ) -> dict:
     """Create a new Subject and its Question Bank in one transaction."""
 
@@ -900,12 +938,15 @@ def import_new_subject_question_bank_data(
         db.add(subject)
         db.flush()
         result = _persist_imported_question_bank(parsed, subject.subject_id, current_user, db)
-        db.commit()
+        if commit:
+            db.commit()
     except HTTPException:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
     except IntegrityError as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise HTTPException(
             status_code=409,
             detail=(
@@ -914,7 +955,8 @@ def import_new_subject_question_bank_data(
             ),
         ) from exc
     except Exception as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise HTTPException(status_code=500, detail="New Subject import failed. No data was imported.") from exc
 
     return {
@@ -938,7 +980,31 @@ async def import_question_bank(
     """Parse, validate, resolve, and import a document in one transaction."""
 
     del role_check
-    return import_question_bank_data(await _parse_question_bank_upload(file), subject_id, current_user, db)
+    content = await file.read()
+    parsed = await run_in_threadpool(_parse_question_bank_content, file.filename, content)
+    if should_background_import(len(parsed.questions)):
+        admin = await run_in_threadpool(_admin, db, current_user["school_id"])
+        job = None
+        try:
+            job, duplicate = await run_in_threadpool(
+                queue_import_job,
+                db,
+                job_type=BackgroundJobType.question_import,
+                requested_by=admin.school_id,
+                filename=file.filename,
+                content=content,
+                total_rows=len(parsed.questions),
+                scope=f"subject:{subject_id.strip()}",
+                metadata={"subject_id": subject_id.strip(), "new_subject": False},
+            )
+            db.commit()
+            return {**import_job_summary(job), "duplicate": duplicate, "background": True}
+        except Exception:
+            db.rollback()
+            if job is not None:
+                delete_staged_source(job.job_id, str((job.result_metadata or {}).get("source_suffix") or ""))
+            raise
+    return await run_in_threadpool(import_question_bank_data, parsed, subject_id, current_user, db)
 
 
 @router.post("/question-bank/import/new-subject", status_code=status.HTTP_201_CREATED)
@@ -952,8 +1018,34 @@ async def import_new_subject_question_bank(
     """Create the file's Subject and import its Question Bank after confirmation."""
 
     del role_check
-    return import_new_subject_question_bank_data(
-        await _parse_question_bank_upload(file), confirm, current_user, db
+    content = await file.read()
+    parsed = await run_in_threadpool(_parse_question_bank_content, file.filename, content)
+    if should_background_import(len(parsed.questions)):
+        admin = await run_in_threadpool(_admin, db, current_user["school_id"])
+        if not confirm:
+            raise HTTPException(status_code=400, detail="Creating a new Subject requires explicit confirmation")
+        job = None
+        try:
+            job, duplicate = await run_in_threadpool(
+                queue_import_job,
+                db,
+                job_type=BackgroundJobType.question_import,
+                requested_by=admin.school_id,
+                filename=file.filename,
+                content=content,
+                total_rows=len(parsed.questions),
+                scope=f"new-subject:{parsed.subject.subject_id}",
+                metadata={"subject_id": parsed.subject.subject_id, "new_subject": True},
+            )
+            db.commit()
+            return {**import_job_summary(job), "duplicate": duplicate, "background": True}
+        except Exception:
+            db.rollback()
+            if job is not None:
+                delete_staged_source(job.job_id, str((job.result_metadata or {}).get("source_suffix") or ""))
+            raise
+    return await run_in_threadpool(
+        import_new_subject_question_bank_data, parsed, confirm, current_user, db
     )
 
 
@@ -1723,20 +1815,26 @@ async def preview_user_import(
     role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
 ):
     del role_check
-    _management_admin(db, current_user)
+    await run_in_threadpool(_management_admin, db, current_user)
     if not file.filename or not file.filename.casefold().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="The uploaded file must not exceed 5 MB")
     try:
-        preview = build_user_import_preview(parse_user_import_xlsx(content), db)
+        preview = await run_in_threadpool(_build_user_import_preview, content, db)
     except UserImportParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"file_name": file.filename, **preview}
 
 
-def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session) -> dict:
+def _build_user_import_preview(content: bytes, db: Session) -> dict:
+    """Parse and validate an uploaded workbook in a worker thread."""
+
+    return build_user_import_preview(parse_user_import_xlsx(content), db)
+
+
+def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session, *, commit: bool = True) -> dict:
     """Persist an already reparsed batch in one transaction after strict validation."""
     preview = build_user_import_preview(rows, db)
     if preview["error_count"]:
@@ -1759,13 +1857,16 @@ def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session) -> dict
                 users.append(user)
         db.flush()
         role_counts = {role: sum(_user_role(user) == role for user in users) for role in ("student", "teacher", "admin")}
-        db.commit()
+        if commit:
+            db.commit()
         return {"success": True, "imported_count": len(users), "role_counts": role_counts}
     except HTTPException:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
     except IntegrityError as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise HTTPException(status_code=409, detail="Import conflicts with an existing school ID or email") from exc
 
 
@@ -1775,17 +1876,61 @@ async def import_users(
     role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
 ):
     del role_check
-    _management_admin(db, current_user)
+    await run_in_threadpool(_management_admin, db, current_user)
     if not file.filename or not file.filename.casefold().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="The uploaded file must not exceed 5 MB")
     try:
-        rows = parse_user_import_xlsx(content)
+        rows = await run_in_threadpool(parse_user_import_xlsx, content)
     except UserImportParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return import_users_from_rows(rows, db)
+    if should_background_import(len(rows)):
+        admin = await run_in_threadpool(_management_admin, db, current_user)
+        job = None
+        try:
+            job, duplicate = await run_in_threadpool(
+                queue_import_job,
+                db,
+                job_type=BackgroundJobType.user_import,
+                requested_by=admin.school_id,
+                filename=file.filename,
+                content=content,
+                total_rows=len(rows),
+                scope="users",
+            )
+            db.commit()
+            return {**import_job_summary(job), "duplicate": duplicate, "background": True}
+        except Exception:
+            db.rollback()
+            if job is not None:
+                delete_staged_source(job.job_id, str((job.result_metadata or {}).get("source_suffix") or ""))
+            raise
+    return await run_in_threadpool(import_users_from_rows, rows, db)
+
+
+def _owned_import_job(db: Session, job_id: int, admin_school_id: str) -> BackgroundJob:
+    job = db.get(BackgroundJob, job_id)
+    job_type = job.job_type.value if job and hasattr(job.job_type, "value") else (str(job.job_type) if job else "")
+    if not job or job_type not in {BackgroundJobType.user_import.value, BackgroundJobType.question_import.value}:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    if job.requested_by != admin_school_id:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    return job
+
+
+@router.get("/import-jobs/{job_id}")
+def get_import_job(
+    job_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Return only the requesting administrator's import progress."""
+    del role_check
+    admin = _management_admin(db, current_user)
+    return import_job_summary(_owned_import_job(db, job_id, admin.school_id))
 
 
 @router.get("/users/{user_id}")
@@ -1837,6 +1982,9 @@ def create_user(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="School ID or email already exists") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.patch("/users/{user_id}")
@@ -1899,6 +2047,9 @@ def update_user(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="School ID or email already exists") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.put("/me/password")
@@ -1924,6 +2075,9 @@ def change_own_password(
     except HTTPException:
         db.rollback()
         raise
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/users/{user_id}/lock")
@@ -1945,10 +2099,22 @@ def lock_user(
         user.is_locked = True
         user.locked_at = datetime.now()
         user.locked_by = admin.school_id
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="USER_LOCKED",
+            entity_type="user",
+            entity_id=user.id,
+            metadata={"target_school_id": user.school_id},
+        )
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)
     except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
         db.rollback()
         raise
 
@@ -1973,6 +2139,9 @@ def unlock_user(
         db.refresh(user)
         return _serialize_admin_user(user)
     except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
         db.rollback()
         raise
 
@@ -2000,9 +2169,50 @@ def delete_user(
         user.is_locked = True
         user.locked_at = datetime.now()
         user.locked_by = admin.school_id
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="USER_DELETED",
+            entity_type="user",
+            entity_id=user.id,
+            metadata={"target_school_id": user.school_id, "target_role": _user_role(user)},
+        )
         db.commit()
         return None
     except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/users/{user_id}/restore")
+def restore_user(
+    user_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Restore a soft-deleted account without re-enabling it implicitly."""
+    del role_check
+    try:
+        _management_admin(db, current_user)
+        user = _locked_user(db, user_id, include_deleted=True)
+        if user.deleted_at is None:
+            raise HTTPException(status_code=409, detail="User is not deleted")
+        user.deleted_at = None
+        user.deleted_by = None
+        # Deletion locks accounts and revokes Teacher subjects. Require the
+        # existing explicit unlock/grant actions before reviving old access.
+        db.commit()
+        db.refresh(user)
+        return _serialize_admin_user(user)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
         db.rollback()
         raise
 
@@ -2021,8 +2231,13 @@ class ReplaceTeacherPermissionsPayload(BaseModel):
     subject_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
-def _permission_teacher(db: Session, teacher_school_id: str) -> User:
-    teacher = db.query(User).filter(User.school_id == teacher_school_id).first()
+def _permission_teacher(db: Session, teacher_school_id: str, *, for_update: bool = False) -> User:
+    query = db.query(User).filter(User.school_id == teacher_school_id)
+    if for_update:
+        # This parent-row lock serializes full permission-set replacements,
+        # including the first grant where no TeacherSubject row exists yet.
+        query = query.with_for_update()
+    teacher = query.first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     if _user_role(teacher) != "teacher":
@@ -2080,14 +2295,25 @@ def list_teacher_permissions(
 ):
     del role_check
     _management_admin(db, current_user)
-    query = db.query(TeacherSubject).join(TeacherSubject.teacher).join(TeacherSubject.subject)
-    if search and search.strip():
-        term = f"%{search.strip()}%"
-        query = query.filter(or_(User.full_name.ilike(term), User.school_id.ilike(term), User.email.ilike(term)))
-    if teacher_school_id is not None: query = query.filter(TeacherSubject.teacher_id == teacher_school_id)
-    if subject_id: query = query.filter(TeacherSubject.subject_id == subject_id)
-    if is_active is not None: query = query.filter(TeacherSubject.is_active.is_(is_active))
-    return {"items": [_serialize_teacher_permission(item) for item in query.order_by(TeacherSubject.teacher_id, TeacherSubject.subject_id).all()]}
+    filters = {
+        "search": search.strip() if search and search.strip() else None,
+        "teacher_school_id": teacher_school_id,
+        "subject_id": subject_id,
+        "is_active": is_active,
+    }
+
+    def load() -> dict:
+        query = db.query(TeacherSubject).join(TeacherSubject.teacher).join(TeacherSubject.subject)
+        if filters["search"]:
+            term = f"%{filters['search']}%"
+            query = query.filter(or_(User.full_name.ilike(term), User.school_id.ilike(term), User.email.ilike(term)))
+        if teacher_school_id is not None: query = query.filter(TeacherSubject.teacher_id == teacher_school_id)
+        if subject_id: query = query.filter(TeacherSubject.subject_id == subject_id)
+        if is_active is not None: query = query.filter(TeacherSubject.is_active.is_(is_active))
+        return {"items": [_serialize_teacher_permission(item) for item in query.order_by(TeacherSubject.teacher_id, TeacherSubject.subject_id).all()]}
+
+    # This is a read-heavy administration view, not an authorization decision.
+    return cache_aside(admin_teacher_permissions_key(filters), 60, load)
 
 
 @router.get("/teacher-permissions/teachers")
@@ -2124,7 +2350,7 @@ def replace_teacher_permissions(
     del role_check
     try:
         admin = _management_admin(db, current_user)
-        teacher = _permission_teacher(db, teacher_school_id)
+        teacher = _permission_teacher(db, teacher_school_id, for_update=True)
         subject_ids = [subject_id.strip() for subject_id in payload.subject_ids]
         if any(not subject_id for subject_id in subject_ids) or len(subject_ids) != len(set(subject_ids)):
             raise HTTPException(status_code=400, detail="Subject IDs must be unique and non-empty")
@@ -2153,7 +2379,27 @@ def replace_teacher_permissions(
                 item.is_active = True
                 item.assigned_by = admin.school_id
                 item.assigned_at = now
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="TEACHER_PERMISSION_UPDATED",
+            entity_type="teacher_permission",
+            entity_id=teacher.school_id,
+            metadata={
+                "active_subject_count": len(requested),
+                "invalidation": admin_permission_updated(teacher.school_id).as_event_metadata(),
+            },
+        )
+        enqueue_outbox_event(
+            db,
+            event_type="analytics.permission_updated",
+            aggregate_type="teacher_permission",
+            aggregate_id=teacher.school_id,
+            metadata={"active_subject_count": len(requested)},
+        )
         db.commit()
+        deliver_invalidation(admin_permission_updated(teacher.school_id))
         refreshed = db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher.school_id).order_by(TeacherSubject.subject_id).all()
         return _serialize_teacher_permission_set(teacher, refreshed)
     except HTTPException:
@@ -2162,6 +2408,9 @@ def replace_teacher_permissions(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Teacher permissions could not be updated") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/teacher-permissions", status_code=status.HTTP_201_CREATED)
@@ -2174,11 +2423,26 @@ def grant_teacher_permission(payload: TeacherPermissionPayload, current_user: di
         if not item:
             item = TeacherSubject(teacher_id=payload.teacher_school_id, subject_id=payload.subject_id); db.add(item)
         item.is_active = True; item.assigned_by = admin.school_id; item.assigned_at = datetime.now()
-        db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="TEACHER_PERMISSION_UPDATED",
+            entity_type="teacher_permission",
+            entity_id=payload.teacher_school_id,
+            metadata={
+                "subject_id": payload.subject_id,
+                "is_active": True,
+                "invalidation": admin_permission_updated(payload.teacher_school_id).as_event_metadata(),
+            },
+        )
+        db.commit(); deliver_invalidation(admin_permission_updated(payload.teacher_school_id)); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
     except IntegrityError as exc:
         db.rollback(); raise HTTPException(status_code=409, detail="Teacher permission conflicts with an existing assignment") from exc
+    except Exception:
+        db.rollback(); raise
 
 
 @router.patch("/teacher-permissions/{teacher_school_id}/{subject_id}")
@@ -2198,8 +2462,25 @@ def update_teacher_permission(teacher_school_id: str, subject_id: str, payload: 
             item.is_active = True
         if payload.is_active is not None: item.is_active = payload.is_active
         item.assigned_by = admin.school_id; item.assigned_at = datetime.now()
-        db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="TEACHER_PERMISSION_UPDATED",
+            entity_type="teacher_permission",
+            entity_id=teacher_school_id,
+            metadata={
+                "subject_id": item.subject_id,
+                "is_active": bool(item.is_active),
+                "invalidation": admin_permission_updated(teacher_school_id).as_event_metadata(),
+            },
+        )
+        db.commit(); deliver_invalidation(admin_permission_updated(teacher_school_id)); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
+        db.rollback(); raise
+    except IntegrityError as exc:
+        db.rollback(); raise HTTPException(status_code=409, detail="Teacher permissions could not be updated") from exc
+    except Exception:
         db.rollback(); raise
 
 
@@ -2207,9 +2488,97 @@ def update_teacher_permission(teacher_school_id: str, subject_id: str, payload: 
 def revoke_teacher_permission(teacher_school_id: str, subject_id: str, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
     del role_check
     try:
-        _management_admin(db, current_user)
+        admin = _management_admin(db, current_user)
         item = db.query(TeacherSubject).filter_by(teacher_id=teacher_school_id, subject_id=subject_id).with_for_update().first()
         if not item: raise HTTPException(status_code=404, detail="Teacher permission not found")
-        item.is_active = False; db.commit(); db.refresh(item); return _serialize_teacher_permission(item)
+        item.is_active = False
+        record_audit(
+            db,
+            actor_school_id=admin.school_id,
+            actor_role=admin.role,
+            action="TEACHER_PERMISSION_UPDATED",
+            entity_type="teacher_permission",
+            entity_id=teacher_school_id,
+            metadata={
+                "subject_id": subject_id,
+                "is_active": False,
+                "invalidation": admin_permission_updated(teacher_school_id).as_event_metadata(),
+            },
+        )
+        db.commit(); deliver_invalidation(admin_permission_updated(teacher_school_id)); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
+    except Exception:
+        db.rollback(); raise
+
+
+@router.post("/reports/exams/{exam_id}/report-jobs", status_code=status.HTTP_202_ACCEPTED)
+def create_admin_exam_results_report_job(
+    exam_id: int,
+    payload: CreateReportJobPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Admins may queue the same durable result export without receiving report data inline."""
+    del role_check
+    admin = _admin(db, current_user["school_id"])
+    if not db.get(Exam, exam_id):
+        raise HTTPException(status_code=404, detail="Exam not found")
+    try:
+        job, duplicate = request_exam_results_report(
+            db,
+            exam_id=exam_id,
+            requested_by=admin.school_id,
+            request_id=payload.request_id,
+        )
+        db.commit()
+        db.refresh(job)
+        return {**report_job_summary(job), "duplicate": duplicate}
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _admin_report_job(db: Session, job_id: int) -> BackgroundJob:
+    job = db.get(BackgroundJob, job_id)
+    metadata = job.result_metadata if job and isinstance(job.result_metadata, dict) else {}
+    job_type = job.job_type.value if job and hasattr(job.job_type, "value") else (str(job.job_type) if job else "")
+    if not job or job_type != BackgroundJobType.report_export.value or metadata.get("report_type") != REPORT_TYPE_EXAM_RESULTS:
+        raise HTTPException(status_code=404, detail="Report job not found")
+    return job
+
+
+@router.get("/reports/report-jobs/{job_id}")
+def get_admin_exam_results_report_job(
+    job_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    return report_job_summary(_admin_report_job(db, job_id))
+
+
+@router.get("/reports/report-jobs/{job_id}/download")
+def download_admin_exam_results_report_job(
+    job_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    del role_check
+    _admin(db, current_user["school_id"])
+    job = _admin_report_job(db, job_id)
+    job_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+    if job_status != BackgroundJobStatus.completed.value:
+        raise HTTPException(status_code=409, detail="Report job is not complete")
+    artifact = report_artifact_path(job.job_id)
+    if not artifact.is_file():
+        raise HTTPException(status_code=409, detail="Report artifact is not available")
+    return FileResponse(
+        artifact,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"exam_results_{job.job_id}.xlsx",
+    )

@@ -10,6 +10,9 @@ from src.models.teacher.requestModel.ExamSettingsRequest import (
     ExamSettingsResponse,
 )
 from src.service.result_strategy_service import set_result_strategy, sync_final_scores
+from src.service.exam_version_service import claim_exam_version
+from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.cache_invalidation_contract import deliver_invalidation, teacher_exam_updated
 
 router = APIRouter()
 
@@ -22,10 +25,11 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
     )
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
+    require_active_subject_assignment(db, school_id, exam.subject_id)
     return exam
 
 
-def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
+def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
     return ExamSettingsResponse(
         exam_id=setting.exam_id,
         shuffle_question=setting.shuffle_question,
@@ -37,12 +41,15 @@ def _serialize(setting: ExamSetting) -> ExamSettingsResponse:
         violation_limit=setting.violation_limit,
         auto_grade=setting.auto_grade,
         result_strategy=setting.result_strategy,
+        result_visibility=exam.result_visibility.value if exam.result_visibility else None,
+        version=exam.version,
     )
 
 
 def _apply(setting: ExamSetting, payload: ExamSettingsRequest) -> None:
     for field, value in payload.model_dump().items():
-        setattr(setting, field, value)
+        if field not in {"expected_version", "result_visibility"}:
+            setattr(setting, field, value)
 
 
 @router.get("/exams/{exam_id}/settings", response_model=ExamSettingsResponse)
@@ -56,22 +63,23 @@ def get_exam_settings(
     exam = _owned_exam(db, exam_id, current_user["school_id"])
     setting = db.get(ExamSetting, exam_id)
     if setting:
-        return _serialize(setting)
+        return _serialize(setting, exam)
     try:
         setting = ExamSetting(exam_id=exam_id)
         db.add(setting)
         db.flush()
         sync_final_scores(db, exam)
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam_id))
         db.refresh(setting)
-        return _serialize(setting)
+        return _serialize(setting, exam)
     except IntegrityError:
         # A concurrent GET may have created the one-to-one row first.
         db.rollback()
         setting = db.get(ExamSetting, exam_id)
         if not setting:
             raise HTTPException(status_code=409, detail="Exam settings could not be initialized")
-        return _serialize(setting)
+        return _serialize(setting, exam)
     except Exception:
         db.rollback()
         raise
@@ -100,8 +108,9 @@ def create_exam_settings(
         db.flush()
         sync_final_scores(db, exam)
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam_id))
         db.refresh(setting)
-        return _serialize(setting)
+        return _serialize(setting, exam)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Exam settings already exist") from exc
@@ -119,20 +128,25 @@ def update_exam_settings(
     db: Session = Depends(get_db),
 ):
     del role_check
-    exam = _owned_exam(db, exam_id, current_user["school_id"])
+    # Keep the existing not-found contract for an unowned settings resource.
+    _owned_exam(db, exam_id, current_user["school_id"])
+    exam = claim_exam_version(db, exam_id, current_user["school_id"], payload.expected_version)
     setting = db.get(ExamSetting, exam_id)
     if not setting:
         raise HTTPException(status_code=404, detail="Exam settings not found")
     try:
         previous_strategy = setting.result_strategy
         _apply(setting, payload)
+        if payload.result_visibility is not None:
+            exam.result_visibility = payload.result_visibility
         if setting.result_strategy != previous_strategy:
             set_result_strategy(db, exam, setting.result_strategy)
         else:
             db.flush()
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam_id))
         db.refresh(setting)
-        return _serialize(setting)
+        return _serialize(setting, exam)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Exam settings could not be updated") from exc
@@ -156,6 +170,7 @@ def delete_exam_settings(
     try:
         db.delete(setting)
         db.commit()
+        deliver_invalidation(teacher_exam_updated(exam_id))
         return {"success": True, "message": "Exam settings deleted"}
     except Exception:
         db.rollback()

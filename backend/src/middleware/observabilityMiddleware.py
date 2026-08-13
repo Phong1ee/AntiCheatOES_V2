@@ -1,0 +1,34 @@
+"""Request ID and sanitized access logging for every API response."""
+
+from time import perf_counter
+from uuid import UUID, uuid4
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from src.service.observability_service import begin_context, elapsed_ms, log_event
+
+
+def _request_id(value: str | None) -> str:
+    if value:
+        try:
+            return str(UUID(value.strip()))
+        except (ValueError, AttributeError):
+            pass
+    return str(uuid4())
+
+
+class ObservabilityMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        request_id = _request_id(request.headers.get("X-Request-ID"))
+        token = begin_context(request_id=request_id, route=request.url.path)
+        started_at = perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            log_event("http.request", status=status_code, latency_ms=elapsed_ms(started_at))
+            from src.service.observability_service import _context
+            _context.reset(token)

@@ -1,0 +1,13 @@
+.env
+.env.*
+.venv
+.pytest_cache
+.pytest-*-tmp
+.tmp
+__pycache__
+*.py[cod]
+generated_reports
+tests
+test_connect_db.py
+scripts/seed_loadtest.py
+scripts/seed_loadtest_distributed.py

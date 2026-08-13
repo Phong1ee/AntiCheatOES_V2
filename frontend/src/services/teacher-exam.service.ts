@@ -41,9 +41,10 @@ export const teacherExamService = {
     return data;
   },
 
-  async updateStatus(examId: number, status: ExamStatus): Promise<TeacherExamApi> {
+  async updateStatus(examId: number, status: ExamStatus, expectedVersion?: number): Promise<TeacherExamApi> {
     const { data } = await apiClient.patch<TeacherExamApi>(`/api/teacher/exams/${examId}/status`, {
       status,
+      expected_version: expectedVersion,
     });
     return data;
   },
@@ -61,8 +62,8 @@ export const teacherExamService = {
   },
 
 
-  async delete(examId: number): Promise<void> {
-    await apiClient.delete(`/api/teacher/delete_exam/${examId}`);
+  async delete(examId: number, expectedVersion?: number): Promise<void> {
+    await apiClient.delete(`/api/teacher/delete_exam/${examId}`, { params: { expected_version: expectedVersion } });
   },
 
   async getAssignmentOptions(examId: number): Promise<AssignmentOptions> {
@@ -72,10 +73,10 @@ export const teacherExamService = {
     return data;
   },
 
-  async saveAssignments(examId: number, studentIds: string[]): Promise<AssignmentSyncResult> {
+  async saveAssignments(examId: number, studentIds: string[], expectedVersion?: number): Promise<AssignmentSyncResult> {
     const { data } = await apiClient.put<AssignmentSyncResult>(
       `/api/teacher/exams/${examId}/assignments`,
-      { class_ids: [], student_ids: studentIds, excluded_student_ids: [] },
+      { class_ids: [], student_ids: studentIds, excluded_student_ids: [], expected_version: expectedVersion },
     );
     return data;
   },

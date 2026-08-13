@@ -11,3 +11,4 @@ class QuestionsSelectFromBank(BaseModel):
         decimal_places=2,
         validation_alias=AliasChoices("max_score", "question_point"),
     )
+    expected_version: int | None = Field(default=None, ge=1)

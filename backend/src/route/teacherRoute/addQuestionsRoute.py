@@ -32,6 +32,7 @@ from src.models.teacher.requestModel.QuestionUpdateRequest import QuestionUpdate
 from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSelectFromBank
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
 from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.exam_version_service import claim_exam_version
 
 router = APIRouter()
 
@@ -345,6 +346,7 @@ def add_question_to_database(
         _validate_options(request.question_type, request.options)
         if request.exam_id is not None:
             exam = _owned_exam(db, request.exam_id, creator.school_id)
+            claim_exam_version(db, request.exam_id, creator.school_id, getattr(request, "expected_version", None))
             if exam.subject_id != request.subject_id:
                 raise HTTPException(status_code=400, detail="Question subject must match the exam subject")
 
@@ -392,7 +394,7 @@ def add_question_to_exam(
     """Attach an existing reusable question to an owned exam."""
     del role_check
     try:
-        exam = _owned_exam(db, exam_id, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         _leave_pool_for_manual_edit(db, exam)
         question = db.query(Question).filter(Question.question_id == request.question_id).first()
         if not question:
@@ -435,7 +437,7 @@ def update_question_in_exam(
     """Update an exam-local draft, cloning shared content before any content edit."""
     del role_check
     try:
-        _owned_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         teacher = _teacher(db, current_user["school_id"])
         link = db.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
         if not link:
@@ -522,11 +524,12 @@ def delete_question_from_exam(
     current_user: dict = Depends(verify_token),
     role_check: dict = Depends(TEACHER_ONLY),
     db: Session = Depends(get_db),
+    expected_version: int | None = Query(default=None, ge=1),
 ):
     """Remove only the exam_question association; keep reusable question data."""
     del role_check
     try:
-        _owned_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         link = db.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
         if not link:
             raise HTTPException(status_code=404, detail="Question not found in the exam")
@@ -548,7 +551,7 @@ def bulk_remove_questions_from_exam(
 ):
     del role_check
     try:
-        _owned_exam(db, exam_id, current_user["school_id"])
+        claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         existing_ids = {
             row[0]
             for row in db.query(ExamQuestion.question_id)
@@ -745,7 +748,8 @@ def add_questions_to_exam_from_question_bank(
     """Atomically attach authorized reusable questions to an owned exam."""
     del role_check
     try:
-        exam = _owned_exam(db, exam_id, current_user["school_id"])
+        expected_version = request[0].expected_version if request else None
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         _leave_pool_for_manual_edit(db, exam)
         teacher = _teacher(db, current_user["school_id"])
         if not request:

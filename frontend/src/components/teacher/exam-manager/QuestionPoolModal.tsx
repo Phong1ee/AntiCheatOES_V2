@@ -21,6 +21,7 @@ interface QuestionPoolModalProps {
   examId: number;
   existingQuestionIds: number[];
   subjectId: string;
+  expectedVersion?: number;
   initialPoolConfig: PoolConfig | null;
   onClose: () => void;
   onImported: () => Promise<void>;
@@ -41,7 +42,7 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
   current_teacher_school_id: '',
 };
 
-export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
+export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, expectedVersion, initialPoolConfig, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
   const [mode, setMode] = useState<'manual' | 'pool'>('manual');
   const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<number>>(() => new Set());
@@ -141,7 +142,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
   const importQuestions = async () => {
     const payload = selectedIds
       .filter((questionId) => !existingIds.has(questionId))
-      .map((questionId) => ({ question_id: questionId }));
+      .map((questionId) => ({ question_id: questionId, expected_version: expectedVersion }));
     if (payload.length === 0) return;
     try {
       setImporting(true);
@@ -256,8 +257,9 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
           <div className="question-pool-modal-list overflow-y-auto p-4 sm:p-6">
             <PoolConfigurationBuilder
               examId={examId}
-              subjectId={examSubjectId}
-              initialConfig={initialPoolConfig}
+          subjectId={examSubjectId}
+          expectedVersion={expectedVersion}
+          initialConfig={initialPoolConfig}
               onSaved={async (config) => {
                 await onPoolSaved(config);
                 onClose();

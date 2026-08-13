@@ -19,6 +19,7 @@ class _EventCursor:
         self.setting = {"anti_cheat_enabled": enabled, "violation_limit": limit}
         self.events = set()
         self.event_rows = []
+        self.outbox_events = []
         self.termination_events = 0
         self.fetchone_value = None
         self.fetchall_value = []
@@ -44,6 +45,8 @@ class _EventCursor:
                 })
             else:
                 self.termination_events += 1
+        elif sql.startswith("INSERT INTO outbox_event"):
+            self.outbox_events.append(params)
         elif sql.startswith("UPDATE attempt SET violation_count"):
             self.attempt["violation_count"] += 1
         elif "FROM attempt_question aq" in sql:
@@ -126,6 +129,11 @@ class AntiCheatEventTests(unittest.TestCase):
         self.assertEqual((first["violationCount"], second["violationCount"]), (1, 2))
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(duplicate["violationCount"], 2)
+        self.assertEqual(len(cursor.outbox_events), 2)
+        payload = json.loads(cursor.outbox_events[0][3])
+        self.assertEqual(payload["eventType"], "TAB_HIDDEN")
+        self.assertNotIn("details", payload)
+        self.assertNotIn("metadata", payload)
 
     def test_camera_ai_events_increment_the_shared_counter(self):
         cursor = _EventCursor(limit=5)
@@ -173,6 +181,7 @@ class AntiCheatEventTests(unittest.TestCase):
         self.assertTrue(terminated["terminated"])
         self.assertEqual(terminated["score"], Decimal("0.00"))
         self.assertEqual(cursor.termination_events, 1)
+        self.assertEqual(json.loads(cursor.outbox_events[0][3])["terminated"], True)
         self.assertFalse(later["eventAccepted"])
         self.assertEqual(cursor.termination_events, 1)
 
@@ -180,6 +189,7 @@ class AntiCheatEventTests(unittest.TestCase):
         source = inspect.getsource(examModel.recordAntiCheatEvent)
         self.assertIn("FOR UPDATE", source)
         self.assertIn("start_transaction", source)
+        self.assertIn("exam.violation.recorded", source)
 
     def test_client_cannot_submit_system_event_or_invalid_payload(self):
         with self.assertRaises(ValidationError):

@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -47,6 +48,9 @@ class _EssayCursor:
         self.fetchone_value = None
         self.fetchall_value = []
         self.final_score = None
+        self.outbox_events: list[tuple] = []
+        self.fail_outbox = False
+        self.fail_attempt_update = False
 
     def execute(self, query, params=()):
         normalized = " ".join(query.split())
@@ -88,12 +92,15 @@ class _EssayCursor:
                 "pending": sum(1 for answer in self.essays.values() if answer["score"] is None)
             }
         elif normalized.startswith("UPDATE attempt SET score"):
-            score, status, _reason, _attempt_id = params
+            if self.fail_attempt_update:
+                raise RuntimeError("attempt update failed")
+            score, status, _reason, submit_request_id, _attempt_id = params
             self.attempt.update(
                 score=score,
                 status=status,
                 submitted_at=datetime(2026, 8, 3, 10, 0),
                 end_time=datetime(2026, 8, 3, 10, 0),
+                submit_request_id=submit_request_id,
             )
         elif normalized.startswith("SELECT result_strategy"):
             self.fetchone_value = {"result_strategy": "highest"}
@@ -103,6 +110,10 @@ class _EssayCursor:
             self.final_score = params[0]
         elif normalized.startswith("INSERT INTO exam_event"):
             return
+        elif normalized.startswith("INSERT INTO outbox_event"):
+            if self.fail_outbox:
+                raise RuntimeError("outbox insert failed")
+            self.outbox_events.append(params)
         else:
             raise AssertionError(f"Unexpected SQL: {normalized}")
 
@@ -121,18 +132,31 @@ class _EssayConnection:
         self.cursor_instance = cursor
         self.commits = 0
         self.rollbacks = 0
+        self.snapshot = None
 
     def cursor(self, **_kwargs):
         return self.cursor_instance
 
     def start_transaction(self):
-        pass
+        self.snapshot = {
+            "attempt": deepcopy(self.cursor_instance.attempt),
+            "essays": deepcopy(self.cursor_instance.essays),
+            "mcqs": deepcopy(self.cursor_instance.mcqs),
+            "outbox_events": list(self.cursor_instance.outbox_events),
+            "final_score": self.cursor_instance.final_score,
+        }
 
     def commit(self):
         self.commits += 1
 
     def rollback(self):
         self.rollbacks += 1
+        if self.snapshot:
+            self.cursor_instance.attempt = self.snapshot["attempt"]
+            self.cursor_instance.essays = self.snapshot["essays"]
+            self.cursor_instance.mcqs = self.snapshot["mcqs"]
+            self.cursor_instance.outbox_events = self.snapshot["outbox_events"]
+            self.cursor_instance.final_score = self.snapshot["final_score"]
 
     def close(self):
         pass
@@ -201,6 +225,51 @@ class EssayFinalizationTests(unittest.TestCase):
         self.assertTrue(second["idempotent"])
         self.assertEqual(len(cursor.essays), 1)
         self.assertFalse(second["essayPending"])
+        self.assertEqual(len(cursor.outbox_events), 1)
+
+    def test_same_submit_request_id_creates_one_outbox_event(self):
+        cursor = _EssayCursor([essay_question(11)])
+        connection = _EssayConnection(cursor)
+        request_id = "123e4567-e89b-12d3-a456-426614174000"
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            first = examModel.finalizeAttempt(10, 5, [], submit_request_id=request_id)
+            second = examModel.finalizeAttempt(10, 5, [], submit_request_id=request_id)
+
+        self.assertFalse(first["idempotent"])
+        self.assertTrue(second["idempotent"])
+        self.assertEqual(first["submitRequestId"], request_id)
+        self.assertEqual(second["submitRequestId"], request_id)
+        self.assertEqual(len(cursor.outbox_events), 1)
+        self.assertEqual(cursor.attempt["submit_request_id"], request_id)
+
+    def test_outbox_insert_failure_rolls_back_attempt_finalization(self):
+        cursor = _EssayCursor([essay_question(11)])
+        cursor.fail_outbox = True
+        connection = _EssayConnection(cursor)
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, "outbox insert failed"):
+                examModel.finalizeAttempt(
+                    10, 5, [], submit_request_id="123e4567-e89b-12d3-a456-426614174000"
+                )
+
+        self.assertEqual(cursor.attempt["status"], "in_progress")
+        self.assertIsNone(cursor.attempt.get("submit_request_id"))
+        self.assertEqual(cursor.outbox_events, [])
+        self.assertEqual(connection.rollbacks, 1)
+
+    def test_attempt_update_failure_does_not_insert_an_outbox_event(self):
+        cursor = _EssayCursor([essay_question(11)])
+        cursor.fail_attempt_update = True
+        connection = _EssayConnection(cursor)
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, "attempt update failed"):
+                examModel.finalizeAttempt(
+                    10, 5, [], submit_request_id="123e4567-e89b-12d3-a456-426614174000"
+                )
+
+        self.assertEqual(cursor.attempt["status"], "in_progress")
+        self.assertEqual(cursor.outbox_events, [])
+        self.assertEqual(connection.rollbacks, 1)
 
     def test_finalize_preserves_a_teacher_graded_essay(self):
         existing = {11: {"answer_text": "Teacher-reviewed answer", "score": 4}}

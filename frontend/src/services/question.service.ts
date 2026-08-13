@@ -198,7 +198,7 @@ export interface PoolPreview {
 }
 
 export const questionService = {
-  async create(payload: CreateQuestionRequest): Promise<number> {
+  async create(payload: CreateQuestionRequest & { expected_version?: number }): Promise<number> {
     const { data } = await apiClient.post<{ question_id: number }>("/api/teacher/add-question", payload);
     return data.question_id;
   },
@@ -208,7 +208,7 @@ export const questionService = {
     return data;
   },
 
-  async updateInExam(examId: number, questionId: number, payload: UpdateQuestionRequest): Promise<QuestionUpdateResponse> {
+  async updateInExam(examId: number, questionId: number, payload: UpdateQuestionRequest & { expected_version?: number }): Promise<QuestionUpdateResponse> {
     const { data } = await apiClient.put<QuestionUpdateResponse>(`/api/teacher/${examId}/update-question/${questionId}`, payload);
     return data;
   },
@@ -218,16 +218,16 @@ export const questionService = {
     return data;
   },
 
-  async removeFromExam(examId: number, questionId: number): Promise<void> {
-    await apiClient.delete(`/api/teacher/${examId}/delete-question/${questionId}`);
+  async removeFromExam(examId: number, questionId: number, expectedVersion?: number): Promise<void> {
+    await apiClient.delete(`/api/teacher/${examId}/delete-question/${questionId}`, { params: { expected_version: expectedVersion } });
   },
 
-  async bulkRemove(examId: number, questionIds: number[]) {
+  async bulkRemove(examId: number, questionIds: number[], expectedVersion?: number) {
     const { data } = await apiClient.post<{
       success: boolean;
       removed_count: number;
       removed_question_ids: number[];
-    }>(`/api/teacher/${examId}/questions/bulk-remove`, { question_ids: questionIds });
+    }>(`/api/teacher/${examId}/questions/bulk-remove`, { question_ids: questionIds, expected_version: expectedVersion });
     return data;
   },
 
@@ -246,7 +246,7 @@ export const questionService = {
 
   async savePoolConfig(
     examId: number,
-    payload: { subject_id: string; fixed_randomization: boolean; rules: PoolRulePayload[] },
+    payload: { subject_id: string; fixed_randomization: boolean; rules: PoolRulePayload[]; expected_version?: number },
   ): Promise<PoolConfig> {
     const { data } = await apiClient.put<PoolConfig>(
       `/api/teacher/exams/${examId}/pool-config`,
@@ -265,11 +265,11 @@ export const questionService = {
   async savePoolRuleCandidates(
     examId: number,
     ruleId: number,
-    includedQuestionIds: number[],
+    includedQuestionIds: number[], expectedVersion?: number,
   ): Promise<PoolConfig> {
     const { data } = await apiClient.put<PoolConfig>(
       `/api/teacher/exams/${examId}/pool-rules/${ruleId}/candidates`,
-      { included_question_ids: includedQuestionIds },
+      { included_question_ids: includedQuestionIds, expected_version: expectedVersion },
     );
     return data;
   },
@@ -286,7 +286,7 @@ export const questionService = {
     examId: number,
     ruleId: number,
     questionId: number,
-    payload: UpdateQuestionRequest,
+    payload: UpdateQuestionRequest & { expected_version?: number },
   ): Promise<QuestionUpdateResponse> {
     const { data } = await apiClient.put<QuestionUpdateResponse>(
       `/api/teacher/exams/${examId}/pool-rules/${ruleId}/questions/${questionId}`,
@@ -295,13 +295,13 @@ export const questionService = {
     return data;
   },
 
-  async exitPoolMode(examId: number) {
+  async exitPoolMode(examId: number, expectedVersion?: number) {
     const { data } = await apiClient.post<{
       success: boolean;
       mode: "manual";
       materialized_count: number;
       question_ids: number[];
-    }>(`/api/teacher/exams/${examId}/pool-config/exit`);
+    }>(`/api/teacher/exams/${examId}/pool-config/exit`, undefined, { params: { expected_version: expectedVersion } });
     return data;
   },
 
@@ -318,7 +318,7 @@ export const questionService = {
 
   async importFromBank(
     examId: number,
-    questions: Array<{ question_id: number }>,
+    questions: Array<{ question_id: number; expected_version?: number }>,
   ): Promise<ImportQuestionsResponse> {
     const { data } = await apiClient.post<ImportQuestionsResponse>(
       `/api/teacher/add-questions-to-exam-from-question-bank/${examId}`,

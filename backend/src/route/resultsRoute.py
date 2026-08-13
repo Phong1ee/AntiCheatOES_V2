@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 @router.get("")
-async def get_results(current_user: dict = Depends(verify_token)):
+def get_results(current_user: dict = Depends(verify_token)):
     try:
         return ResultsController.get_results(
             current_user["school_id"],
@@ -23,7 +23,7 @@ async def get_results(current_user: dict = Depends(verify_token)):
 
 
 @router.get("/{attempt_id}")
-async def get_result_detail(attempt_id: int, current_user: dict = Depends(verify_token)):
+def get_result_detail(attempt_id: int, current_user: dict = Depends(verify_token)):
     try:
         return ResultsController.get_result_detail(
             current_user["school_id"],

@@ -1,5 +1,7 @@
 import os
 
 
-SECRET_KEY = os.getenv("SECRET_KEY", "HASQEWQEO!LNDALSDASLKDN123456789")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be configured; refusing to use an insecure default.")
 ALGORITHM = "HS256"

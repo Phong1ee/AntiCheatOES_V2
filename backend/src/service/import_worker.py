@@ -4,7 +4,7 @@ from datetime import datetime
 
 from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, BulkDataRequest, BulkDataRequestStatus, UserRole
 from src.service.background_job_service import complete_job, fail_job, mark_job_running, update_job_progress
-from src.service.import_job_service import delete_staged_source, import_batch_size, source_path
+from src.service.import_job_service import delete_staged_source, import_batch_size, materialized_source
 from src.service.rabbitmq_worker import consume
 from src.service.user_import_service import UserImportParseError, parse_user_import_xlsx
 from src.service.question_bank_import_parser import QuestionBankParseError, parse_question_bank_document
@@ -86,7 +86,7 @@ def _cleanup_completed_bulk_request(job: BackgroundJob, db) -> None:
     try:
         if not bulk_request_storage.delete(key):
             return
-    except OSError:
+    except Exception:
         return
     request.stored_file_key = None
     db.commit()
@@ -189,20 +189,22 @@ def dispatch_import_job(job: BackgroundJob, db) -> None:
     suffix = metadata.get("source_suffix")
     if not isinstance(suffix, str):
         raise ValueError("Import job is missing its staged source type")
-    source = source_path(job.job_id, suffix)
-    if not source.is_file():
-        raise FileNotFoundError("Staged import source is not available")
-
     mark_job_running(db, job.job_id)
     db.commit()
     try:
-        if job.job_type == BackgroundJobType.user_import:
-            _dispatch_user_import(job, source, suffix, db)
-            return
-        if job.job_type == BackgroundJobType.question_import:
-            _dispatch_question_import(job, source, suffix, db)
-            return
-        raise ValueError("Unsupported import background job type")
+        source_key = metadata.get("source_key")
+        expected_sha256 = metadata.get("source_sha256")
+        with materialized_source(
+            job.job_id, suffix, source_key if isinstance(source_key, str) else None,
+            expected_sha256 if isinstance(expected_sha256, str) else None,
+        ) as source:
+            if job.job_type == BackgroundJobType.user_import:
+                _dispatch_user_import(job, source, suffix, db)
+                return
+            if job.job_type == BackgroundJobType.question_import:
+                _dispatch_question_import(job, source, suffix, db)
+                return
+            raise ValueError("Unsupported import background job type")
     except (UserImportParseError, QuestionBankParseError) as exc:
         fail_job(db, job.job_id, error=str(exc), error_metadata={"kind": "validation"})
         _propagate_bulk_request_status(job, db)

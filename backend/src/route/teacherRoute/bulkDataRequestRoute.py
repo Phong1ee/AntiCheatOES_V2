@@ -8,7 +8,7 @@ import tempfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -204,7 +204,7 @@ def create_bulk_data_request(
         if stored_file_key is not None and not committed:
             try:
                 storage.delete(stored_file_key)
-            except OSError:
+            except Exception:
                 pass
 
 
@@ -272,7 +272,10 @@ def download_bulk_data_request(
     item = get_own_bulk_data_request(db, request_id, current_user)
     if not item.stored_file_key or not storage.exists(item.stored_file_key):
         raise HTTPException(status_code=410, detail="The uploaded file is no longer available")
-    return FileResponse(storage.path_for(item.stored_file_key), filename=item.original_filename, media_type="application/octet-stream")
+    return Response(
+        storage.read(item.stored_file_key), media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{item.original_filename}"'},
+    )
 
 
 @router.get("/{request_id}")

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import tempfile
 from uuid import uuid4
+from src.service.object_storage import ObjectNotFoundError, storage_for
 
 
 _ALLOWED_SUFFIXES = {".docx", ".pdf", ".xlsx"}
@@ -42,48 +43,42 @@ def _validated_path(stored_file_key: str) -> Path:
     return path
 
 
+def _storage():
+    return storage_for("bulk-data-requests", storage_root())
+
+
 def save(content: bytes, original_filename: str) -> str:
     """Write bytes atomically under a generated UUID key and return that key."""
     if not isinstance(content, bytes):
         raise TypeError("Bulk data request content must be bytes")
     suffix = _validated_suffix(original_filename)
-    root = storage_root()
-    root.mkdir(parents=True, exist_ok=True)
     stored_file_key = f"{uuid4()}{suffix}"
-    destination = _validated_path(stored_file_key)
-    with tempfile.NamedTemporaryFile(dir=root, prefix=".upload-", suffix=".tmp", delete=False) as handle:
-        handle.write(content)
-        temporary = Path(handle.name)
-    try:
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    _storage().put(stored_file_key, content)
     return stored_file_key
 
 
 def path_for(stored_file_key: str) -> Path:
     """Return a validated internal path; callers must never expose it in APIs."""
-    return _validated_path(stored_file_key)
+    return _storage().local_path(stored_file_key)
 
 
 def read(stored_file_key: str) -> bytes:
-    return path_for(stored_file_key).read_bytes()
+    return _storage().get(stored_file_key)
 
 
 def exists(stored_file_key: str) -> bool:
-    return path_for(stored_file_key).is_file()
+    return _storage().exists(stored_file_key)
 
 
 def delete(stored_file_key: str) -> bool:
-    path = path_for(stored_file_key)
-    if not path.is_file():
-        return False
-    path.unlink()
-    return True
+    return _storage().delete(stored_file_key)
 
 
 def verify_sha256(stored_file_key: str, expected_sha256: str) -> bool:
     """Check stored contents against the digest kept in the request record."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
         return False
-    return sha256(read(stored_file_key)).hexdigest() == expected_sha256.casefold()
+    try:
+        return _storage().verify_sha256(stored_file_key, expected_sha256)
+    except ObjectNotFoundError:
+        return False

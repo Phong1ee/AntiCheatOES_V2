@@ -18,6 +18,25 @@ from src.middleware.observabilityMiddleware import ObservabilityMiddleware
 from src.service.health_service import readiness
 
 UVICORN_ACCESS_LOG = os.getenv("UVICORN_ACCESS_LOG", "true").strip().lower() in {"1", "true", "yes", "on"}
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+_LOCAL_DEVELOPMENT_ORIGINS = [
+    "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
+    "http://localhost:3000", "http://localhost:5000", "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:3000",
+    "http://127.0.0.1:5000",
+]
+
+
+def _configured_cors_origins() -> list[str]:
+    """Return explicit CORS origins and refuse an unsafe production default."""
+    if APP_ENV not in {"development", "staging", "production"}:
+        raise RuntimeError("APP_ENV must be development, staging, or production.")
+
+    configured = os.getenv("CORS_ALLOWED_ORIGINS") or os.getenv("FRONTEND_ORIGIN", "")
+    origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if APP_ENV in {"staging", "production"} and not origins:
+        raise RuntimeError(f"{APP_ENV} requires FRONTEND_ORIGIN or CORS_ALLOWED_ORIGINS.")
+    return [*_LOCAL_DEVELOPMENT_ORIGINS, *origins] if APP_ENV == "development" else origins
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
@@ -30,21 +49,10 @@ app = FastAPI(title="Online Examination System API", version="0.1.0", lifespan=a
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(message)s")
 app.add_middleware(ObservabilityMiddleware)
 
-# Configure CORS to allow frontend communication
+# Configure CORS to allow only configured browser origins with credentials.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:3000",
-        "http://localhost:5000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5000",
-    ],
+    allow_origins=_configured_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

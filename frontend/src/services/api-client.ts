@@ -2,9 +2,8 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { toApiError } from "./api-error";
 import { authStorage } from "./auth.storage";
 
-const baseURL = import.meta.env.VITE_API_BASE_URL;
-
-if (!baseURL) throw new Error("VITE_API_BASE_URL must be configured.");
+// Keep /api paths same-origin by default so Vite and production Nginx proxy them.
+const baseURL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export const apiClient = axios.create({
   baseURL,

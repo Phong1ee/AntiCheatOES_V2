@@ -10,6 +10,7 @@ import {
   Calendar,
   ChevronRight,
 } from 'lucide-react';
+import { apiClient } from '../../services/api-client';
 
 interface UpcomingExam {
   exam_id: string;
@@ -48,20 +49,7 @@ export function TeacherInfoSidebar({ onExamClick }: TeacherInfoSidebarProps) {
           throw new Error("Authentication token not found");
         }
 
-        const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_URL || "http://localhost:8000";
-        const response = await fetch(`${API_BASE_URL}/api/teacher/get_exam_overview`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch exams");
-        }
-
-        const data = await response.json();
+        const { data } = await apiClient.get('/api/teacher/get_exam_overview');
         console.log("Fetched exam data:", data);
         setActiveExamsCount(Array.isArray(data.active_exams) ? data.active_exams.length : 0);
         setTotalStudentsCount(data.total_students || 0);

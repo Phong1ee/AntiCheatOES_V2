@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, Exam, StudentExam, User
 from src.service.background_job_service import complete_job, get_or_create_job, mark_job_running
 from src.service.outbox_publisher import enqueue_outbox_event
+from src.service.object_storage import ObjectNotFoundError, storage_for
 
 
 REPORT_TYPE_EXAM_RESULTS = "exam_results"
@@ -89,19 +90,23 @@ def _exam_results_workbook(db: Session, exam: Exam) -> bytes:
 
 
 def _write_artifact(job_id: int, data: bytes) -> str:
-    directory = _report_directory()
     filename = f"report_job_{job_id}.xlsx"
-    destination = directory / filename
-    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{destination.name}.", suffix=".tmp", delete=False) as handle:
-        handle.write(data)
-        temporary_path = Path(handle.name)
-    os.replace(temporary_path, destination)
+    storage_for("reports", _report_directory()).put(filename, data)
     return filename
 
 
 def report_artifact_path(job_id: int) -> Path:
     """Resolve a worker-created artifact without trusting a database path value."""
     return _report_directory() / f"report_job_{job_id}.xlsx"
+
+
+def report_artifact_bytes(job: BackgroundJob) -> bytes:
+    """Read a private report object using trusted job metadata only."""
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    key = metadata.get("artifact_key") or f"report_job_{job.job_id}.xlsx"
+    if not isinstance(key, str):
+        raise ObjectNotFoundError("invalid report artifact key")
+    return storage_for("reports", _report_directory()).get(key)
 
 
 def handle_report_requested(envelope: dict, db: Session) -> None:
@@ -137,7 +142,7 @@ def handle_report_requested(envelope: dict, db: Session) -> None:
         raise ValueError("Report exam no longer exists")
 
     mark_job_running(db, job_id)
-    artifact_path = _write_artifact(job_id, _exam_results_workbook(db, exam))
+    artifact_key = _write_artifact(job_id, _exam_results_workbook(db, exam))
     complete_job(
         db,
         job_id,
@@ -148,7 +153,7 @@ def handle_report_requested(envelope: dict, db: Session) -> None:
             "report_type": REPORT_TYPE_EXAM_RESULTS,
             "exam_id": exam_id,
             "format": "xlsx",
-            "artifact_path": artifact_path,
+            "artifact_key": artifact_key,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     )

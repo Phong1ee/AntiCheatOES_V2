@@ -54,7 +54,7 @@ from src.service.event_contract import sanitize_metadata
 from src.service.cache_invalidation_contract import admin_enrollment_updated, admin_permission_updated, deliver_invalidation
 from src.service.cache_service import admin_teacher_permissions_key, cache_aside
 from src.service.outbox_publisher import enqueue_outbox_event
-from src.service.report_job_service import REPORT_TYPE_EXAM_RESULTS, report_artifact_path, report_job_summary, request_exam_results_report
+from src.service.report_job_service import REPORT_TYPE_EXAM_RESULTS, report_artifact_bytes, report_job_summary, request_exam_results_report
 from src.service.import_job_service import (
     delete_staged_source,
     import_job_summary,
@@ -2223,7 +2223,7 @@ def _cleanup_terminal_bulk_request_file(db: Session, item: BulkDataRequest) -> N
     try:
         if not bulk_request_storage.delete(key):
             return
-    except OSError:
+    except Exception:
         return
     try:
         persisted = db.get(BulkDataRequest, item.request_id, with_for_update=True)
@@ -2365,7 +2365,10 @@ def download_bulk_data_request(request_id: int, current_user: dict = Depends(ver
     if not item:
         raise HTTPException(status_code=404, detail="Bulk data request not found")
     _bulk_request_source(item)
-    return FileResponse(bulk_request_storage.path_for(item.stored_file_key), filename=item.original_filename, media_type="application/octet-stream")
+    return Response(
+        bulk_request_storage.read(item.stored_file_key), media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{item.original_filename}"'},
+    )
 
 
 @router.post("/bulk-data-requests/{request_id}/preview")
@@ -3635,11 +3638,12 @@ def download_admin_exam_results_report_job(
     job_status = job.status.value if hasattr(job.status, "value") else str(job.status)
     if job_status != BackgroundJobStatus.completed.value:
         raise HTTPException(status_code=409, detail="Report job is not complete")
-    artifact = report_artifact_path(job.job_id)
-    if not artifact.is_file():
+    try:
+        artifact = report_artifact_bytes(job)
+    except FileNotFoundError:
         raise HTTPException(status_code=409, detail="Report artifact is not available")
-    return FileResponse(
+    return Response(
         artifact,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=f"exam_results_{job.job_id}.xlsx",
+        headers={"Content-Disposition": f'attachment; filename="exam_results_{job.job_id}.xlsx"'},
     )

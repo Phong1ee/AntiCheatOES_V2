@@ -144,9 +144,9 @@ class ExamDataMigrationTests(unittest.TestCase):
 
         config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        # The subject/class uniqueness migration follows the anti-cheat head;
-        # the invariant is a single linear Alembic head, not a fixed revision.
-        self.assertEqual(script.get_heads(), ["e7c5b3a1d902"])
+        # Later migrations retain a single linear Alembic head. Keep this
+        # assertion aligned with the current repository migration tip.
+        self.assertEqual(script.get_heads(), ["50292736ea8d"])
 
 
 if __name__ == "__main__":

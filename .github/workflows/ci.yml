@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend build and assets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # A non-production placeholder proves the Vite variable is supplied
+      # without publishing a real Railway domain in repository history.
+      VITE_API_BASE_URL: https://api.example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Verify production AI assets
+        run: |
+          test -f build/models/camera/face_landmarker.task
+          test -f build/vad/silero_vad_v5.onnx
+          test -f build/models/audio/pyannote-segmentation-3.0-int8.onnx
+          test -f build/vad/vad.worklet.bundle.min.js
+          test -f build/mediapipe/vision_wasm_internal.wasm
+          test -n "$(find build/assets -name 'ort-wasm-simd-threaded*.wasm' -print -quit)"
+      - name: Reject development API URLs in shipped files
+        run: |
+          if grep -R --binary-files=text -n -E 'http://(localhost|127\.0\.0\.1):8000' build; then
+            echo 'Development API URL found in production build.' >&2
+            exit 1
+          fi
+
+  backend:
+    name: Backend tests and migration chain
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: .
+      SECRET_KEY: ci-only-secret-with-at-least-32-characters
+      APP_ENV: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: Verify exactly one Alembic head
+        run: |
+          test "$(uv run alembic heads | grep -c '(head)')" -eq 1
+          uv run alembic history
+      - name: Run unit and regression suite
+        run: uv run pytest --ignore=tests/test_rabbitmq_live_e2e.py

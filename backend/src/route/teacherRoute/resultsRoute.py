@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from openpyxl import Workbook
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -51,7 +51,7 @@ from src.service.cache_invalidation_contract import deliver_invalidation, teache
 from src.service.outbox_publisher import enqueue_outbox_event
 from src.service.report_job_service import (
     REPORT_TYPE_EXAM_RESULTS,
-    report_artifact_path,
+    report_artifact_bytes,
     report_job_summary,
     request_exam_results_report,
 )
@@ -904,13 +904,14 @@ def download_exam_results_report_job(
     job = _owned_report_job(db, job_id, teacher.school_id)
     if job.status != BackgroundJobStatus.completed:
         raise HTTPException(status_code=409, detail="Report job is not complete")
-    artifact = report_artifact_path(job.job_id)
-    if not artifact.is_file():
+    try:
+        artifact = report_artifact_bytes(job)
+    except FileNotFoundError:
         raise HTTPException(status_code=409, detail="Report artifact is not available")
-    return FileResponse(
+    return Response(
         artifact,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=f"exam_results_{job.job_id}.xlsx",
+        headers={"Content-Disposition": f'attachment; filename="exam_results_{job.job_id}.xlsx"'},
     )
 
 

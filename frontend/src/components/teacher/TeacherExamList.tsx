@@ -23,6 +23,7 @@ import { Input } from '../ui/input';
 import { ExamDetailsModal } from './ExamDetailsModal';
 import { LoadingState } from './common/LoadingState';
 import { normalizeSearchText } from '../../utils/search';
+import { apiClient } from '../../services/api-client';
 
 interface Exam {
   exam_id: number;
@@ -85,21 +86,7 @@ export function TeacherExamList({ onExamClick, onNavigateToSettings, onNavigateT
           throw new Error("Authentication token not found");
         }
 
-        const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_URL || "http://localhost:8000";
-        const response = await fetch(`${API_BASE_URL}/api/teacher/exams`, {
-          method: "GET",
-          headers: { 
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || "Failed to fetch exams");
-        }
-
-        const data = await response.json();
+        const { data } = await apiClient.get('/api/teacher/exams');
         console.log('Teacher exams response:', data);
         setExams(Array.isArray(data) ? data : (data.exams || []));
         setError(null);

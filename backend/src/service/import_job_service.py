@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.a_db_config import BackgroundJob, BackgroundJobType
 from src.service.background_job_service import get_or_create_job
 from src.service.outbox_publisher import enqueue_outbox_event
+from src.service.object_storage import storage_for
 
 
 DEFAULT_BACKGROUND_THRESHOLD = 100
@@ -59,20 +61,45 @@ def source_path(job_id: int, suffix: str) -> Path:
     """Resolve only a deterministic internal file path from trusted job metadata."""
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError("Unsupported staged import file type")
-    return _staging_directory() / f"import_job_{job_id}{suffix}"
+    return _storage().local_path(source_key(job_id, suffix))
+
+
+def source_key(job_id: int, suffix: str) -> str:
+    if suffix not in _ALLOWED_SUFFIXES:
+        raise ValueError("Unsupported staged import file type")
+    return f"import_job_{job_id}{suffix}"
+
+
+def _storage():
+    return storage_for("imports", _staging_directory())
 
 
 def _stage_source(job_id: int, suffix: str, content: bytes) -> Path:
-    destination = source_path(job_id, suffix)
-    with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp", delete=False) as handle:
-        handle.write(content)
-        temporary = Path(handle.name)
-    os.replace(temporary, destination)
-    return destination
+    key = source_key(job_id, suffix)
+    _storage().put(key, content)
+    # Callers do not persist this value; object keys remain the only durable reference.
+    return Path(key)
 
 
 def delete_staged_source(job_id: int, suffix: str) -> None:
-    source_path(job_id, suffix).unlink(missing_ok=True)
+    _storage().delete(source_key(job_id, suffix))
+
+
+@contextmanager
+def materialized_source(job_id: int, suffix: str, key: str | None = None, expected_sha256: str | None = None):
+    """Make a private object available to path-based parsers and always remove it."""
+    data = _storage().get(key or source_key(job_id, suffix))
+    if expected_sha256 and sha256(data).hexdigest() != expected_sha256.casefold():
+        raise ValueError("Staged import source failed its integrity check")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="oes-import-", suffix=suffix, delete=False) as handle:
+            handle.write(data)
+            temporary_path = Path(handle.name)
+        yield temporary_path
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def queue_import_job(
@@ -101,13 +128,14 @@ def queue_import_job(
             "source_filename": Path(filename or f"import{suffix}").name[:255],
             "source_suffix": suffix,
             "source_sha256": content_hash,
-            **(metadata or {}),
-        },
-    )
+                **(metadata or {}),
+            },
+        )
     if duplicate:
         return job, True
 
     try:
+        job.result_metadata = {**(job.result_metadata or {}), "source_key": source_key(job.job_id, suffix)}
         _stage_source(job.job_id, suffix, content)
         enqueue_outbox_event(
             db,

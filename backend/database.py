@@ -3,6 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -14,8 +15,6 @@ DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_NAME = os.getenv("DB_NAME", "")
 SQL_ECHO = os.getenv("SQL_ECHO", "false").strip().lower() in {"1", "true", "yes", "on"}
 
-URL_DATABASE = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
-
 
 def _positive_int_env(name: str, default: int) -> int:
     value = os.getenv(name, str(default))
@@ -26,6 +25,18 @@ def _positive_int_env(name: str, default: int) -> int:
     if parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer")
     return parsed
+
+
+# URL.create preserves reserved characters in managed-database credentials and
+# makes the DB_PORT environment contract effective for SQLAlchemy routes.
+URL_DATABASE = URL.create(
+    "mysql+pymysql",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=_positive_int_env("DB_PORT", 3306),
+    database=DB_NAME,
+)
 
 
 # SQLAlchemy routes use this engine while legacy routes use mysql-connector.

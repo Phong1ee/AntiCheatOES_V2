@@ -351,17 +351,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       setIsDeleting(false);
     }
   };
-      setQuestions(remaining);
-      if (selectedQuestion === id) setSelectedQuestion(remaining[0]?.id ?? null);
-      return;
-    }
-    setPendingRemovals((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const markSelectedForRemoval = () => {
     setQuestions((current) => current.filter((question) => !(question.id.startsWith('new-') && selectedIds.has(question.id))));
@@ -767,9 +756,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
         }
       }
       await loadQuestions();
-        }
-      }
-      await loadQuestions();
       setQuestionsSavedAt(Date.now());
     } catch (error) {
       // Local edits are preserved so the teacher can fix the cause and retry.
@@ -1017,9 +1003,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             initialPoolConfig={poolConfig}
             poolDraft={poolDraft}
             onPoolDraftChange={setPoolDraft}
-            allowManual={false}
-            onClose={() => setShowQuestionPool(false)}
-            onImported={async () => undefined}
             allowManual={false}
             onClose={() => setShowQuestionPool(false)}
             onImported={async () => {
@@ -1693,9 +1676,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
           subjectId={subjectId}
           expectedVersion={expectedVersion}
           initialPoolConfig={poolConfig}
-          poolDraft={poolDraft}
-          onPoolDraftChange={setPoolDraft}
-          onClose={() => setShowQuestionPool(false)}
           poolDraft={poolDraft}
           onPoolDraftChange={setPoolDraft}
           onClose={() => setShowQuestionPool(false)}

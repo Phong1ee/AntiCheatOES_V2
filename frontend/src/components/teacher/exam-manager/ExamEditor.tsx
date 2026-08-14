@@ -56,7 +56,6 @@ interface ExamEditorProps {
     expectedVersion?: number;
   }) => Promise<void>;
   onSaved: () => Promise<void>;
-  onResultVisibilityChange: (examId: string, resultVisibility: ResultVisibility) => Promise<void>;
   onStatusChange: (examId: string, status: ExamStatus) => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
   /** Lets the page warn before the teacher navigates away from unsaved work. */
@@ -74,7 +73,7 @@ const scheduleKey = (raw: string) => {
   return date && time ? `${date}T${time.slice(0, 5)}` : '';
 };
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onResultVisibilityChange, onStatusChange, onViewInQuestionBank, onDirtyChange }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onStatusChange, onViewInQuestionBank, onDirtyChange }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -596,15 +595,12 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           {visitedTabs.includes('settings') && (
             <TabsContent value="settings" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
               <SettingsTab
-                ref={settingsTabRef}
                 examId={examId}
                 resultVisibility={resultVisibility}
                 expectedVersion={exam?.version}
                 onResultVisibilityChange={async (nextVisibility) => {
-                  await onResultVisibilityChange(examId, nextVisibility);
                   setResultVisibility(nextVisibility);
                 }}
-                onSavingChange={setSettingsSaving}
                 onSaved={onSaved}
                 onDirtyChange={handleSettingsDirty}
               />

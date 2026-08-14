@@ -42,7 +42,7 @@ from src.a_db_config import (
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token, TEACHER_ONLY
 from src.service.audit_service import record_audit
-from src.service.cache_invalidation_contract import admin_permission_updated, deliver_invalidation
+from src.service.cache_invalidation_contract import admin_enrollment_updated, admin_permission_updated, deliver_invalidation
 from src.service.cache_service import admin_teacher_permissions_key, cache_aside
 from src.service.outbox_publisher import enqueue_outbox_event
 from src.service.report_job_service import REPORT_TYPE_EXAM_RESULTS, report_artifact_path, report_job_summary, request_exam_results_report
@@ -2510,6 +2510,33 @@ def revoke_teacher_permission(teacher_school_id: str, subject_id: str, current_u
         db.commit(); deliver_invalidation(admin_permission_updated(teacher_school_id)); db.refresh(item); return _serialize_teacher_permission(item)
     except HTTPException:
         db.rollback(); raise
+
+
+@router.post("/reports/exams/{exam_id}/report-jobs", status_code=status.HTTP_202_ACCEPTED)
+def create_admin_exam_results_report_job(
+    exam_id: int,
+    payload: CreateReportJobPayload,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Queue a durable report job; the transaction owns its outbox event."""
+    del role_check
+    admin = _admin(db, current_user["school_id"])
+    if not db.get(Exam, exam_id):
+        raise HTTPException(status_code=404, detail="Exam not found")
+    try:
+        job, duplicate = request_exam_results_report(
+            db, exam_id=exam_id, requested_by=admin.school_id, request_id=payload.request_id,
+        )
+        db.commit()
+        db.refresh(job)
+        return {**report_job_summary(job), "duplicate": duplicate}
+    except Exception:
+        db.rollback()
+        raise
+
+
 # --------------------------------------------------------------------------
 # Subject classes
 #
@@ -2542,6 +2569,8 @@ def _class_teacher(db: Session, school_id: str) -> User:
         raise HTTPException(status_code=404, detail="Teacher not found")
     if getattr(teacher, "deleted_at", None) is not None:
         raise HTTPException(status_code=422, detail="A deleted account cannot be assigned to a class")
+    if getattr(teacher, "is_locked", False):
+        raise HTTPException(status_code=422, detail="A locked account cannot be assigned to a class")
     return teacher
 
 
@@ -2590,6 +2619,13 @@ def _subject_enrolment_map(db: Session, subject_id: str, exclude_class_id: int) 
         .all()
     )
     return {student_id: course_class for student_id, course_class in rows}
+
+
+def _lock_subject_classes(db: Session, subject_id: str) -> None:
+    """Serialize class roster changes for one subject until schema can enforce it."""
+    # Lock the parent as well so an empty subject's first class is serialized.
+    db.query(Subject.subject_id).filter(Subject.subject_id == subject_id).with_for_update().one()
+    db.query(CourseClass.class_id).filter(CourseClass.subject_id == subject_id).with_for_update().all()
 
 
 def _ensure_subject_permission(db: Session, teacher_school_id: str, subject_id: str, admin: User) -> bool:
@@ -2728,27 +2764,6 @@ def list_available_students(
         }
         for student in query.order_by(User.full_name, User.school_id).all()
     ]
-    current_user: dict = Depends(verify_token),
-    role_check: dict = Depends(ADMIN_ONLY),
-    db: Session = Depends(get_db),
-):
-    """Admins may queue the same durable result export without receiving report data inline."""
-    del role_check
-    admin = _admin(db, current_user["school_id"])
-    if not db.get(Exam, exam_id):
-        raise HTTPException(status_code=404, detail="Exam not found")
-    try:
-        job, duplicate = request_exam_results_report(
-            db,
-            exam_id=exam_id,
-            requested_by=admin.school_id,
-            request_id=payload.request_id,
-        )
-        db.commit()
-        db.refresh(job)
-        return {**report_job_summary(job), "duplicate": duplicate}
-    except Exception:
-        db.rollback(); raise
 
 
 @router.patch("/classes/{class_id}/teacher")
@@ -2766,7 +2781,24 @@ def change_class_teacher(
         teacher = _class_teacher(db, payload.teacher_school_id)
         course_class.teacher_id = teacher.school_id
         granted = _ensure_subject_permission(db, teacher.school_id, course_class.subject_id, admin)
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="CLASS_TEACHER_UPDATED", entity_type="class", entity_id=class_id,
+            metadata={"teacher_school_id": teacher.school_id, "subject_id": course_class.subject_id},
+        )
+        if granted:
+            record_audit(
+                db, actor_school_id=admin.school_id, actor_role=admin.role,
+                action="TEACHER_PERMISSION_UPDATED", entity_type="teacher_permission", entity_id=teacher.school_id,
+                metadata={"subject_id": course_class.subject_id, "is_active": True},
+            )
+            enqueue_outbox_event(
+                db, event_type="analytics.permission_updated", aggregate_type="teacher_permission",
+                aggregate_id=teacher.school_id, metadata={"active_subject_count": len(_active_subject_teacher_ids(db, course_class.subject_id))},
+            )
         db.commit()
+        if granted:
+            deliver_invalidation(admin_permission_updated(teacher.school_id))
         db.refresh(course_class)
         count = db.query(StudentClass).filter(StudentClass.class_id == class_id).count()
         return {**_serialize_class(course_class, count), "granted_subject_permission": granted}
@@ -2776,6 +2808,9 @@ def change_class_teacher(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="The class teacher could not be updated") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/classes/{class_id}/students", status_code=status.HTTP_201_CREATED)
@@ -2790,6 +2825,7 @@ def add_class_students(
     try:
         _management_admin(db, current_user)
         course_class = _class_or_404(db, class_id)
+        _lock_subject_classes(db, course_class.subject_id)
         requested = [school_id.strip() for school_id in payload.student_ids if school_id.strip()]
         if not requested:
             raise HTTPException(status_code=400, detail="At least one student is required")
@@ -2835,7 +2871,13 @@ def add_class_students(
                 ),
             )
         db.add_all(StudentClass(class_id=class_id, student_id=school_id) for school_id in added)
+        record_audit(
+            db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"),
+            action="CLASS_ROSTER_UPDATED", entity_type="class", entity_id=class_id,
+            metadata={"added_count": len(added), "removed_count": 0},
+        )
         db.commit()
+        deliver_invalidation(admin_enrollment_updated(class_id))
         return {"added_count": len(added), "skipped_count": len(already), "student_ids": added}
     except HTTPException:
         db.rollback()
@@ -2843,6 +2885,9 @@ def add_class_students(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="One or more students are already enrolled") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.delete("/classes/{class_id}/students/{student_school_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -2857,7 +2902,8 @@ def remove_class_student(
     del role_check
     try:
         _management_admin(db, current_user)
-        _class_or_404(db, class_id)
+        course_class = _class_or_404(db, class_id)
+        _lock_subject_classes(db, course_class.subject_id)
         membership = (
             db.query(StudentClass)
             .filter(StudentClass.class_id == class_id, StudentClass.student_id == student_school_id)
@@ -2866,11 +2912,18 @@ def remove_class_student(
         if not membership:
             raise HTTPException(status_code=404, detail="Student is not enrolled in this class")
         db.delete(membership)
+        record_audit(
+            db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"),
+            action="CLASS_ROSTER_UPDATED", entity_type="class", entity_id=class_id,
+            metadata={"added_count": 0, "removed_count": 1},
+        )
         db.commit()
+        deliver_invalidation(admin_enrollment_updated(class_id))
         return None
     except HTTPException:
         db.rollback()
         raise
+    except Exception:
         db.rollback()
         raise
 
@@ -2920,7 +2973,25 @@ def create_class(
         )
         db.add(course_class)
         granted = _ensure_subject_permission(db, teacher.school_id, payload.subject_id, admin)
+        db.flush()
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="CLASS_CREATED", entity_type="class", entity_id=course_class.class_id,
+            metadata={"subject_id": payload.subject_id, "teacher_school_id": teacher.school_id},
+        )
+        if granted:
+            record_audit(
+                db, actor_school_id=admin.school_id, actor_role=admin.role,
+                action="TEACHER_PERMISSION_UPDATED", entity_type="teacher_permission", entity_id=teacher.school_id,
+                metadata={"subject_id": payload.subject_id, "is_active": True},
+            )
+            enqueue_outbox_event(
+                db, event_type="analytics.permission_updated", aggregate_type="teacher_permission",
+                aggregate_id=teacher.school_id, metadata={"active_subject_count": len(_active_subject_teacher_ids(db, payload.subject_id))},
+            )
         db.commit()
+        if granted:
+            deliver_invalidation(admin_permission_updated(teacher.school_id))
         db.refresh(course_class)
         return {**_serialize_class(course_class, 0), "granted_subject_permission": granted}
     except HTTPException:
@@ -2929,6 +3000,9 @@ def create_class(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="The class could not be created") from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.patch("/classes/{class_id}")
@@ -2950,11 +3024,21 @@ def rename_class(
             raise HTTPException(status_code=400, detail="Class name is required")
         _reject_duplicate_class_name(db, course_class.subject_id, class_name, exclude_id=class_id)
         course_class.class_name = class_name
+        record_audit(
+            db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"),
+            action="CLASS_RENAMED", entity_type="class", entity_id=class_id, metadata={"subject_id": course_class.subject_id},
+        )
         db.commit()
         db.refresh(course_class)
         count = db.query(StudentClass).filter(StudentClass.class_id == class_id).count()
         return _serialize_class(course_class, count)
     except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The class name is already in use for this subject") from exc
+    except Exception:
         db.rollback()
         raise
 
@@ -2971,9 +3055,13 @@ def delete_class(
     del role_check
     try:
         _management_admin(db, current_user)
-        _class_or_404(db, class_id)
+        course_class = _class_or_404(db, class_id)
         db.query(StudentClass).filter(StudentClass.class_id == class_id).delete(synchronize_session=False)
         db.query(CourseClass).filter(CourseClass.class_id == class_id).delete(synchronize_session=False)
+        record_audit(
+            db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"),
+            action="CLASS_DELETED", entity_type="class", entity_id=class_id, metadata={"subject_id": course_class.subject_id},
+        )
         db.commit()
         return None
     except HTTPException:

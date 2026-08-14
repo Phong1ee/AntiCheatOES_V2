@@ -274,6 +274,9 @@ class ChapterLO(Base):
 
 class CourseClass(Base):
     __tablename__ = "class"
+    __table_args__ = (
+        UniqueConstraint("subject_id", "class_name", name="uq_class_subject_name"),
+    )
 
     class_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     class_name: Mapped[str] = mapped_column(String(100), nullable=False)

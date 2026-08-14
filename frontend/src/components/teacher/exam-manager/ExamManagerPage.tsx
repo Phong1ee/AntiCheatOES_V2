@@ -240,7 +240,6 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           onDirtyChange={setEditorDirty}
           onSave={handleSaveExam}
           onSaved={refreshExam}
-          onResultVisibilityChange={handleResultVisibilityChange}
           onStatusChange={handleStatusChange}
           onViewInQuestionBank={onViewInQuestionBank}
         />

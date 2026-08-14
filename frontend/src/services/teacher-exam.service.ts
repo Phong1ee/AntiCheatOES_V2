@@ -52,8 +52,12 @@ export const teacherExamService = {
   async updateResultVisibility(
     examId: number,
     resultVisibility: ResultVisibility,
+    expectedVersion?: number,
   ): Promise<TeacherResultVisibilityResponse> {
-    const payload: TeacherResultVisibilityRequest = { result_visibility: resultVisibility };
+    const payload: TeacherResultVisibilityRequest = {
+      result_visibility: resultVisibility,
+      expected_version: expectedVersion,
+    };
     const { data } = await apiClient.patch<TeacherResultVisibilityResponse>(
       `/api/teacher/exams/${examId}/result-visibility`,
       payload,

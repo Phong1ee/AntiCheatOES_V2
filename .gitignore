@@ -24,6 +24,7 @@ ENV/
 
 # Node / Frontend Dependecies & Cache
 **/node_modules/
+.npm-cache/
 .vite/
 dist/
 build/

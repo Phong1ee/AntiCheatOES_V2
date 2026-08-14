@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
 import {
@@ -20,10 +21,8 @@ interface SettingsTabProps {
   resultVisibility: ResultVisibility;
   expectedVersion?: number;
   onSaved: () => Promise<void>;
-  onSavingChange?: (saving: boolean) => void;
   onResultVisibilityChange: (resultVisibility: ResultVisibility) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
-}
 }
 
 const gradingMethods: { value: ResultStrategy; label: string}[] = [
@@ -61,9 +60,8 @@ const validateSettings = (settings: TeacherExamSettingsPayload): string | null =
   return null;
 };
 
-export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(function SettingsTab(
-  { examId, resultVisibility, expectedVersion, onSaved, onSavingChange, onResultVisibilityChange, onDirtyChange },
-  ref,
+export function SettingsTab(
+  { examId, resultVisibility, expectedVersion, onSaved, onResultVisibilityChange, onDirtyChange }: SettingsTabProps,
 ) {
   const [settings, setSettings] = useState<TeacherExamSettingsPayload>(defaultTeacherExamSettings);
   const [draftResultVisibility, setDraftResultVisibility] = useState<ResultVisibility>(resultVisibility);
@@ -161,17 +159,6 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       setError(validationError);
       return;
     }
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    if (
-      settings.anti_cheat_enabled
-      && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
-    ) {
-      setError('Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.');
-      return;
-    }
     const payload: TeacherExamSettingsPayload = {
       ...settings,
       result_visibility: draftResultVisibility,
@@ -181,20 +168,9 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
       const targetExamId = persistedExamId;
       setSaving(true);
       setError(null);
-      const saved = await teacherExamSettingsService.update(targetExamId, settings);
+      const saved = await teacherExamSettingsService.update(targetExamId, payload);
       if (currentExamId.current !== targetExamId) return;
-      if (draftResultVisibility !== resultVisibility) {
-        await onResultVisibilityChange(draftResultVisibility);
-        if (currentExamId.current !== targetExamId) return;
-      }
       const persisted: TeacherExamSettingsPayload = {
-        shuffle_question: saved.shuffle_question,
-        shuffle_answer_options: saved.shuffle_answer_options,
-        sequential_navigation: saved.sequential_navigation,
-        violation_limit: saved.violation_limit,
-        auto_grade: saved.auto_grade,
-        result_strategy: saved.result_strategy,
-      };
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
         sequential_navigation: saved.sequential_navigation,
@@ -204,9 +180,13 @@ export const SettingsTab = forwardRef<SettingsTabHandle, SettingsTabProps>(funct
         violation_limit: saved.violation_limit,
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
-      });
-      setBaseline(snapshotOf(persisted, draftResultVisibility));
+      };
+      const persistedVisibility = saved.result_visibility ?? draftResultVisibility;
+      setBaseline(snapshotOf(persisted, persistedVisibility));
       setSettings(persisted);
+      if (persistedVisibility !== resultVisibility) {
+        await onResultVisibilityChange(persistedVisibility);
+      }
       setSavedAt(Date.now());
       await onSaved();
       toast.success('Exam settings saved.');

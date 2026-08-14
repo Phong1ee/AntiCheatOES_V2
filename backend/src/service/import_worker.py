@@ -1,11 +1,78 @@
 """Concrete, idempotent consumer for staged background bulk imports."""
 
-from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType
+from datetime import datetime
+
+from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, BulkDataRequest, BulkDataRequestStatus, UserRole
 from src.service.background_job_service import complete_job, fail_job, mark_job_running, update_job_progress
 from src.service.import_job_service import delete_staged_source, import_batch_size, source_path
 from src.service.rabbitmq_worker import consume
 from src.service.user_import_service import UserImportParseError, parse_user_import_xlsx
 from src.service.question_bank_import_parser import QuestionBankParseError, parse_question_bank_document
+from src.service import bulk_data_request_storage as bulk_request_storage
+from src.service.audit_service import record_audit
+
+
+def _propagate_bulk_request_status(job: BackgroundJob, db) -> None:
+    """Mirror terminal job state to its originating Teacher request when present."""
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    request_id = metadata.get("bulk_data_request_id")
+    if not isinstance(request_id, int):
+        return
+    request = db.get(BulkDataRequest, request_id, with_for_update=True)
+    if not request or request.status != BulkDataRequestStatus.processing:
+        return
+    if job.status == BackgroundJobStatus.completed:
+        request.status = BulkDataRequestStatus.imported
+        request.processed_at = datetime.now()
+        request.result_metadata = {
+            "imported_count": job.success_rows,
+            "failed_rows": job.failed_rows,
+            **{
+                key: value for key, value in metadata.items()
+                if key in {"imported_count", "duplicate_skipped_count", "success_rows", "failed_rows", "role_counts"}
+            },
+        }
+        record_audit(
+            db,
+            actor_school_id=job.requested_by,
+            actor_role=UserRole.admin,
+            action="BULK_DATA_REQUEST_IMPORTED",
+            entity_type="bulk_data_request",
+            entity_id=request.request_id,
+            metadata={"job_id": job.job_id, "request_type": request.request_type.value, "imported_count": job.success_rows},
+        )
+    elif job.status == BackgroundJobStatus.failed:
+        request.status = BulkDataRequestStatus.failed
+        request.processed_at = datetime.now()
+        request.result_metadata = {"message": (job.last_error or "Background import failed")[:500]}
+        record_audit(
+            db,
+            actor_school_id=job.requested_by,
+            actor_role=UserRole.admin,
+            action="BULK_DATA_REQUEST_FAILED",
+            entity_type="bulk_data_request",
+            entity_id=request.request_id,
+            metadata={"job_id": job.job_id, "request_type": request.request_type.value},
+        )
+
+
+def _cleanup_completed_bulk_request(job: BackgroundJob, db) -> None:
+    """Remove the original Teacher source only after the imported state is committed."""
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    request_id = metadata.get("bulk_data_request_id")
+    if not isinstance(request_id, int):
+        return
+    request = db.get(BulkDataRequest, request_id, with_for_update=True)
+    if not request or request.status != BulkDataRequestStatus.imported or not request.stored_file_key:
+        return
+    key = request.stored_file_key
+    try:
+        if not bulk_request_storage.delete(key):
+            return
+    except OSError:
+        return
+    request.stored_file_key = None
+    db.commit()
 
 
 def _user_import_error(row) -> dict:
@@ -13,59 +80,30 @@ def _user_import_error(row) -> dict:
 
 
 def _dispatch_user_import(job: BackgroundJob, source, suffix: str, db) -> None:
-    """Commit each user-import batch and persist real progress after it commits."""
+    """Import a Teacher request atomically; a failed request creates no users."""
     from src.route.adminRoute import build_user_import_preview, import_users_from_rows
     from src.service.user_import_service import parse_user_import_xlsx
 
     rows = parse_user_import_xlsx(source.read_bytes())
     total = len(rows)
-    if job.total_rows != total:
-        job.total_rows = total
-    start = min(job.processed_rows, total)
-    succeeded = job.success_rows
-    failed = job.failed_rows
-    errors = list((job.error_metadata or {}).get("row_errors", []))
-    batch_size = import_batch_size()
-
-    for offset in range(start, total, batch_size):
-        batch = rows[offset:offset + batch_size]
-        preview = build_user_import_preview(batch, db)
-        invalid_numbers = {item["row_number"] for item in preview["rows"] if item["status"] == "invalid"}
-        valid_rows = [row for row in batch if row.row_number not in invalid_numbers]
-        batch_errors = [_user_import_error(row) for row in batch if row.row_number in invalid_numbers]
-        if valid_rows:
-            try:
-                # The whole valid subset is one DB transaction. A failed subset
-                # rolls back without poisoning the next durable batch.
-                import_users_from_rows(valid_rows, db, commit=False)
-                succeeded += len(valid_rows)
-            except Exception as exc:
-                db.rollback()
-                batch_errors.extend({"row": row.row_number, "errors": [str(getattr(exc, "detail", exc))]} for row in valid_rows)
-        failed += len(batch_errors)
-        errors.extend(batch_errors)
-        processed = offset + len(batch)
-        update_job_progress(
-            db,
-            job.job_id,
-            processed_rows=processed,
-            success_rows=succeeded,
-            failed_rows=failed,
-            error_metadata={"row_errors": errors[:200]},
-        )
-        # Progress only moves forward after user mutations have committed.
-        db.commit()
+    preview = build_user_import_preview(rows, db)
+    if preview["error_count"]:
+        raise UserImportParseError("Import validation failed")
+    result = import_users_from_rows(rows, db, commit=False)
 
     metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
     complete_job(
         db,
         job.job_id,
         processed_rows=total,
-        success_rows=succeeded,
-        failed_rows=failed,
-        result_metadata={**metadata, "batch_size": batch_size, "row_error_count": len(errors)},
+        success_rows=int(result["imported_count"]),
+        failed_rows=0,
+        result_metadata={**metadata, "imported_count": int(result["imported_count"])},
     )
     db.commit()
+    _propagate_bulk_request_status(job, db)
+    db.commit()
+    _cleanup_completed_bulk_request(job, db)
     delete_staged_source(job.job_id, suffix)
 
 
@@ -77,7 +115,7 @@ def _question_batch(parsed, questions):
 
 
 def _dispatch_question_import(job: BackgroundJob, source, suffix: str, db) -> None:
-    """Persist Question Bank imports in committed, restart-safe batches."""
+    """Persist a Teacher Question Bank request in one transaction."""
     from src.a_db_config import Subject
     from src.route.adminRoute import import_new_subject_question_bank_data, import_question_bank_data
 
@@ -101,45 +139,28 @@ def _dispatch_question_import(job: BackgroundJob, source, suffix: str, db) -> No
     elif not selected_subject_id:
         raise ValueError("Question import job is missing its subject")
 
-    start = min(job.processed_rows, total)
-    succeeded = job.success_rows
-    skipped = int(metadata.get("duplicate_skipped_count", 0))
-    batch_size = import_batch_size()
-
-    for offset in range(start, total, batch_size):
-        batch = parsed.questions[offset:offset + batch_size]
-        result = import_question_bank_data(
-            _question_batch(parsed, batch), selected_subject_id, current_user, db, commit=False
-        )
-        succeeded += int(result["imported_count"])
-        skipped += int(result["duplicate_skipped_count"])
-        processed = offset + len(batch)
-        update_job_progress(
-            db,
-            job.job_id,
-            processed_rows=processed,
-            success_rows=succeeded,
-            failed_rows=0,
-        )
-        # Question/taxonomy rows and their progress become durable together.
-        db.commit()
+    result = import_question_bank_data(
+        parsed, selected_subject_id, current_user, db,
+        creator_school_id=metadata.get("question_creator_school_id") if isinstance(metadata.get("question_creator_school_id"), str) else None,
+        commit=False,
+    )
 
     completed_metadata = {
-        "source_filename": metadata.get("source_filename"),
-        "source_suffix": suffix,
-        "source_sha256": metadata.get("source_sha256"),
-        "duplicate_skipped_count": skipped,
-        "batch_size": batch_size,
+        **metadata,
+        "duplicate_skipped_count": int(result["duplicate_skipped_count"]),
     }
     complete_job(
         db,
         job.job_id,
         processed_rows=total,
-        success_rows=succeeded,
+        success_rows=int(result["imported_count"]),
         failed_rows=0,
         result_metadata=completed_metadata,
     )
     db.commit()
+    _propagate_bulk_request_status(job, db)
+    db.commit()
+    _cleanup_completed_bulk_request(job, db)
     delete_staged_source(job.job_id, suffix)
 
 
@@ -165,6 +186,7 @@ def dispatch_import_job(job: BackgroundJob, db) -> None:
         raise ValueError("Unsupported import background job type")
     except (UserImportParseError, QuestionBankParseError) as exc:
         fail_job(db, job.job_id, error=str(exc), error_metadata={"kind": "validation"})
+        _propagate_bulk_request_status(job, db)
         db.info.setdefault("after_commit", []).append(lambda: delete_staged_source(job.job_id, suffix))
         return
     except Exception as exc:
@@ -172,6 +194,7 @@ def dispatch_import_job(job: BackgroundJob, db) -> None:
         # back so the shared worker framework can retry them.
         if hasattr(exc, "status_code") and 400 <= exc.status_code < 500:
             fail_job(db, job.job_id, error=str(getattr(exc, "detail", exc)), error_metadata={"kind": "validation"})
+            _propagate_bulk_request_status(job, db)
             db.info.setdefault("after_commit", []).append(lambda: delete_staged_source(job.job_id, suffix))
             return
         raise
@@ -203,6 +226,7 @@ def _mark_import_failed(envelope: dict, error: Exception, db) -> None:
     job = db.get(BackgroundJob, job_id, with_for_update=True)
     if job and job.status in {BackgroundJobStatus.pending, BackgroundJobStatus.running}:
         fail_job(db, job_id, error=str(error), error_metadata={"event_type": envelope.get("event_type")})
+        _propagate_bulk_request_status(job, db)
 
 
 def run_forever() -> None:

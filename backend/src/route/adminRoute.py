@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -8,7 +9,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
@@ -39,6 +40,9 @@ from src.a_db_config import (
     BackgroundJob,
     BackgroundJobStatus,
     BackgroundJobType,
+    BulkDataRequest,
+    BulkDataRequestStatus,
+    BulkDataRequestType,
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token, TEACHER_ONLY
 from src.service.audit_service import record_audit
@@ -58,6 +62,8 @@ from src.service.question_bank_import_parser import (
     parse_question_bank_document,
 )
 from src.service.user_import_service import ParsedUserImportRow, UserImportParseError, parse_user_import_xlsx
+from src.service import bulk_data_request_storage as bulk_request_storage
+from src.service.teacher_subject_service import require_active_subject_assignment
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -743,6 +749,7 @@ def _persist_imported_question_bank(
     subject_id: str,
     current_user: dict,
     db: Session,
+    creator_school_id: str | None = None,
 ) -> dict:
     """Create/reuse a Subject's taxonomy and Questions without committing."""
 
@@ -828,7 +835,7 @@ def _persist_imported_question_bank(
             question_type=imported_question.question_type,
             question_difficulties=imported_question.difficulty,
             subject_id=subject_id,
-            created_by=current_user["school_id"],
+            created_by=creator_school_id or current_user["school_id"],
             question_status=QuestionStatus.approved,
         )
         db.add(question)
@@ -861,6 +868,7 @@ def import_question_bank_data(
     current_user: dict,
     db: Session,
     *,
+    creator_school_id: str | None = None,
     commit: bool = True,
 ) -> dict:
     """Persist one validated import in a single all-or-nothing transaction."""
@@ -887,7 +895,9 @@ def import_question_bank_data(
                     f"but the selected subject is {selected_subject_id}."
                 ),
             )
-        result = _persist_imported_question_bank(parsed, selected_subject_id, current_user, db)
+        result = _persist_imported_question_bank(
+            parsed, selected_subject_id, current_user, db, creator_school_id=creator_school_id
+        )
         if commit:
             db.commit()
     except HTTPException:
@@ -1910,6 +1920,255 @@ async def import_users(
                 delete_staged_source(job.job_id, str((job.result_metadata or {}).get("source_suffix") or ""))
             raise
     return await run_in_threadpool(import_users_from_rows, rows, db)
+
+
+_BULK_REQUEST_RESULT_KEYS = {
+    "imported_count", "duplicate_skipped_count", "chapters_created", "learning_objectives_created",
+    "role_counts", "message", "total_rows", "success_rows", "failed_rows",
+}
+
+
+def _safe_bulk_request_result(metadata: object) -> dict | None:
+    if not isinstance(metadata, dict):
+        return None
+    return {
+        key: value for key, value in metadata.items()
+        if key in _BULK_REQUEST_RESULT_KEYS and isinstance(value, (str, int, float, bool, dict, type(None)))
+    } or None
+
+
+def _serialize_bulk_data_request(item: BulkDataRequest, db: Session) -> dict:
+    subject = db.get(Subject, item.subject_id) if item.subject_id else None
+    return {
+        "request_id": item.request_id,
+        "request_type": _value(item.request_type),
+        "status": _value(item.status),
+        "requested_by": item.requested_by,
+        "subject": _subject_summary(subject),
+        "original_filename": item.original_filename,
+        "file_size": item.file_size,
+        "teacher_note": item.teacher_note,
+        "admin_note": item.admin_note,
+        "processed_by": item.processed_by,
+        "processed_at": item.processed_at.isoformat() if item.processed_at else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "result_metadata": _safe_bulk_request_result(item.result_metadata),
+    }
+
+
+def _locked_bulk_data_request(db: Session, request_id: int) -> BulkDataRequest:
+    item = db.query(BulkDataRequest).filter(BulkDataRequest.request_id == request_id).with_for_update().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Bulk data request not found")
+    return item
+
+
+def _bulk_request_source(item: BulkDataRequest) -> bytes:
+    if not item.stored_file_key or not bulk_request_storage.exists(item.stored_file_key):
+        raise HTTPException(status_code=410, detail="The submitted file is no longer available")
+    if not bulk_request_storage.verify_sha256(item.stored_file_key, item.sha256):
+        raise HTTPException(status_code=409, detail="The submitted file failed its integrity check")
+    return bulk_request_storage.read(item.stored_file_key)
+
+
+def _parse_bulk_question_request(item: BulkDataRequest, content: bytes) -> ParsedQuestionBank:
+    return _parse_question_bank_content(item.original_filename, content)
+
+
+def _cleanup_terminal_bulk_request_file(db: Session, item: BulkDataRequest) -> None:
+    """Best-effort post-commit cleanup; a filesystem failure never rolls back imports."""
+    if not item.stored_file_key:
+        return
+    key = item.stored_file_key
+    try:
+        if not bulk_request_storage.delete(key):
+            return
+    except OSError:
+        return
+    try:
+        persisted = db.get(BulkDataRequest, item.request_id, with_for_update=True)
+        if persisted and persisted.stored_file_key == key:
+            persisted.stored_file_key = None
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
+def preview_bulk_data_request(db: Session, request_id: int, current_user: dict) -> dict:
+    _admin(db, current_user["school_id"])
+    item = db.get(BulkDataRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bulk data request not found")
+    content = _bulk_request_source(item)
+    if item.request_type == BulkDataRequestType.question_bank:
+        if not item.subject_id:
+            raise HTTPException(status_code=409, detail="Question request is missing its selected subject")
+        parsed = _parse_bulk_question_request(item, content)
+        return {"request": _serialize_bulk_data_request(item, db), "preview": build_question_bank_import_preview(parsed, item.subject_id, current_user, db)}
+    if item.request_type == BulkDataRequestType.user_import:
+        try:
+            rows = parse_user_import_xlsx(content)
+        except UserImportParseError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"request": _serialize_bulk_data_request(item, db), "preview": build_user_import_preview(rows, db)}
+    raise HTTPException(status_code=409, detail="Unsupported bulk data request type")
+
+
+def process_bulk_data_request(db: Session, request_id: int, current_user: dict) -> dict:
+    """Import one pending Teacher request, or queue its existing background importer."""
+    admin = _admin(db, current_user["school_id"])
+    item = _locked_bulk_data_request(db, request_id)
+    if item.status not in {BulkDataRequestStatus.pending, BulkDataRequestStatus.failed}:
+        raise HTTPException(status_code=409, detail="Only pending or failed bulk data requests can be imported")
+    # A failed job is terminal. A retry must use a new durable job/outbox event,
+    # never relabel the old failed job as processing.
+    retry_token = uuid4().hex if item.status == BulkDataRequestStatus.failed else None
+    try:
+        # MySQL's row lock is the primary cross-instance guard. This CAS also
+        # rejects stale sessions instead of allowing a second terminal path.
+        transitioned = db.execute(
+            update(BulkDataRequest)
+            .where(
+                BulkDataRequest.request_id == item.request_id,
+                BulkDataRequest.status == item.status,
+            )
+            .values(status=BulkDataRequestStatus.processing)
+        )
+        if transitioned.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Bulk data request state changed; refresh and retry")
+        db.refresh(item)
+        content = _bulk_request_source(item)
+        if item.request_type == BulkDataRequestType.question_bank:
+            if not item.subject_id:
+                raise HTTPException(status_code=409, detail="Question request is missing its selected subject")
+            require_active_subject_assignment(db, item.requested_by, item.subject_id)
+            parsed = _parse_bulk_question_request(item, content)
+            preview = build_question_bank_import_preview(parsed, item.subject_id, current_user, db)
+            if preview["summary"]["error_questions"]:
+                raise HTTPException(status_code=400, detail={"message": "Import validation failed", "preview": preview})
+            if should_background_import(len(parsed.questions)):
+                job, _ = queue_import_job(
+                    db, job_type=BackgroundJobType.question_import, requested_by=admin.school_id,
+                    filename=item.original_filename, content=content, total_rows=len(parsed.questions),
+                    scope=f"bulk-request:{item.request_id}:subject:{item.subject_id}" + (f":retry:{retry_token}" if retry_token else ""),
+                    metadata={"bulk_data_request_id": item.request_id, "question_creator_school_id": item.requested_by, "subject_id": item.subject_id, "new_subject": False},
+                )
+                item.status = BulkDataRequestStatus.processing
+                item.background_job_id = job.job_id
+                item.processed_by = admin.school_id
+                record_audit(db, actor_school_id=admin.school_id, actor_role=admin.role, action="BULK_DATA_REQUEST_QUEUED", entity_type="bulk_data_request", entity_id=item.request_id, metadata={"job_id": job.job_id, "request_type": item.request_type.value})
+                db.commit()
+                return {"request": _serialize_bulk_data_request(item, db), "background": True, "job": import_job_summary(job)}
+            result = import_question_bank_data(parsed, item.subject_id, current_user, db, creator_school_id=item.requested_by, commit=False)
+        elif item.request_type == BulkDataRequestType.user_import:
+            try:
+                rows = parse_user_import_xlsx(content)
+            except UserImportParseError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            preview = build_user_import_preview(rows, db)
+            if preview["error_count"]:
+                raise HTTPException(status_code=400, detail={"message": "Import validation failed", "preview": preview})
+            if should_background_import(len(rows)):
+                job, _ = queue_import_job(
+                    db, job_type=BackgroundJobType.user_import, requested_by=admin.school_id,
+                    filename=item.original_filename, content=content, total_rows=len(rows),
+                    scope=f"bulk-request:{item.request_id}:users" + (f":retry:{retry_token}" if retry_token else ""), metadata={"bulk_data_request_id": item.request_id},
+                )
+                item.status = BulkDataRequestStatus.processing
+                item.background_job_id = job.job_id
+                item.processed_by = admin.school_id
+                record_audit(db, actor_school_id=admin.school_id, actor_role=admin.role, action="BULK_DATA_REQUEST_QUEUED", entity_type="bulk_data_request", entity_id=item.request_id, metadata={"job_id": job.job_id, "request_type": item.request_type.value})
+                db.commit()
+                return {"request": _serialize_bulk_data_request(item, db), "background": True, "job": import_job_summary(job)}
+            result = import_users_from_rows(rows, db, commit=False)
+        else:
+            raise HTTPException(status_code=409, detail="Unsupported bulk data request type")
+
+        item.status = BulkDataRequestStatus.imported
+        item.processed_by = admin.school_id
+        item.processed_at = datetime.now()
+        item.result_metadata = result
+        record_audit(db, actor_school_id=admin.school_id, actor_role=admin.role, action="BULK_DATA_REQUEST_IMPORTED", entity_type="bulk_data_request", entity_id=item.request_id, metadata={"request_type": item.request_type.value, "imported_count": result.get("imported_count", 0)})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    _cleanup_terminal_bulk_request_file(db, item)
+    return {"request": _serialize_bulk_data_request(item, db), "background": False}
+
+
+@router.get("/bulk-data-requests")
+def list_bulk_data_requests(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _admin(db, current_user["school_id"])
+    query = db.query(BulkDataRequest)
+    total = query.count()
+    items = query.order_by(BulkDataRequest.created_at.desc(), BulkDataRequest.request_id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {"items": [_serialize_bulk_data_request(item, db) for item in items], "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("/bulk-data-requests/{request_id}")
+def get_bulk_data_request(request_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _admin(db, current_user["school_id"])
+    item = db.get(BulkDataRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bulk data request not found")
+    return _serialize_bulk_data_request(item, db)
+
+
+@router.get("/bulk-data-requests/{request_id}/download")
+def download_bulk_data_request(request_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _admin(db, current_user["school_id"])
+    item = db.get(BulkDataRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bulk data request not found")
+    _bulk_request_source(item)
+    return FileResponse(bulk_request_storage.path_for(item.stored_file_key), filename=item.original_filename, media_type="application/octet-stream")
+
+
+@router.post("/bulk-data-requests/{request_id}/preview")
+def preview_stored_bulk_data_request(request_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    return preview_bulk_data_request(db, request_id, current_user)
+
+
+@router.post("/bulk-data-requests/{request_id}/reject")
+def reject_bulk_data_request(request_id: int, payload: RejectPayload, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    admin = _admin(db, current_user["school_id"])
+    item = _locked_bulk_data_request(db, request_id)
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A rejection reason is required")
+    if item.status != BulkDataRequestStatus.pending:
+        raise HTTPException(status_code=409, detail="Only pending bulk data requests can be rejected")
+    transitioned = db.execute(
+        update(BulkDataRequest)
+        .where(
+            BulkDataRequest.request_id == item.request_id,
+            BulkDataRequest.status == BulkDataRequestStatus.pending,
+        )
+        .values(status=BulkDataRequestStatus.rejected)
+    )
+    if transitioned.rowcount != 1:
+        raise HTTPException(status_code=409, detail="Bulk data request state changed; refresh and retry")
+    db.refresh(item)
+    item.admin_note = reason
+    item.processed_by = admin.school_id
+    item.processed_at = datetime.now()
+    record_audit(db, actor_school_id=admin.school_id, actor_role=admin.role, action="BULK_DATA_REQUEST_REJECTED", entity_type="bulk_data_request", entity_id=item.request_id, metadata={"request_type": item.request_type.value})
+    db.commit()
+    _cleanup_terminal_bulk_request_file(db, item)
+    return _serialize_bulk_data_request(item, db)
+
+
+@router.post("/bulk-data-requests/{request_id}/import")
+def import_stored_bulk_data_request(request_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    return process_bulk_data_request(db, request_id, current_user)
 
 
 def _owned_import_job(db: Session, job_id: int, admin_school_id: str) -> BackgroundJob:

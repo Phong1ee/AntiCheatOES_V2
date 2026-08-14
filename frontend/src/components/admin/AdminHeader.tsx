@@ -1,5 +1,5 @@
 import { Button } from '../ui/button';
-import { Shield, Activity, Users, FileText, BookOpen, LogOut, UserCog, School } from 'lucide-react';
+import { Shield, Activity, Users, FileText, BookOpen, LogOut, UserCog, School, Inbox } from 'lucide-react';
 
 interface AdminHeaderProps {
   activeTab: string;
@@ -15,6 +15,7 @@ export function AdminHeader({ activeTab, onTabChange, onLogout }: AdminHeaderPro
     { id: 'classes', label: 'Subject Classes', icon: School },
     { id: 'audit', label: 'Audit Log', icon: FileText },
     { id: 'questions', label: 'Question Bank', icon: BookOpen },
+    { id: 'bulk-requests', label: 'Bulk Requests', icon: Inbox },
   ];
 
   return (

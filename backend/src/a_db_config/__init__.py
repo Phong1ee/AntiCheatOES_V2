@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
     Column,
+    BigInteger,
     JSON,
     Index
 )
@@ -62,6 +63,19 @@ class BackgroundJobStatus(str, enum.Enum):
     failed = "FAILED"
 
 
+class BulkDataRequestType(str, enum.Enum):
+    question_bank = "QUESTION_BANK"
+    user_import = "USER_IMPORT"
+
+
+class BulkDataRequestStatus(str, enum.Enum):
+    pending = "PENDING"
+    processing = "PROCESSING"
+    imported = "IMPORTED"
+    rejected = "REJECTED"
+    failed = "FAILED"
+
+
 background_job_type_enum = Enum(
     BackgroundJobType,
     values_callable=lambda enum_class: [item.value for item in enum_class],
@@ -72,6 +86,18 @@ background_job_status_enum = Enum(
     BackgroundJobStatus,
     values_callable=lambda enum_class: [item.value for item in enum_class],
     name="backgroundjobstatus",
+)
+
+bulk_data_request_type_enum = Enum(
+    BulkDataRequestType,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="bulkdatarequesttype",
+)
+
+bulk_data_request_status_enum = Enum(
+    BulkDataRequestStatus,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="bulkdatarequeststatus",
 )
 
 
@@ -670,6 +696,56 @@ class BackgroundJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class BulkDataRequest(Base):
+    """Teacher-submitted source file retained until an Admin reviews it."""
+
+    __tablename__ = "bulk_data_request"
+    __table_args__ = (
+        Index("ix_bulk_data_request_status_created", "status", "created_at"),
+        Index("ix_bulk_data_request_requested_by_created", "requested_by", "created_at"),
+        Index("ix_bulk_data_request_type_status", "request_type", "status"),
+        Index("ix_bulk_data_request_subject_status", "subject_id", "status"),
+    )
+
+    request_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_type: Mapped[BulkDataRequestType] = mapped_column(bulk_data_request_type_enum, nullable=False)
+    status: Mapped[BulkDataRequestStatus] = mapped_column(
+        bulk_data_request_status_enum,
+        nullable=False,
+        default=BulkDataRequestStatus.pending,
+        server_default=text("'PENDING'"),
+    )
+    requested_by: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="RESTRICT"), nullable=False
+    )
+    subject_id: Mapped[Optional[str]] = mapped_column(
+        String(20), ForeignKey("subject.subject_id", ondelete="RESTRICT"), nullable=True
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_file_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    teacher_note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    admin_note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    processed_by: Mapped[Optional[str]] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="RESTRICT"), nullable=True
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    background_job_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("background_job.job_id", ondelete="SET NULL"), nullable=True
+    )
+    result_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )
 
 
 class AuditLog(Base):

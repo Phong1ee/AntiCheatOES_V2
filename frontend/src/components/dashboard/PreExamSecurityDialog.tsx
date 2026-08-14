@@ -124,6 +124,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
         <li>Stay in fullscreen and do not switch tabs, windows, or minimize the browser.</li>
         <li>Copy, paste, cut, print, and blocked shortcuts are recorded.</li>
         <li>Camera and microphone must remain active. Refreshing is recorded when resumed.</li>
+        <li>Use the same browser profile throughout this attempt. Switching browsers or browser profiles during an active exam is not allowed.</li>
         <li>All violations share one limit of <strong>{violationLimit}</strong>. Reaching it ends this attempt with 0 points.</li>
       </ul>
       {stream && <div className="grid grid-cols-1 gap-4 rounded-xl border p-3 sm:grid-cols-[13.5rem_1fr]"><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="w-[216px] max-w-full rounded-lg bg-slate-900 object-contain" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}

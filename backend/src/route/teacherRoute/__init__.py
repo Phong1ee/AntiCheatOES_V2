@@ -7,6 +7,7 @@ from .examSettingsRoute import router as exam_settings_router
 from .examPoolRoute import router as exam_pool_router
 from .resultsRoute import router as results_router
 from .antiCheatRoute import router as anti_cheat_router
+from .bulkDataRequestRoute import router as bulk_data_request_router
 
 router = APIRouter()
 router.include_router(question_bank_router)
@@ -17,3 +18,4 @@ router.include_router(exam_settings_router)
 router.include_router(exam_pool_router)
 router.include_router(results_router)
 router.include_router(anti_cheat_router)
+router.include_router(bulk_data_request_router)

@@ -48,9 +48,12 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REPORT_EXPORT_DIR: /var/oes/reports
       IMPORT_STAGING_DIR: /var/oes/imports
+      # Teacher source files must be visible to both API instances and workers.
+      BULK_DATA_REQUEST_STORAGE_DIR: /var/oes/bulk-requests
     volumes:
       - report-artifacts:/var/oes/reports
       - import-artifacts:/var/oes/imports
+      - bulk-request-artifacts:/var/oes/bulk-requests
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
       interval: 10s
@@ -193,6 +196,7 @@ volumes:
   rabbitmq-data:
   report-artifacts:
   import-artifacts:
+  bulk-request-artifacts:
 
 networks:
   oes:

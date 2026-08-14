@@ -6,6 +6,7 @@ frontend/.env
 .env.local
 .env.compose
 deploy/loadtest/results/*.csv
+backend/generated_bulk_requests/
 
 # Virtual Environments (Python)
 .venv/

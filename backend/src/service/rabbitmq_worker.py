@@ -66,12 +66,14 @@ def consume(
                     else:
                         handler(payload, db)
                         db.commit()
-                    for callback in db.info.pop("after_commit", []):
-                        try:
-                            callback()
-                        except Exception:
-                            log_event("worker.after_commit_failed", status="failed")
-                    log_event("worker.processed", status="completed")
+                # Import handlers commit their own business transaction before
+                # the processed-event marker, but still need terminal cleanup.
+                for callback in db.info.pop("after_commit", []):
+                    try:
+                        callback()
+                    except Exception:
+                        log_event("worker.after_commit_failed", status="failed")
+                log_event("worker.processed", status="completed")
             except Exception:
                 db.rollback()
                 db.info.pop("after_commit", None)

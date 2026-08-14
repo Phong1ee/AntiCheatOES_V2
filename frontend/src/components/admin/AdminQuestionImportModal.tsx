@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
+  Download,
   FileCheck2,
   FileText,
   LoaderCircle,
@@ -62,12 +63,16 @@ export function AdminQuestionImportModal({ open, mode = "existing-subject", subj
   const [error, setError] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [templateViewed, setTemplateViewed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isBusy = isPreviewing || isImporting;
   const isNewSubject = mode === "new-subject";
   const subjectName = isNewSubject ? preview?.subject.subject_name ?? "New Subject from file" : subject?.subjectName ?? "Selected Subject";
   const subjectId = isNewSubject ? preview?.subject.subject_id ?? "Read from file" : subject?.subjectId ?? "";
+  const templateSubjectId = isNewSubject ? "NEW_SUBJECT_ID" : subject?.subjectId ?? "SELECTED_SUBJECT_ID";
+  const templateSubjectName = isNewSubject ? "New Subject Name" : subject?.subjectName ?? "Selected Subject Name";
+  const questionTemplate = `Question Bank\n\nSubject ID: ${templateSubjectId}\nSubject Name: ${templateSubjectName}\nDescription: Brief subject description\n\nCHAPTER: Chapter 1\n\nQUESTION 1\nType: Multiple Choice\nDifficulty: Easy\nLearning Objectives: Learning objective 1 | Learning objective 2\nContent: What is 2 + 2?\nA. 3\nB. 4\nAnswer: B\n\nQUESTION 2\nType: True/False\nDifficulty: Medium\nLearning Objectives: Learning objective 1\nContent: The statement is true.\nAnswer: True\n\nQUESTION 3\nType: Essay\nDifficulty: Hard\nLearning Objectives: Learning objective 2\nContent: Explain your reasoning.`;
   const hasBlockingIssues = !!preview && (
     preview.summary.error_questions > 0
     || preview.chapters.some((chapter) => chapter.action === "conflict")
@@ -82,6 +87,7 @@ export function AdminQuestionImportModal({ open, mode = "existing-subject", subj
       setError(null);
       setIsPreviewing(false);
       setIsImporting(false);
+      setTemplateViewed(false);
     }
   }, [open]);
 
@@ -171,8 +177,8 @@ export function AdminQuestionImportModal({ open, mode = "existing-subject", subj
             </div>
           </div>
           <div className="mt-4 flex gap-2 text-xs font-medium">
-            {(["Upload", "Preview", "Import Result"] as const).map((step, index) => {
-              const active = result ? index <= 2 : preview ? index <= 1 : index === 0;
+            {(["Template", "Upload", "Preview", "Import Result"] as const).map((step, index) => {
+              const active = !templateViewed ? index === 0 : result ? index <= 3 : preview ? index <= 2 : index <= 1;
               return (
                 <div key={step} className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-gray-400"}`}>
                   <span className={`flex size-5 items-center justify-center rounded-full ${active ? "bg-teal-600 text-white" : "bg-gray-100"}`}>{index + 1}</span>
@@ -191,7 +197,15 @@ export function AdminQuestionImportModal({ open, mode = "existing-subject", subj
             </div>
           )}
 
-          {!preview && !result && (
+          {!templateViewed && !preview && !result && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900"><p className="font-semibold">Question Bank document template</p><p className="mt-1">Save this content as DOCX or a text-based PDF. For an existing Subject, Subject ID must match the selected Subject exactly.</p><a href="/templates/question-bank-import-template.docx" download="question-bank-import-template.docx" className="mt-3 inline-flex items-center gap-2 rounded-lg border border-teal-300 bg-white px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-100"><Download className="size-4" />Download DOCX template</a></div>
+              <pre className="overflow-x-auto rounded-xl border border-gray-200 bg-slate-950 p-4 text-xs leading-5 text-slate-100">{questionTemplate}</pre>
+              <div className="grid gap-3 text-xs text-gray-600 sm:grid-cols-2"><div className="rounded-lg border border-gray-200 p-3"><p className="font-semibold text-gray-800">Required fields</p><p className="mt-1">Subject ID, Subject Name, Chapter, Type, Difficulty, Learning Objectives, and Content. Description is optional.</p></div><div className="rounded-lg border border-gray-200 p-3"><p className="font-semibold text-gray-800">Question types</p><p className="mt-1">MCQ needs 2-6 options (A-F) and Answer labels such as B or A,C. True/False uses Answer: True or False with no options. Essay has no options and no Answer.</p></div><div className="rounded-lg border border-gray-200 p-3"><p className="font-semibold text-gray-800">Taxonomy</p><p className="mt-1">Start each group with CHAPTER: name. Separate multiple Learning Objectives with |. Existing names are reused; unambiguous new names are created after import.</p></div><div className="rounded-lg border border-gray-200 p-3"><p className="font-semibold text-gray-800">Limits and format</p><p className="mt-1">Use DOCX or text-based PDF under 5 MB. Difficulty must be Easy, Medium, or Hard. IDs, names, question text, and options have length limits checked during Preview.</p></div></div>
+            </div>
+          )}
+
+          {templateViewed && !preview && !result && (
             <div className="space-y-4">
               <button
                 type="button"
@@ -301,7 +315,8 @@ export function AdminQuestionImportModal({ open, mode = "existing-subject", subj
           ) : <span />}
           <div className="flex items-center gap-2">
             <button type="button" disabled={isBusy} onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50">{result ? "Close" : "Cancel"}</button>
-            {!preview && !result && <button type="button" disabled={!file || isBusy} onClick={() => void handlePreview()} className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">{isPreviewing && <LoaderCircle className="size-4 animate-spin" />}Preview</button>}
+            {!templateViewed && !preview && !result && <button type="button" onClick={() => setTemplateViewed(true)} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">Continue to Upload</button>}
+            {templateViewed && !preview && !result && <button type="button" disabled={!file || isBusy} onClick={() => void handlePreview()} className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">{isPreviewing && <LoaderCircle className="size-4 animate-spin" />}Preview</button>}
             {preview && !result && <button type="button" disabled={hasBlockingIssues || isBusy} onClick={() => void handleImport()} className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">{isImporting && <LoaderCircle className="size-4 animate-spin" />}{isImporting ? "Importing..." : isNewSubject ? "Confirm & Create Subject" : "Import"}</button>}
           </div>
         </div>

@@ -24,6 +24,14 @@ import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
 
 type Exam = StudentExamListItem;
 
+const displayAttemptAccessError = (error: unknown, fallback: string): string => {
+  const message = error instanceof Error ? error.message : fallback;
+  if (message.toLowerCase().includes("attempt device does not match")) {
+    return "Không thể tiếp tục bài thi trên trình duyệt này. Bài thi đang làm đã được liên kết với trình duyệt/profile khác để bảo vệ chống gian lận. Hãy quay lại đúng trình duyệt/profile đã dùng để bắt đầu bài thi; không thể chuyển sang Chrome, Edge hoặc Vivaldi khi attempt còn đang diễn ra.";
+  }
+  return message;
+};
+
 const statusConfig = {
   upcoming: {
     label: "Upcoming",
@@ -156,7 +164,7 @@ export function ExamList({
       resetExamFlow();
       onEnterExam?.(exam.id, stream, false, runtime);
     } catch (error) {
-      onStartError?.(error instanceof Error ? error.message : "Unable to start the exam.");
+      onStartError?.(displayAttemptAccessError(error, "Unable to start the exam."));
       throw error;
     } finally {
       setStartingExamId(null);
@@ -229,7 +237,7 @@ export function ExamList({
       resetExamFlow();
       onEnterExam?.(exam.id);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to resume this exam.";
+      const message = displayAttemptAccessError(error, "Unable to resume this exam.");
       setFetchedLoadError(message);
       onStartError?.(message);
     }
@@ -237,16 +245,20 @@ export function ExamList({
 
   const handleSecurityReady = async (stream: MediaStream, runtime: AntiCheatRuntime) => {
     if (!selectedExam) throw new Error("No exam selected");
-    if (securityResume) {
-      if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
-      const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
-      if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
-      localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
-      resetExamFlow();
-      onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded, runtime);
-      return;
+    try {
+      if (securityResume) {
+        if (!selectedExam.openAttemptId) throw new Error("No open attempt is available to resume.");
+        const resumed = await studentExamService.resume(selectedExam.id, selectedExam.openAttemptId, "normal_resume");
+        if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
+        localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
+        resetExamFlow();
+        onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded, runtime);
+        return;
+      }
+      await startExam(selectedExam, securityCode, stream, runtime);
+    } catch (error) {
+      throw new Error(displayAttemptAccessError(error, "Unable to start the secure exam session."));
     }
-    await startExam(selectedExam, securityCode, stream, runtime);
   };
 
   if (loading) {

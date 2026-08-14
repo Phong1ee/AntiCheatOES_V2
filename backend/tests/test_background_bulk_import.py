@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, OutboxEvent, Subject, User, UserRole
+from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, OutboxEvent, Question, Subject, User, UserRole
 from src.route.adminRoute import _owned_import_job, import_users, import_users_from_rows
 from src.service.import_job_service import import_job_summary, queue_import_job
 from src.service.import_worker import handle_import_requested
@@ -130,13 +130,12 @@ class BackgroundBulkImportTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 3)
 
-    def test_invalid_large_batch_completes_with_row_errors_and_valid_rows(self):
+    def test_invalid_large_import_fails_without_creating_any_users(self):
         job, _ = self._queue(workbook_bytes(self._rows(2, invalid=True)), 2)
         handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
         self.db.commit()
         failed = self.db.get(BackgroundJob, job.job_id)
-        self.assertEqual(failed.status, BackgroundJobStatus.completed)
-        self.assertEqual((failed.processed_rows, failed.success_rows, failed.failed_rows), (2, 0, 2))
+        self.assertEqual(failed.status, BackgroundJobStatus.failed)
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 0)
 
     def test_same_source_uses_one_job_and_status_hides_source_details(self):
@@ -188,9 +187,7 @@ class BackgroundBulkImportTests(unittest.TestCase):
         self.assertEqual(completed.status, BackgroundJobStatus.completed)
         self.assertEqual(completed.success_rows, 1)
 
-    def test_question_import_commits_configured_batches_and_resumes_without_duplicates(self):
-        from src.service import import_worker
-
+    def test_question_import_is_one_transaction_and_redelivery_does_not_duplicate(self):
         self.db.add(Subject(subject_id="DB", subject_name="Databases", subject_description="Database concepts"))
         self.db.commit()
         job, _ = queue_import_job(
@@ -204,20 +201,9 @@ class BackgroundBulkImportTests(unittest.TestCase):
             metadata={"subject_id": "DB", "new_subject": False},
         )
         self.db.commit()
-        progress = []
-        original = import_worker.update_job_progress
-
-        def record_progress(*args, **kwargs):
-            progress.append(kwargs["processed_rows"])
-            return original(*args, **kwargs)
-
-        with patch.dict(os.environ, {"IMPORT_BATCH_SIZE": "50"}, clear=False), patch(
-            "src.service.import_worker.update_job_progress", side_effect=record_progress
-        ):
-            handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
+        handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
 
         completed = self.db.get(BackgroundJob, job.job_id)
-        self.assertEqual(progress, [50, 100, 120])
         self.assertEqual((completed.processed_rows, completed.success_rows, completed.failed_rows), (120, 120, 0))
         self.assertEqual(completed.result_metadata["duplicate_skipped_count"], 0)
 
@@ -225,47 +211,47 @@ class BackgroundBulkImportTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(completed.success_rows, 120)
 
-    def test_user_import_commits_batches_and_persists_mixed_row_progress(self):
+    def test_user_import_rejects_invalid_file_without_partial_rows(self):
         content = workbook_bytes(self._rows(5, invalid=True))
         job, _ = self._queue(content, 5)
-        progress = []
-
-        from src.service import import_worker
-        original = import_worker.update_job_progress
-
-        def record_progress(*args, **kwargs):
-            progress.append((kwargs["processed_rows"], kwargs["success_rows"], kwargs["failed_rows"]))
-            return original(*args, **kwargs)
-
-        with patch.dict(os.environ, {"IMPORT_BATCH_SIZE": "50"}, clear=False), patch(
-            "src.service.import_worker.update_job_progress", side_effect=record_progress
-        ):
-            handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
+        handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
 
         completed = self.db.get(BackgroundJob, job.job_id)
-        self.assertEqual(completed.status, BackgroundJobStatus.completed)
-        self.assertEqual((completed.processed_rows, completed.success_rows, completed.failed_rows), (5, 3, 2))
-        self.assertEqual(progress, [(5, 3, 2)])
-        self.assertEqual(completed.error_metadata["row_errors"][0]["row"], 2)
+        self.assertEqual(completed.status, BackgroundJobStatus.failed)
+        self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 0)
 
-    def test_user_import_uses_multiple_configured_batches(self):
+    def test_user_import_is_one_transaction(self):
         job, _ = self._queue(workbook_bytes(self._rows(120)), 120)
-        progress = []
-        from src.service import import_worker
-        original = import_worker.update_job_progress
+        handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
 
-        def record_progress(*args, **kwargs):
-            progress.append(kwargs["processed_rows"])
-            return original(*args, **kwargs)
-
-        with patch.dict(os.environ, {"IMPORT_BATCH_SIZE": "50"}, clear=False), patch(
-            "src.service.import_worker.update_job_progress", side_effect=record_progress
-        ):
-            handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
-
-        self.assertEqual(progress, [50, 100, 120])
         completed = self.db.get(BackgroundJob, job.job_id)
         self.assertEqual((completed.processed_rows, completed.success_rows, completed.failed_rows), (120, 120, 0))
+
+    def test_fault_before_terminal_commit_rolls_back_question_rows(self):
+        from src.service import import_worker
+
+        self.db.add(Subject(subject_id="DB", subject_name="Databases", subject_description="Database concepts"))
+        self.db.commit()
+        job, _ = queue_import_job(
+            self.db,
+            job_type=BackgroundJobType.question_import,
+            requested_by="A1",
+            filename="questions.docx",
+            content=question_document_bytes(2),
+            total_rows=2,
+            scope="subject:DB:fault",
+            metadata={"subject_id": "DB", "new_subject": False},
+        )
+        self.db.commit()
+
+        with patch.object(import_worker, "complete_job", side_effect=RuntimeError("forced pre-commit failure")):
+            with self.assertRaisesRegex(RuntimeError, "forced pre-commit failure"):
+                handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
+        self.db.rollback()
+
+        self.assertEqual(self.db.query(Question).count(), 0)
+        self.assertEqual(self.db.get(BackgroundJob, job.job_id).status, BackgroundJobStatus.running)
+        self.assertTrue(os.path.exists(os.path.join(self.temp.name, f"import_job_{job.job_id}.docx")))
 
 
 if __name__ == "__main__":

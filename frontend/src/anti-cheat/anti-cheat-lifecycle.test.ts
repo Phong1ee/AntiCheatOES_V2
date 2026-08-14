@@ -29,6 +29,22 @@ describe('secured attempt lifecycle', () => {
     expect(prepared.resetForAttemptStart).toHaveBeenCalledOnce();
   });
 
+  it('does not preflight or create an attempt when fullscreen cannot be entered', async () => {
+    const preflight = vi.fn();
+    const startAttempt = vi.fn();
+
+    await expect(startSecuredAttempt({
+      requestFullscreen: async () => {
+        throw new Error('Your browser did not enter fullscreen mode.');
+      },
+      preflight,
+      startAttempt,
+    })).rejects.toThrow('did not enter fullscreen');
+
+    expect(preflight).not.toHaveBeenCalled();
+    expect(startAttempt).not.toHaveBeenCalled();
+  });
+
   it.each(['MediaPipe', 'Silero', 'Pyannote'])('does not start when %s preflight fails', async (module) => {
     const startAttempt = vi.fn();
 

@@ -6,6 +6,7 @@ import { TeacherPermissionsPage } from './TeacherPermissionsPage';
 import { AuditLogPage } from './AuditLogPage';
 import { AdminQuestionBankPage } from './AdminQuestionBankPage';
 import { SubjectClassPage } from './SubjectClassPage';
+import { AdminBulkDataRequestsPage } from './AdminBulkDataRequestsPage';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -23,6 +24,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
       {activeTab === 'classes' && <SubjectClassPage />}
       {activeTab === 'audit' && <AuditLogPage />}
       {activeTab === 'questions' && <AdminQuestionBankPage />}
+      {activeTab === 'bulk-requests' && <AdminBulkDataRequestsPage />}
     </div>
   );
 }

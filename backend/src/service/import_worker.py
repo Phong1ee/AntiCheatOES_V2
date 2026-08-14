@@ -40,6 +40,7 @@ def _propagate_bulk_request_status(job: BackgroundJob, db) -> None:
             entity_type="bulk_data_request",
             entity_id=request.request_id,
             metadata={"job_id": job.job_id, "request_type": request.request_type.value, "imported_count": job.success_rows},
+            outcome="SUCCESS",
         )
     elif job.status == BackgroundJobStatus.failed:
         request.status = BulkDataRequestStatus.failed
@@ -53,7 +54,23 @@ def _propagate_bulk_request_status(job: BackgroundJob, db) -> None:
             entity_type="bulk_data_request",
             entity_id=request.request_id,
             metadata={"job_id": job.job_id, "request_type": request.request_type.value},
+            outcome="FAILED",
         )
+
+
+def _record_direct_import_terminal(job: BackgroundJob, db) -> None:
+    """Audit only direct Admin jobs; bulk requests have their own lifecycle event."""
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    if isinstance(metadata.get("bulk_data_request_id"), int):
+        return
+    action_prefix = "QUESTION_IMPORT" if job.job_type == BackgroundJobType.question_import else "USER_IMPORT"
+    outcome = "SUCCESS" if job.status == BackgroundJobStatus.completed else "FAILED"
+    record_audit(
+        db, actor_school_id=job.requested_by, actor_role=UserRole.admin,
+        action=f"{action_prefix}_{'COMPLETED' if outcome == 'SUCCESS' else 'FAILED'}",
+        entity_type="background_job", entity_id=job.job_id, outcome=outcome,
+        metadata={"job_id": job.job_id, "success_rows": job.success_rows, "failed_rows": job.failed_rows, "subject_id": metadata.get("subject_id")},
+    )
 
 
 def _cleanup_completed_bulk_request(job: BackgroundJob, db) -> None:
@@ -100,6 +117,7 @@ def _dispatch_user_import(job: BackgroundJob, source, suffix: str, db) -> None:
         failed_rows=0,
         result_metadata={**metadata, "imported_count": int(result["imported_count"])},
     )
+    _record_direct_import_terminal(job, db)
     db.commit()
     _propagate_bulk_request_status(job, db)
     db.commit()
@@ -157,6 +175,7 @@ def _dispatch_question_import(job: BackgroundJob, source, suffix: str, db) -> No
         failed_rows=0,
         result_metadata=completed_metadata,
     )
+    _record_direct_import_terminal(job, db)
     db.commit()
     _propagate_bulk_request_status(job, db)
     db.commit()
@@ -187,6 +206,7 @@ def dispatch_import_job(job: BackgroundJob, db) -> None:
     except (UserImportParseError, QuestionBankParseError) as exc:
         fail_job(db, job.job_id, error=str(exc), error_metadata={"kind": "validation"})
         _propagate_bulk_request_status(job, db)
+        _record_direct_import_terminal(job, db)
         db.info.setdefault("after_commit", []).append(lambda: delete_staged_source(job.job_id, suffix))
         return
     except Exception as exc:
@@ -195,6 +215,7 @@ def dispatch_import_job(job: BackgroundJob, db) -> None:
         if hasattr(exc, "status_code") and 400 <= exc.status_code < 500:
             fail_job(db, job.job_id, error=str(getattr(exc, "detail", exc)), error_metadata={"kind": "validation"})
             _propagate_bulk_request_status(job, db)
+            _record_direct_import_terminal(job, db)
             db.info.setdefault("after_commit", []).append(lambda: delete_staged_source(job.job_id, suffix))
             return
         raise
@@ -227,6 +248,7 @@ def _mark_import_failed(envelope: dict, error: Exception, db) -> None:
     if job and job.status in {BackgroundJobStatus.pending, BackgroundJobStatus.running}:
         fail_job(db, job_id, error=str(error), error_metadata={"event_type": envelope.get("event_type")})
         _propagate_bulk_request_status(job, db)
+        _record_direct_import_terminal(job, db)
 
 
 def run_forever() -> None:

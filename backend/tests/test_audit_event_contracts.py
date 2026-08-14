@@ -86,17 +86,33 @@ class AuditAndEventContractTests(unittest.TestCase):
             action="USER_LOCKED",
             entity_type="user",
             entity_id=self.student.id,
-            metadata={"target_school_id": "S1", "password": "secret", "nested": {"jwt": "x", "ok": True}},
+            metadata={
+                "target_school_id": "S1", "password": "secret", "file_content": "raw import",
+                "database_connection": "mysql://secret", "nested": {"jwt": "x", "essay": "answer", "ok": True},
+            },
         )
         self.db.commit()
 
         audit = self.db.query(AuditLog).one()
         self.assertEqual((audit.actor_school_id, audit.actor_role, audit.action), ("A1", "admin", "USER_LOCKED"))
+        self.assertEqual(audit.outcome, "SUCCESS")
         self.assertEqual(audit.metadata_json, {"target_school_id": "S1", "nested": {"ok": True}})
 
         record_audit(self.db, actor_school_id="A1", actor_role="admin", action="USER_DELETED", entity_type="user", entity_id=self.student.id)
         self.db.rollback()
         self.assertEqual(self.db.query(AuditLog).count(), 1)
+
+    def test_audit_accepts_only_explicit_outcomes(self):
+        failed = record_audit(
+            self.db, actor_school_id=None, actor_role="system", action="IMPORT_FAILED",
+            entity_type="background_job", entity_id=1, outcome="failed",
+        )
+        self.assertEqual(failed.outcome, "FAILED")
+        with self.assertRaisesRegex(ValueError, "SUCCESS or FAILED"):
+            record_audit(
+                self.db, actor_school_id="A1", actor_role="admin", action="BAD",
+                entity_type="user", entity_id=1, outcome="PENDING",
+            )
 
     def test_mutation_failure_rolls_back_its_audit_row(self):
         with patch.object(self.db, "commit", side_effect=RuntimeError("database unavailable")):

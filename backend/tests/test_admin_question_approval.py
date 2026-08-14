@@ -9,6 +9,7 @@ from database import Base
 from src.a_db_config import (
     Attempt,
     AttemptQuestion,
+    AuditLog,
     Chapter,
     ChapterLO,
     ChapterQuestion,
@@ -188,6 +189,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
             self._approve_question(question.question_id)
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(self.db.query(QuestionRevision).count(), 1)
+        self.assertEqual(self.db.query(AuditLog).one().action, "QUESTION_APPROVED")
 
     def test_reject_new_question_requires_reason_and_persists_review_audit(self):
         question = self._question()
@@ -203,6 +205,9 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(audit.approved_by, self.admin.school_id)
         self.assertIsNotNone(audit.approved_at)
         self.assertEqual(self.db.query(Option).filter_by(question_id=question.question_id).count(), 2)
+        review_audit = self.db.query(AuditLog).one()
+        self.assertEqual(review_audit.action, "QUESTION_REJECTED")
+        self.assertEqual(review_audit.metadata_json["reason"], "Clarify the wording")
 
     def test_reapproval_after_resubmission_clears_previous_rejection_feedback(self):
         question = self._question()
@@ -263,6 +268,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(applied.approved_by, self.admin.school_id)
         self.assertIsNotNone(applied.approved_at)
         self.assertEqual(result["active_question"]["question_status"], "approved")
+        self.assertEqual(self.db.query(AuditLog).one().action, "QUESTION_REVISION_APPROVED")
 
     def test_approve_pending_revision_preserves_all_learning_objective_mappings(self):
         question = self._question(QuestionStatus.approved)
@@ -282,6 +288,7 @@ class AdminQuestionApprovalTests(unittest.TestCase):
         self.assertEqual(sorted(item.options_text for item in active.options), ["Duplicating data", "Reducing redundancy"])
         self.assertEqual(rejected.question_status, "rejected")
         self.assertEqual(rejected.rejection_reason, "Use clearer terms")
+        self.assertEqual(self.db.query(AuditLog).one().action, "QUESTION_REVISION_REJECTED")
         with self.assertRaises(HTTPException) as raised:
             self._approve_revision(revision.revision_id)
         self.assertEqual(raised.exception.status_code, 409)

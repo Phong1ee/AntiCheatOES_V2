@@ -1,425 +1,49 @@
-import { useState } from 'react';
-import { normalizeSearchText } from '../../utils/search';
-import { Card } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Badge } from '../ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select';
-import {
-  FileText,
-  Search,
-  Download,
-  Filter,
-  Calendar,
-  User,
-  Activity,
-  AlertCircle,
-  CheckCircle,
-  Info,
-  AlertTriangle,
-} from 'lucide-react';
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, CheckCircle, Download, Eye, FileText, LoaderCircle, RefreshCw, Search } from "lucide-react";
+import { toast } from "sonner";
+import { adminAuditLogService } from "../../services/admin-audit-log.service";
+import type { AdminAuditListParams, AdminAuditLog, AdminAuditLogDetail, AdminAuditStats } from "../../types/admin-audit-log";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Input } from "../ui/input";
 
-interface AuditLog {
-  id: string;
-  timestamp: string;
-  user: string;
-  userId: string;
-  action: string;
-  category: 'auth' | 'exam' | 'user' | 'system' | 'question';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  ipAddress: string;
-  details: string;
-  status: 'success' | 'failed' | 'warning';
-}
-
-const mockLogs: AuditLog[] = [
-  {
-    id: '1',
-    timestamp: '2025-11-24 11:45:23',
-    user: 'John Doe',
-    userId: 'U001',
-    action: 'Exam Submitted',
-    category: 'exam',
-    severity: 'low',
-    ipAddress: '192.168.1.105',
-    details: 'Midterm Exam - Database Systems submitted successfully',
-    status: 'success',
-  },
-  {
-    id: '2',
-    timestamp: '2025-11-24 11:32:15',
-    user: 'Admin User',
-    userId: 'A001',
-    action: 'User Created',
-    category: 'user',
-    severity: 'medium',
-    ipAddress: '192.168.1.100',
-    details: 'New student account created: jane.smith@university.edu',
-    status: 'success',
-  },
-  {
-    id: '3',
-    timestamp: '2025-11-24 11:20:08',
-    user: 'Robert Brown',
-    userId: 'U005',
-    action: 'Login Failed',
-    category: 'auth',
-    severity: 'high',
-    ipAddress: '203.45.67.89',
-    details: 'Multiple failed login attempts detected (5 attempts)',
-    status: 'failed',
-  },
-  {
-    id: '4',
-    timestamp: '2025-11-24 11:15:42',
-    user: 'Jane Smith',
-    userId: 'T002',
-    action: 'Exam Published',
-    category: 'exam',
-    severity: 'medium',
-    ipAddress: '192.168.1.110',
-    details: 'Final Exam - Data Structures published for CS201',
-    status: 'success',
-  },
-  {
-    id: '5',
-    timestamp: '2025-11-24 11:05:30',
-    user: 'System',
-    userId: 'SYS',
-    action: 'Backup Completed',
-    category: 'system',
-    severity: 'low',
-    ipAddress: 'localhost',
-    details: 'Automated database backup completed successfully',
-    status: 'success',
-  },
-  {
-    id: '6',
-    timestamp: '2025-11-24 10:50:18',
-    user: 'Emily Davis',
-    userId: 'T006',
-    action: 'Question Added',
-    category: 'question',
-    severity: 'low',
-    ipAddress: '192.168.1.115',
-    details: 'New multiple-choice question added to Database Systems bank',
-    status: 'success',
-  },
-  {
-    id: '7',
-    timestamp: '2025-11-24 10:35:55',
-    user: 'Michael Johnson',
-    userId: 'U003',
-    action: 'Exam Violation',
-    category: 'exam',
-    severity: 'high',
-    ipAddress: '192.168.1.120',
-    details: 'Tab switching detected during Quiz 3 - Normalization',
-    status: 'warning',
-  },
-  {
-    id: '8',
-    timestamp: '2025-11-24 10:20:12',
-    user: 'Admin User',
-    userId: 'A001',
-    action: 'User Suspended',
-    category: 'user',
-    severity: 'high',
-    ipAddress: '192.168.1.100',
-    details: 'User account suspended due to policy violation: robert.b@university.edu',
-    status: 'success',
-  },
-  {
-    id: '9',
-    timestamp: '2025-11-24 10:05:47',
-    user: 'System',
-    userId: 'SYS',
-    action: 'Security Alert',
-    category: 'system',
-    severity: 'critical',
-    ipAddress: '45.67.89.123',
-    details: 'Suspicious activity detected: Multiple access attempts from unknown IP',
-    status: 'warning',
-  },
-  {
-    id: '10',
-    timestamp: '2025-11-24 09:45:33',
-    user: 'Sarah Williams',
-    userId: 'A004',
-    action: 'Settings Updated',
-    category: 'system',
-    severity: 'medium',
-    ipAddress: '192.168.1.100',
-    details: 'System configuration updated: Exam duration limits modified',
-    status: 'success',
-  },
-];
+const initialFilters: AdminAuditListParams = { page: 1, page_size: 25 };
+const dateTime = (value: string | null) => value ? new Date(value).toLocaleString() : "-";
+const target = (item: AdminAuditLog) => `${item.entity.type.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} #${item.entity.id}`;
+const metadataLabel = (key: string) => key.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 export function AuditLogPage() {
-  const [logs, setLogs] = useState<AuditLog[]>(mockLogs);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [filters, setFilters] = useState<AdminAuditListParams>(initialFilters);
+  const [items, setItems] = useState<AdminAuditLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState<AdminAuditStats | null>(null);
+  const [actions, setActions] = useState<{ code: string; label: string; category: string }[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [selected, setSelected] = useState<AdminAuditLogDetail | null>(null);
+  const requestVersion = useRef(0);
 
-  const filteredLogs = logs.filter((log) => {
-    const matchesSearch =
-      normalizeSearchText(log.user).includes(normalizeSearchText(searchQuery)) ||
-      normalizeSearchText(log.action).includes(normalizeSearchText(searchQuery)) ||
-      normalizeSearchText(log.details).includes(normalizeSearchText(searchQuery));
-    const matchesCategory = categoryFilter === 'all' || log.category === categoryFilter;
-    const matchesSeverity = severityFilter === 'all' || log.severity === severityFilter;
-    const matchesStatus = statusFilter === 'all' || log.status === statusFilter;
-    return matchesSearch && matchesCategory && matchesSeverity && matchesStatus;
-  });
-
-  const handleExportLogs = () => {
-    const csv = [
-      ['Timestamp', 'User', 'User ID', 'Action', 'Category', 'Severity', 'IP Address', 'Details', 'Status'],
-      ...filteredLogs.map((log) => [
-        log.timestamp,
-        log.user,
-        log.userId,
-        log.action,
-        log.category,
-        log.severity,
-        log.ipAddress,
-        log.details,
-        log.status,
-      ]),
-    ]
-      .map((row) => row.join(','))
-      .join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+  const load = async () => {
+    const version = ++requestVersion.current; setLoading(true); setError(false);
+    try { const result = await adminAuditLogService.list(filters); if (version === requestVersion.current) { setItems(result.items); setTotal(result.total); } }
+    catch { if (version === requestVersion.current) setError(true); }
+    finally { if (version === requestVersion.current) setLoading(false); }
   };
+  useEffect(() => { void load(); }, [filters]);
+  useEffect(() => { void Promise.all([adminAuditLogService.getStats(), adminAuditLogService.getActions()]).then(([nextStats, catalog]) => { setStats(nextStats); setActions(catalog.actions); setCategories(catalog.categories); }).catch(() => toast.error("Audit log filters could not be loaded.")); }, []);
+  const setFilter = (key: keyof AdminAuditListParams, value: string) => setFilters((current) => ({ ...current, [key]: value || undefined, page: 1 }));
+  const showDetail = async (id: number) => { try { setSelected(await adminAuditLogService.get(id)); } catch { toast.error("Audit event details could not be loaded."); } };
+  const exportCsv = async () => { try { const blob = await adminAuditLogService.exportCsv(filters); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url); } catch { toast.error("Audit log export could not be completed."); } };
+  const start = total ? (Number(filters.page) - 1) * Number(filters.page_size) + 1 : 0;
+  const end = Math.min(start + items.length - 1, total);
 
-  const getCategoryBadge = (category: string) => {
-    const styles = {
-      auth: 'bg-blue-100 text-blue-700 border-blue-300',
-      exam: 'bg-purple-100 text-purple-700 border-purple-300',
-      user: 'bg-teal-100 text-teal-700 border-teal-300',
-      system: 'bg-gray-100 text-gray-700 border-gray-300',
-      question: 'bg-green-100 text-green-700 border-green-300',
-    };
-    return styles[category as keyof typeof styles] || styles.system;
-  };
-
-  const getSeverityBadge = (severity: string) => {
-    const styles = {
-      low: 'bg-green-100 text-green-700 border-green-300',
-      medium: 'bg-amber-100 text-amber-700 border-amber-300',
-      high: 'bg-orange-100 text-orange-700 border-orange-300',
-      critical: 'bg-red-100 text-red-700 border-red-300',
-    };
-    return styles[severity as keyof typeof styles] || styles.low;
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'success':
-        return <CheckCircle className="size-4 text-green-600" />;
-      case 'failed':
-        return <AlertCircle className="size-4 text-red-600" />;
-      case 'warning':
-        return <AlertTriangle className="size-4 text-amber-600" />;
-      default:
-        return <Info className="size-4 text-blue-600" />;
-    }
-  };
-
-  const stats = [
-    {
-      label: 'Total Events',
-      value: logs.length,
-      color: 'from-blue-500 to-cyan-600',
-    },
-    {
-      label: 'Critical',
-      value: logs.filter((l) => l.severity === 'critical').length,
-      color: 'from-red-500 to-pink-600',
-    },
-    {
-      label: 'Failed Actions',
-      value: logs.filter((l) => l.status === 'failed').length,
-      color: 'from-orange-500 to-red-600',
-    },
-    {
-      label: 'Warnings',
-      value: logs.filter((l) => l.status === 'warning').length,
-      color: 'from-amber-500 to-orange-600',
-    },
-  ];
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
-      <main className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Page Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl text-gray-900 mb-2">Audit Log</h1>
-          <p className="text-gray-600">Track all system activities and user actions</p>
-        </div>
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {stats.map((stat) => (
-            <Card key={stat.label} className="p-4 bg-white border border-gray-200 shadow-sm">
-              <div className="text-2xl text-gray-900 mb-1">{stat.value}</div>
-              <div className="text-sm text-gray-600">{stat.label}</div>
-            </Card>
-          ))}
-        </div>
-
-        {/* Filters Bar */}
-        <Card className="p-4 bg-white border border-gray-200 shadow-sm mb-6">
-          <div className="flex flex-col lg:flex-row gap-3">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-              <Input
-                placeholder="Search logs by user, action, or details..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-
-            {/* Category Filter */}
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full lg:w-40">
-                <Filter className="size-4 mr-2" />
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="auth">Authentication</SelectItem>
-                <SelectItem value="exam">Exams</SelectItem>
-                <SelectItem value="user">Users</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="question">Questions</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Severity Filter */}
-            <Select value={severityFilter} onValueChange={setSeverityFilter}>
-              <SelectTrigger className="w-full lg:w-36">
-                <SelectValue placeholder="Severity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Severity</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Status Filter */}
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full lg:w-36">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Export Button */}
-            <Button
-              onClick={handleExportLogs}
-              variant="outline"
-              className="gap-2"
-            >
-              <Download className="size-4" />
-              Export
-            </Button>
-          </div>
-        </Card>
-
-        {/* Logs Table */}
-        <Card className="bg-white border border-gray-200 shadow-md overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left p-4 text-sm text-gray-700">Timestamp</th>
-                  <th className="text-left p-4 text-sm text-gray-700">User</th>
-                  <th className="text-left p-4 text-sm text-gray-700">Action</th>
-                  <th className="text-left p-4 text-sm text-gray-700">Category</th>
-                  <th className="text-left p-4 text-sm text-gray-700">Severity</th>
-                  <th className="text-left p-4 text-sm text-gray-700">Details</th>
-                  <th className="text-center p-4 text-sm text-gray-700">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="p-4">
-                      <div className="text-sm text-gray-900 flex items-center gap-2">
-                        <Calendar className="size-3 text-gray-400" />
-                        {log.timestamp}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-gray-900 flex items-center gap-2">
-                        <User className="size-3 text-gray-400" />
-                        {log.user}
-                      </div>
-                      <div className="text-xs text-gray-500">{log.ipAddress}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-gray-900 flex items-center gap-2">
-                        <Activity className="size-3 text-gray-400" />
-                        {log.action}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <Badge className={getCategoryBadge(log.category)}>{log.category}</Badge>
-                    </td>
-                    <td className="p-4">
-                      <Badge className={getSeverityBadge(log.severity)}>{log.severity}</Badge>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-gray-700 max-w-md truncate">
-                        {log.details}
-                      </div>
-                    </td>
-                    <td className="p-4 text-center">{getStatusIcon(log.status)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {filteredLogs.length === 0 && (
-              <div className="text-center py-12 text-gray-500">
-                <FileText className="size-12 mx-auto mb-3 text-gray-400" />
-                <p>No audit logs found</p>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        {/* Results Count */}
-        {filteredLogs.length > 0 && (
-          <div className="mt-4 text-center text-sm text-gray-600">
-            Showing {filteredLogs.length} of {logs.length} log entries
-          </div>
-        )}
-      </main>
-    </div>
-  );
+  return <main className="mx-auto max-w-7xl px-4 py-6 md:px-6"><div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-semibold text-gray-900">Audit Log</h2><p className="mt-1 text-sm text-gray-500">Review important administrative and system changes across the examination platform.</p></div><Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button></div>
+    <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[["Total Events", stats?.total_events], ["Last 24 Hours", stats?.events_last_24h], ["Admin Actions", stats?.admin_actions], ["Failed Operations", stats?.failed_operations]].map(([label, value]) => <Card key={label as string} className="border-gray-200 p-4"><p className="text-2xl font-semibold text-gray-900">{value ?? "-"}</p><p className="text-sm text-gray-500">{label}</p></Card>)}</div>
+    <Card className="mb-5 p-4"><div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6"><div className="relative xl:col-span-2"><Search className="absolute left-3 top-2.5 size-4 text-gray-400" /><Input className="pl-9" value={filters.search ?? ""} onChange={(event) => setFilter("search", event.target.value)} placeholder="Search actor, action, target..." /></div><select value={filters.actor_role ?? ""} onChange={(event) => setFilter("actor_role", event.target.value)} className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm"><option value="">All Roles</option><option value="admin">Admin</option><option value="teacher">Teacher</option><option value="system">System</option></select><select value={filters.category ?? ""} onChange={(event) => setFilter("category", event.target.value)} className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm"><option value="">All Categories</option>{categories.map((item) => <option key={item} value={item}>{item.replace(/_/g, " ")}</option>)}</select><select value={filters.action ?? ""} onChange={(event) => setFilter("action", event.target.value)} className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm"><option value="">All Actions</option>{actions.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select><select value={filters.outcome ?? ""} onChange={(event) => setFilter("outcome", event.target.value)} className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm"><option value="">All Outcomes</option><option value="SUCCESS">Success</option><option value="FAILED">Failed</option></select><Input type="date" value={filters.date_from ?? ""} onChange={(event) => setFilter("date_from", event.target.value)} /><Input type="date" value={filters.date_to ?? ""} onChange={(event) => setFilter("date_to", event.target.value)} /><Button variant="outline" onClick={() => setFilters(initialFilters)}>Reset Filters</Button><Button onClick={() => void exportCsv()}><Download className="size-4" />Export</Button></div></Card>
+    <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr>{["Time", "Actor", "Role", "Action", "Target", "Outcome", "Details"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500"><LoaderCircle className="mr-2 inline size-4 animate-spin" />Loading audit logs...</td></tr> : error ? <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500">Audit logs could not be loaded. <Button size="sm" variant="outline" onClick={() => void load()}>Retry</Button></td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500"><FileText className="mx-auto mb-2 size-7" />No audit events match the current filters.</td></tr> : items.map((item) => <tr key={item.audit_log_id} className="border-t border-gray-100"><td className="px-4 py-3 text-xs text-gray-500">{dateTime(item.created_at)}</td><td className="px-4 py-3"><p className="font-medium">{item.actor.full_name ?? (item.actor.school_id ? item.actor.school_id : "System")}</p>{item.actor.school_id && <p className="text-xs text-gray-500">{item.actor.school_id}</p>}</td><td className="px-4 py-3"><span className="rounded-full bg-gray-100 px-2 py-1 text-xs">{item.actor.role ?? "-"}</span></td><td className="px-4 py-3">{item.action_label}</td><td className="px-4 py-3">{target(item)}</td><td className="px-4 py-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${item.outcome === "SUCCESS" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{item.outcome === "SUCCESS" ? <CheckCircle className="size-3" /> : <AlertCircle className="size-3" />}{item.outcome === "SUCCESS" ? "Success" : "Failed"}</span></td><td className="px-4 py-3"><Button size="sm" variant="outline" onClick={() => void showDetail(item.audit_log_id)}><Eye className="size-4" />View</Button></td></tr>)}</tbody></table></div></Card>
+    <div className="mt-4 flex items-center justify-between text-sm text-gray-600"><span>Showing {start}-{end} of {total} events</span><div className="flex items-center gap-2"><select value={String(filters.page_size)} onChange={(event) => setFilters((current) => ({ ...current, page: 1, page_size: Number(event.target.value) }))} className="h-8 rounded border px-2"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select><Button size="sm" variant="outline" disabled={Number(filters.page) <= 1} onClick={() => setFilters((current) => ({ ...current, page: Number(current.page) - 1 }))}>Previous</Button><span>Page {filters.page}</span><Button size="sm" variant="outline" disabled={end >= total} onClick={() => setFilters((current) => ({ ...current, page: Number(current.page) + 1 }))}>Next</Button></div></div>
+    <Dialog open={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null); }}><DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>Audit Event #{selected?.audit_log_id}</DialogTitle><DialogDescription>{selected?.action_label} ({selected?.action})</DialogDescription></DialogHeader>{selected && <div className="grid gap-3 text-sm sm:grid-cols-2"><p><strong>Time:</strong> {dateTime(selected.created_at)}</p><p><strong>Outcome:</strong> {selected.outcome}</p><p><strong>Actor:</strong> {selected.actor.full_name ?? "System"}</p><p><strong>School ID:</strong> {selected.actor.school_id ?? "-"}</p><p><strong>Role:</strong> {selected.actor.role ?? "system"}</p><p><strong>Target:</strong> {selected.entity_type} #{selected.entity_id}</p><p><strong>Request ID:</strong> {selected.request_id ?? "-"}</p><p><strong>Client IP:</strong> {selected.client_ip ?? "-"}</p><p className="sm:col-span-2"><strong>Browser / User Agent:</strong> {selected.user_agent ?? "-"}</p><div className="sm:col-span-2 rounded-lg bg-gray-50 p-3"><strong>Metadata / Changes</strong><dl className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(selected.metadata).length ? Object.entries(selected.metadata).map(([key, value]) => <div key={key}><dt className="text-xs text-gray-500">{metadataLabel(key)}</dt><dd>{Array.isArray(value) ? value.join(", ") : String(value ?? "-")}</dd></div>) : <span className="text-gray-500">No additional metadata.</span>}</dl></div></div>}</DialogContent></Dialog>
+  </main>;
 }

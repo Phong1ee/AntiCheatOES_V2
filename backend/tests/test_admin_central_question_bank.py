@@ -9,6 +9,7 @@ from database import Base
 from src.a_db_config import (
     Attempt,
     AttemptQuestion,
+    AuditLog,
     Chapter,
     ChapterLO,
     ChapterQuestion,
@@ -115,6 +116,9 @@ class AdminCentralQuestionBankTests(unittest.TestCase):
         self.assertEqual(question.created_by, "A1")
         update_central_question(created["question_id"], self._payload(chapter_ids=[2], lo_ids=[12]), self._admin(), {}, self.db)
         self.assertEqual([link.lo_id for link in self.db.get(Question, created["question_id"]).lo_questions], [12])
+        audits = self.db.query(AuditLog).order_by(AuditLog.audit_log_id).all()
+        self.assertEqual([audit.action for audit in audits], ["QUESTION_CREATED", "QUESTION_UPDATED"])
+        self.assertNotIn("What is normalization?", str(audits[-1].metadata_json))
 
     def test_invalid_lo_rolls_back_and_non_admin_is_rejected(self):
         created = self._create(lo_ids=[10, 11])
@@ -130,6 +134,7 @@ class AdminCentralQuestionBankTests(unittest.TestCase):
         unused = self._create()
         delete_central_question(unused["question_id"], self._admin(), {}, self.db)
         self.assertIsNone(self.db.get(Question, unused["question_id"]))
+        self.assertEqual(self.db.query(AuditLog).order_by(AuditLog.audit_log_id).all()[-1].action, "QUESTION_DELETED")
         referenced = self._create(question_text="Referenced")
         self.db.add(Exam(manage_by="T1", title="Exam", examcode="E1", max_attempt=1, duration_minutes=30, subject_id="DB"))
         self.db.flush()

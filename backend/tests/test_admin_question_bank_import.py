@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from src.a_db_config import Chapter, ChapterLO, ChapterQuestion, LO, LOQuestion, Option, Question, Subject, User
+from src.a_db_config import AuditLog, Chapter, ChapterLO, ChapterQuestion, LO, LOQuestion, Option, Question, Subject, User
 from src.route.adminRoute import import_question_bank, import_question_bank_data
 from src.service.question_bank_import_parser import parse_question_bank_text
 
@@ -142,6 +142,10 @@ class AdminQuestionBankImportTests(unittest.TestCase):
         self.assertEqual(sum(option.is_correct for option in true_false.options), 1)
         self.assertEqual(essay.options, [])
         self.assertEqual(len(essay.lo_questions), 1)
+        audit = self.db.query(AuditLog).one()
+        self.assertEqual(audit.action, "QUESTION_IMPORT_COMPLETED")
+        self.assertEqual(audit.metadata_json["imported_count"], 3)
+        self.assertNotIn("question", str(audit.metadata_json).lower())
 
     def test_successful_text_pdf_import(self):
         result = self._endpoint_import("questions.pdf", _pdf_bytes(IMPORT_TEXT))

@@ -1,4 +1,6 @@
-from datetime import date, datetime
+import csv
+from datetime import date, datetime, time, timedelta
+from io import StringIO
 from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,11 +9,11 @@ import tempfile
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 from starlette.concurrency import run_in_threadpool
 
 from database import get_db
@@ -43,9 +45,12 @@ from src.a_db_config import (
     BulkDataRequest,
     BulkDataRequestStatus,
     BulkDataRequestType,
+    AuditLog,
 )
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token, TEACHER_ONLY
 from src.service.audit_service import record_audit
+from src.service.audit_catalog import audit_action_info, hidden_audit_actions, visible_audit_actions
+from src.service.event_contract import sanitize_metadata
 from src.service.cache_invalidation_contract import admin_enrollment_updated, admin_permission_updated, deliver_invalidation
 from src.service.cache_service import admin_teacher_permissions_key, cache_aside
 from src.service.outbox_publisher import enqueue_outbox_event
@@ -482,7 +487,7 @@ def build_question_bank_import_preview(
 ) -> dict:
     """Resolve an import document against the taxonomy without changing it."""
 
-    _admin(db, current_user["school_id"])
+    admin = _admin(db, current_user["school_id"])
     selected_subject_id = subject_id.strip()
     subject = db.query(Subject).filter(Subject.subject_id == selected_subject_id).first()
     if not subject:
@@ -873,7 +878,7 @@ def import_question_bank_data(
 ) -> dict:
     """Persist one validated import in a single all-or-nothing transaction."""
 
-    _admin(db, current_user["school_id"])
+    admin = _admin(db, current_user["school_id"])
     selected_subject_id = subject_id.strip()
 
     try:
@@ -899,6 +904,18 @@ def import_question_bank_data(
             parsed, selected_subject_id, current_user, db, creator_school_id=creator_school_id
         )
         if commit:
+            record_audit(
+                db, actor_school_id=admin.school_id, actor_role=admin.role,
+                action="QUESTION_IMPORT_COMPLETED", entity_type="subject", entity_id=selected_subject_id,
+                metadata={
+                    "subject_id": selected_subject_id,
+                    "imported_count": result["imported_count"],
+                    "duplicate_skipped_count": result["duplicate_skipped_count"],
+                    "created_chapter_count": result["chapters_created"],
+                    "created_lo_count": result["learning_objectives_created"],
+                    "new_subject": False,
+                },
+            )
             db.commit()
     except HTTPException:
         if commit:
@@ -929,7 +946,7 @@ def import_new_subject_question_bank_data(
 ) -> dict:
     """Create a new Subject and its Question Bank in one transaction."""
 
-    _admin(db, current_user["school_id"])
+    admin = _admin(db, current_user["school_id"])
     if not confirmed:
         raise HTTPException(status_code=400, detail="Creating a new Subject requires explicit confirmation")
 
@@ -951,6 +968,18 @@ def import_new_subject_question_bank_data(
         db.flush()
         result = _persist_imported_question_bank(parsed, subject.subject_id, current_user, db)
         if commit:
+            record_audit(
+                db, actor_school_id=admin.school_id, actor_role=admin.role,
+                action="QUESTION_IMPORT_COMPLETED", entity_type="subject", entity_id=subject.subject_id,
+                metadata={
+                    "subject_id": subject.subject_id,
+                    "imported_count": result["imported_count"],
+                    "duplicate_skipped_count": result["duplicate_skipped_count"],
+                    "created_chapter_count": result["chapters_created"],
+                    "created_lo_count": result["learning_objectives_created"],
+                    "new_subject": True,
+                },
+            )
             db.commit()
     except HTTPException:
         if commit:
@@ -1009,6 +1038,12 @@ async def import_question_bank(
                 scope=f"subject:{subject_id.strip()}",
                 metadata={"subject_id": subject_id.strip(), "new_subject": False},
             )
+            if not duplicate:
+                record_audit(
+                    db, actor_school_id=admin.school_id, actor_role=admin.role,
+                    action="QUESTION_IMPORT_QUEUED", entity_type="background_job", entity_id=job.job_id,
+                    metadata={"subject_id": subject_id.strip(), "job_id": job.job_id, "row_count": len(parsed.questions)},
+                )
             db.commit()
             return {**import_job_summary(job), "duplicate": duplicate, "background": True}
         except Exception:
@@ -1049,6 +1084,12 @@ async def import_new_subject_question_bank(
                 scope=f"new-subject:{parsed.subject.subject_id}",
                 metadata={"subject_id": parsed.subject.subject_id, "new_subject": True},
             )
+            if not duplicate:
+                record_audit(
+                    db, actor_school_id=admin.school_id, actor_role=admin.role,
+                    action="QUESTION_IMPORT_QUEUED", entity_type="background_job", entity_id=job.job_id,
+                    metadata={"subject_id": parsed.subject.subject_id, "job_id": job.job_id, "row_count": len(parsed.questions), "new_subject": True},
+                )
             db.commit()
             return {**import_job_summary(job), "duplicate": duplicate, "background": True}
         except Exception:
@@ -1207,6 +1248,11 @@ def create_central_question(
         db.flush()
         _replace_taxonomy(db, question, chapters, los)
         _replace_options(db, question, payload)
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_CREATED", entity_type="question", entity_id=question.question_id,
+            metadata={"subject_id": question.subject_id, "question_type": _value(question.question_type), "question_status": _question_status(question)},
+        )
         db.commit()
         return _serialize_question(_question_query(db).filter(Question.question_id == question.question_id).one())
     except HTTPException:
@@ -1227,7 +1273,7 @@ def update_central_question(
 ):
     del role_check
     try:
-        _admin(db, current_user["school_id"])
+        admin = _admin(db, current_user["school_id"])
         question = _locked_question(db, question_id)
         if _question_status(question) != "approved":
             raise HTTPException(status_code=409, detail="Only approved central questions can be edited")
@@ -1235,6 +1281,16 @@ def update_central_question(
         _replace_options(db, question, payload)
         _apply_snapshot(question, payload)
         _replace_taxonomy(db, question, chapters, los)
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_UPDATED", entity_type="question", entity_id=question.question_id,
+            metadata={
+                "subject_id": question.subject_id,
+                "question_type": _value(question.question_type),
+                "question_status": _question_status(question),
+                "changed_fields": sorted(payload.model_fields_set),
+            },
+        )
         db.commit()
         db.expire_all()
         return _serialize_question(_question_query(db).filter(Question.question_id == question_id).one())
@@ -1255,11 +1311,16 @@ def delete_central_question(
 ):
     del role_check
     try:
-        _admin(db, current_user["school_id"])
+        admin = _admin(db, current_user["school_id"])
         question = _locked_question(db, question_id)
         if _question_status(question) != "approved":
             raise HTTPException(status_code=409, detail="Only approved central questions can be deleted")
         _ensure_question_can_be_deleted(db, question)
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_DELETED", entity_type="question", entity_id=question.question_id,
+            metadata={"subject_id": question.subject_id, "question_type": _value(question.question_type), "question_status": _question_status(question)},
+        )
         db.delete(question)
         db.commit()
     except HTTPException:
@@ -1347,6 +1408,11 @@ def approve_pending_question(
             QuestionRevision.question_status == "rejected",
         ).update({"rejection_reason": None}, synchronize_session=False)
         question.question_status = QuestionStatus.approved
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_APPROVED", entity_type="question", entity_id=question.question_id,
+            metadata={"question_id": question.question_id, "subject_id": question.subject_id},
+        )
         db.commit()
         db.expire_all()
         return _serialize_question(_question_query(db).filter(Question.question_id == question_id).one())
@@ -1380,6 +1446,11 @@ def reject_pending_question(
             admin.school_id, datetime.now(), reason,
         ))
         question.question_status = QuestionStatus.rejected
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_REJECTED", entity_type="question", entity_id=question.question_id,
+            metadata={"question_id": question.question_id, "subject_id": question.subject_id, "reason": reason[:500]},
+        )
         db.commit()
         db.expire_all()
         return _serialize_question(_question_query(db).filter(Question.question_id == question_id).one())
@@ -1479,6 +1550,11 @@ def approve_pending_revision(
         revision.approved_by = admin.school_id
         revision.approved_at = datetime.now()
         revision.rejection_reason = None
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_REVISION_APPROVED", entity_type="question_revision", entity_id=revision.revision_id,
+            metadata={"question_id": question.question_id, "revision_id": revision.revision_id, "subject_id": revision.subject_id},
+        )
         db.commit()
         db.expire_all()
         refreshed_revision = _revision_query(db).filter(QuestionRevision.revision_id == revision_id).one()
@@ -1510,6 +1586,11 @@ def reject_pending_revision(
         revision.approved_by = admin.school_id
         revision.approved_at = datetime.now()
         revision.rejection_reason = reason
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="QUESTION_REVISION_REJECTED", entity_type="question_revision", entity_id=revision.revision_id,
+            metadata={"question_id": revision.question_id, "revision_id": revision.revision_id, "subject_id": revision.subject_id, "reason": reason[:500]},
+        )
         db.commit()
         db.expire_all()
         return _serialize_snapshot(_revision_query(db).filter(QuestionRevision.revision_id == revision_id).one(), db)
@@ -1734,6 +1815,150 @@ def _management_admin(db: Session, current_user: dict) -> User:
     return _admin(db, current_user["school_id"])
 
 
+def _audit_datetime(value: datetime | date | None, *, end_of_day: bool = False) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.combine(value, time.max if end_of_day else time.min)
+
+
+def _audit_actor(row: AuditLog, actor: User | None) -> dict:
+    if row.actor_school_id is None:
+        return {"school_id": None, "full_name": "System", "role": "system"}
+    return {
+        "school_id": row.actor_school_id,
+        "full_name": actor.full_name if actor else None,
+        "role": _user_role(actor) if actor else row.actor_role,
+    }
+
+
+def _audit_query(
+    db: Session, *, search: str | None = None, actor_role: str | None = None,
+    category: str | None = None, action: str | None = None, outcome: str | None = None,
+    date_from: datetime | date | None = None, date_to: datetime | date | None = None,
+):
+    actor = aliased(User)
+    query = db.query(AuditLog, actor).outerjoin(actor, AuditLog.actor_school_id == actor.school_id)
+    query = query.filter(~AuditLog.action.in_(hidden_audit_actions()))
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(
+            AuditLog.actor_school_id.ilike(term), actor.full_name.ilike(term), AuditLog.action.ilike(term),
+            AuditLog.entity_type.ilike(term), AuditLog.entity_id.ilike(term), AuditLog.request_id.ilike(term),
+        ))
+    if actor_role:
+        query = query.filter(AuditLog.actor_role == actor_role.strip().lower())
+    if action:
+        query = query.filter(AuditLog.action == action.strip().upper())
+    if outcome:
+        normalized_outcome = outcome.strip().upper()
+        if normalized_outcome not in {"SUCCESS", "FAILED"}:
+            raise HTTPException(status_code=422, detail="outcome must be SUCCESS or FAILED")
+        query = query.filter(AuditLog.outcome == normalized_outcome)
+    if category:
+        category_actions = [item["code"] for item in visible_audit_actions() if item["category"] == category.strip().upper()]
+        query = query.filter(AuditLog.action.in_(category_actions or ["__NO_SUCH_AUDIT_ACTION__"]))
+    if (start := _audit_datetime(date_from)) is not None:
+        query = query.filter(AuditLog.created_at >= start)
+    if (end := _audit_datetime(date_to, end_of_day=True)) is not None:
+        query = query.filter(AuditLog.created_at <= end)
+    return query
+
+
+def _serialize_audit_item(row: AuditLog, actor: User | None, *, detail: bool = False) -> dict:
+    info = audit_action_info(row.action)
+    result = {
+        "audit_log_id": row.audit_log_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "actor": _audit_actor(row, actor),
+        "action": row.action,
+        "action_label": info["label"],
+        "category": info["category"],
+        "entity": {"type": row.entity_type, "id": row.entity_id},
+        "outcome": row.outcome,
+        "request_id": row.request_id,
+    }
+    if detail:
+        result.update({
+            "entity_type": row.entity_type, "entity_id": row.entity_id,
+            "client_ip": row.client_ip, "user_agent": row.user_agent,
+            "metadata": sanitize_metadata(row.metadata_json),
+        })
+    return result
+
+
+@router.get("/audit-logs/actions")
+def audit_log_actions(current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    actions = visible_audit_actions()
+    return {"actions": actions, "categories": sorted({item["category"] for item in actions})}
+
+
+@router.get("/audit-logs/stats")
+def audit_log_stats(current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    visible = ~AuditLog.action.in_(hidden_audit_actions())
+    since = datetime.now() - timedelta(hours=24)
+    return {
+        "total_events": db.query(func.count(AuditLog.audit_log_id)).filter(visible).scalar() or 0,
+        "events_last_24h": db.query(func.count(AuditLog.audit_log_id)).filter(visible, AuditLog.created_at >= since).scalar() or 0,
+        "admin_actions": db.query(func.count(AuditLog.audit_log_id)).filter(visible, AuditLog.actor_role == "admin").scalar() or 0,
+        "teacher_actions": db.query(func.count(AuditLog.audit_log_id)).filter(visible, AuditLog.actor_role == "teacher").scalar() or 0,
+        "failed_operations": db.query(func.count(AuditLog.audit_log_id)).filter(visible, AuditLog.outcome == "FAILED").scalar() or 0,
+    }
+
+
+@router.get("/audit-logs/export")
+def export_audit_logs(
+    search: str | None = None, actor_role: str | None = None, category: str | None = None,
+    action: str | None = None, outcome: str | None = None, date_from: datetime | date | None = None,
+    date_to: datetime | date | None = None, current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    query = _audit_query(db, search=search, actor_role=actor_role, category=category, action=action, outcome=outcome, date_from=date_from, date_to=date_to)
+    if query.count() > 5000:
+        raise HTTPException(status_code=422, detail="Export is limited to 5000 matching audit logs")
+    output = StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["Timestamp", "Actor Name", "School ID", "Role", "Action", "Category", "Entity Type", "Entity ID", "Outcome", "Request ID", "Client IP"])
+    for row, actor in query.order_by(AuditLog.created_at.desc(), AuditLog.audit_log_id.desc()).all():
+        actor_data = _audit_actor(row, actor)
+        values = [row.created_at.isoformat() if row.created_at else "", actor_data["full_name"] or "", actor_data["school_id"] or "", actor_data["role"] or "", row.action, audit_action_info(row.action)["category"], row.entity_type, row.entity_id, row.outcome, row.request_id or "", row.client_ip or ""]
+        writer.writerow([f"'{value}" if isinstance(value, str) and value[:1] in {"=", "+", "-", "@"} else value for value in values])
+    return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=audit-logs.csv"})
+
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100), search: str | None = None,
+    actor_role: str | None = None, category: str | None = None, action: str | None = None, outcome: str | None = None,
+    date_from: datetime | date | None = None, date_to: datetime | date | None = None,
+    current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
+):
+    del role_check
+    _management_admin(db, current_user)
+    query = _audit_query(db, search=search, actor_role=actor_role, category=category, action=action, outcome=outcome, date_from=date_from, date_to=date_to)
+    total = query.order_by(None).count()
+    rows = query.order_by(AuditLog.created_at.desc(), AuditLog.audit_log_id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {"items": [_serialize_audit_item(row, actor) for row, actor in rows], "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("/audit-logs/{audit_log_id}")
+def get_audit_log(audit_log_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db)):
+    del role_check
+    _management_admin(db, current_user)
+    actor = aliased(User)
+    row = db.query(AuditLog, actor).outerjoin(actor, AuditLog.actor_school_id == actor.school_id).filter(AuditLog.audit_log_id == audit_log_id, ~AuditLog.action.in_(hidden_audit_actions())).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Audit log not found")
+    return _serialize_audit_item(*row, detail=True)
+
+
 @router.get("/users")
 def list_users(
     search: Annotated[str | None, Query(max_length=100)] = None,
@@ -1846,7 +2071,9 @@ def _build_user_import_preview(content: bytes, db: Session) -> dict:
     return build_user_import_preview(parse_user_import_xlsx(content), db)
 
 
-def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session, *, commit: bool = True) -> dict:
+def import_users_from_rows(
+    rows: list[ParsedUserImportRow], db: Session, *, commit: bool = True, audit_actor: User | None = None,
+) -> dict:
     """Persist an already reparsed batch in one transaction after strict validation."""
     preview = build_user_import_preview(rows, db)
     if preview["error_count"]:
@@ -1870,6 +2097,12 @@ def import_users_from_rows(rows: list[ParsedUserImportRow], db: Session, *, comm
         db.flush()
         role_counts = {role: sum(_user_role(user) == role for user in users) for role in ("student", "teacher", "admin")}
         if commit:
+            if audit_actor is not None:
+                record_audit(
+                    db, actor_school_id=audit_actor.school_id, actor_role=audit_actor.role,
+                    action="USER_IMPORT_COMPLETED", entity_type="user_import", entity_id="batch",
+                    metadata={"imported_count": len(users), "role_counts": role_counts},
+                )
             db.commit()
         return {"success": True, "imported_count": len(users), "role_counts": role_counts}
     except HTTPException:
@@ -1888,7 +2121,7 @@ async def import_users(
     role_check: dict = Depends(ADMIN_ONLY), db: Session = Depends(get_db),
 ):
     del role_check
-    await run_in_threadpool(_management_admin, db, current_user)
+    admin = await run_in_threadpool(_management_admin, db, current_user)
     if not file.filename or not file.filename.casefold().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
     content = await file.read()
@@ -1912,6 +2145,12 @@ async def import_users(
                 total_rows=len(rows),
                 scope="users",
             )
+            if not duplicate:
+                record_audit(
+                    db, actor_school_id=admin.school_id, actor_role=admin.role,
+                    action="USER_IMPORT_QUEUED", entity_type="background_job", entity_id=job.job_id,
+                    metadata={"job_id": job.job_id, "row_count": len(rows)},
+                )
             db.commit()
             return {**import_job_summary(job), "duplicate": duplicate, "background": True}
         except Exception:
@@ -1919,7 +2158,7 @@ async def import_users(
             if job is not None:
                 delete_staged_source(job.job_id, str((job.result_metadata or {}).get("source_suffix") or ""))
             raise
-    return await run_in_threadpool(import_users_from_rows, rows, db)
+    return await run_in_threadpool(import_users_from_rows, rows, db, audit_actor=admin)
 
 
 _BULK_REQUEST_RESULT_KEYS = {
@@ -2222,7 +2461,7 @@ def create_user(
 ):
     del role_check
     try:
-        _management_admin(db, current_user)
+        admin = _management_admin(db, current_user)
         user = build_new_user(
             db,
             school_id=payload.school_id,
@@ -2234,6 +2473,12 @@ def create_user(
             date_of_birth=payload.date_of_birth,
         )
         db.add(user)
+        db.flush()
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="USER_CREATED", entity_type="user", entity_id=user.id,
+            metadata={"target_school_id": user.school_id, "target_role": _user_role(user)},
+        )
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)
@@ -2261,6 +2506,7 @@ def update_user(
         admin = _management_admin(db, current_user)
         user = _locked_user(db, user_id)
         is_own_admin_account = user.id == admin.id and _user_role(user) == "admin"
+        changed_fields = sorted(payload.model_fields_set - {"password"})
 
         # Reject all prohibited account mutations before changing any managed fields.
         if payload.password is not None:
@@ -2299,6 +2545,15 @@ def update_user(
             if _user_role(user) == "admin" and new_role != UserRole.admin:
                 _ensure_not_last_active_admin(db, user)
             user.role = new_role
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="USER_UPDATED", entity_type="user", entity_id=user.id,
+            metadata={
+                "target_school_id": user.school_id,
+                "target_role": _user_role(user),
+                "changed_fields": changed_fields,
+            },
+        )
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)
@@ -2331,6 +2586,11 @@ def change_own_password(
         if check_password_hash(admin.password_hash, new_password):
             raise HTTPException(status_code=400, detail="New password must be different from the current password")
         admin.password_hash = generate_password_hash(new_password)
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="ADMIN_PASSWORD_CHANGED", entity_type="user", entity_id=admin.id,
+            metadata={"target_school_id": admin.school_id, "target_role": _user_role(admin)},
+        )
         db.commit()
         return {"success": True, "message": "Password changed successfully"}
     except HTTPException:
@@ -2389,13 +2649,18 @@ def unlock_user(
 ):
     del role_check
     try:
-        _management_admin(db, current_user)
+        admin = _management_admin(db, current_user)
         user = _locked_user(db, user_id)
         if not user.is_locked:
             raise HTTPException(status_code=409, detail="User is not locked")
         user.is_locked = False
         user.locked_at = None
         user.locked_by = None
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="USER_UNLOCKED", entity_type="user", entity_id=user.id,
+            metadata={"target_school_id": user.school_id, "target_role": _user_role(user)},
+        )
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)
@@ -2459,7 +2724,7 @@ def restore_user(
     """Restore a soft-deleted account without re-enabling it implicitly."""
     del role_check
     try:
-        _management_admin(db, current_user)
+        admin = _management_admin(db, current_user)
         user = _locked_user(db, user_id, include_deleted=True)
         if user.deleted_at is None:
             raise HTTPException(status_code=409, detail="User is not deleted")
@@ -2467,6 +2732,11 @@ def restore_user(
         user.deleted_by = None
         # Deletion locks accounts and revokes Teacher subjects. Require the
         # existing explicit unlock/grant actions before reviving old access.
+        record_audit(
+            db, actor_school_id=admin.school_id, actor_role=admin.role,
+            action="USER_RESTORED", entity_type="user", entity_id=user.id,
+            metadata={"target_school_id": user.school_id, "target_role": _user_role(user)},
+        )
         db.commit()
         db.refresh(user)
         return _serialize_admin_user(user)

@@ -562,6 +562,7 @@ def update_result_strategy(
 
     try:
         strategy = set_result_strategy(db, exam, payload.strategy)
+        record_audit(db, actor_school_id=teacher.school_id, actor_role=teacher.role, action="RESULT_STRATEGY_UPDATED", entity_type="exam", entity_id=exam.exam_id, metadata={"result_strategy": strategy})
         db.commit()
         return {"resultStrategy": strategy}
     except Exception:

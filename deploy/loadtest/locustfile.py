@@ -8,6 +8,7 @@ before authenticated requests are made.
 import os
 import threading
 import uuid
+from datetime import datetime, timedelta
 
 from locust import HttpUser, between, events, task
 from locust.exception import StopUser
@@ -19,6 +20,8 @@ ADMIN_COUNT = 2
 PASSWORD_ENV = "LOADTEST_PASSWORD"
 _allocation_lock = threading.Lock()
 _allocations: dict[str, int] = {"STUDENT": 0, "TEACHER": 0, "ADMIN": 0}
+_audit_mutation_lock = threading.Lock()
+_audit_mutation_started = False
 
 
 def _account(role: str, index: int) -> str:
@@ -220,6 +223,40 @@ class TeacherUser(BaseUser):
     def monitor_subjects(self) -> None:
         if self.authenticated:
             self.request("GET", "/api/teacher/anti-cheat/subjects", name="teacher anti-cheat subjects")
+
+    @task(1)
+    def audited_disposable_mutation(self) -> None:
+        """Exercise one real audited mutation without conflicting with exam traffic."""
+        global _audit_mutation_started
+        if not self.authenticated:
+            return
+        with _audit_mutation_lock:
+            if _audit_mutation_started:
+                return
+            _audit_mutation_started = True
+        now = datetime.now()
+        with self.request(
+            "POST",
+            "/api/teacher/add_exam",
+            json={
+                "title": f"Disposable audit probe {uuid.uuid4()}",
+                "examcode": None,
+                "max_attempt": 0,
+                "description": "One-shot audited capacity probe.",
+                "duration_minutes": 30,
+                "start_time": now.isoformat(),
+                "end_time": (now + timedelta(hours=1)).isoformat(),
+                "status": "draft",
+                "result_visibility": "hidden",
+                "subject_id": "LOAD101",
+            },
+            name="teacher audited exam create",
+            catch_response=True,
+        ) as response:
+            if response.status_code != 201:
+                response.failure(f"audited mutation rejected: HTTP {response.status_code}")
+            else:
+                response.success()
 
 
 class AdminUser(BaseUser):

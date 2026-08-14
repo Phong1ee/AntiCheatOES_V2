@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database import Base
-from src.a_db_config import Subject, TeacherSubject, User, UserRole
+from src.a_db_config import AuditLog, Subject, TeacherSubject, User, UserRole
 from src.controller.authController import AuthController
 from src.middleware.authMiddleware import ADMIN_ONLY, verify_token
 from src.route.adminRoute import (
@@ -116,6 +116,9 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertEqual(stored.phone, "0123456789")
         self.assertEqual(stored.date_of_birth, date(2000, 1, 2))
         self.assertNotIn("password_hash", created)
+        audit = self.db.query(AuditLog).one()
+        self.assertEqual((audit.action, audit.entity_type, audit.entity_id), ("USER_CREATED", "user", str(created["id"])))
+        self.assertNotIn("password", str(audit.metadata_json).lower())
         detail = get_user_detail(created["id"], False, self.current_admin, None, self.db)
         self.assertEqual(detail["email"], "new.student@example.edu")
         self._expect_http_error(
@@ -170,6 +173,7 @@ class AdminUserManagementTests(unittest.TestCase):
         permission = self.db.query(TeacherSubject).one()
         self.assertEqual(self.teacher.role, UserRole.student)
         self.assertFalse(permission.is_active)
+        self.assertEqual(self.db.query(AuditLog).one().action, "USER_UPDATED")
 
     def test_admin_cannot_change_another_users_password(self):
         old_hash = self.teacher.password_hash
@@ -230,6 +234,9 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertNotEqual(self.admin.password_hash, old_hash)
         self.assertTrue(check_password_hash(self.admin.password_hash, "newpassword123"))
         self.assertFalse(check_password_hash(self.admin.password_hash, "password123"))
+        audit = self.db.query(AuditLog).one()
+        self.assertEqual(audit.action, "ADMIN_PASSWORD_CHANGED")
+        self.assertNotIn("password", str(audit.metadata_json).lower())
 
     def test_change_own_password_rejects_bad_current_or_confirmation(self):
         old_hash = self.admin.password_hash
@@ -273,6 +280,7 @@ class AdminUserManagementTests(unittest.TestCase):
             unlocked = unlock_user(self.student.id, self.current_admin, None, self.db)
             self.assertFalse(unlocked["is_locked"])
             self.assertEqual(verify_token(authorization=f"Bearer {token}")["role"], "student")
+        self.assertEqual([item.action for item in self.db.query(AuditLog).order_by(AuditLog.audit_log_id)], ["USER_LOCKED", "USER_UNLOCKED"])
 
     def test_soft_delete_deactivates_teacher_permissions_and_blocks_old_token(self):
         subject = Subject(subject_id="PHY", subject_name="Physics", subject_description="Physics subject")
@@ -287,6 +295,7 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertTrue(self.teacher.is_locked)
         self.assertFalse(self.db.query(TeacherSubject).one().is_active)
         self.assertEqual(self.db.query(User).filter(User.id == self.teacher.id).count(), 1)
+        self.assertEqual(self.db.query(AuditLog).one().action, "USER_DELETED")
         with patch("src.middleware.authMiddleware.SessionLocal", side_effect=self.Session):
             self._expect_http_error(401, lambda: verify_token(authorization=f"Bearer {token}"))
         active = list_users(current_user=self.current_admin, role_check=None, db=self.db)
@@ -307,6 +316,7 @@ class AdminUserManagementTests(unittest.TestCase):
         self.assertIsNone(self.teacher.deleted_at)
         self.assertTrue(self.teacher.is_locked)
         self.assertFalse(self.db.query(TeacherSubject).one().is_active)
+        self.assertEqual([item.action for item in self.db.query(AuditLog).order_by(AuditLog.audit_log_id)], ["USER_DELETED", "USER_RESTORED"])
         self._expect_http_error(409, lambda: restore_user(self.teacher.id, self.current_admin, None, self.db))
 
     def test_cannot_self_manage_or_remove_last_active_admin(self):

@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 from src.middleware.observabilityMiddleware import ObservabilityMiddleware
 from src.service import health_service
-from src.service.audit_service import record_audit
+from src.service.audit_service import (
+    begin_audit_request_context,
+    record_audit,
+    reset_audit_request_context,
+)
 from src.service.observability_service import begin_context, log_event
 from src.service.outbox_publisher import enqueue_outbox_event
 
@@ -97,6 +101,27 @@ class ObservabilityTests(unittest.TestCase):
             _context.reset(token)
         self.assertEqual(audit.request_id, "request-audit")
         self.assertEqual(audit.metadata_json, {"safe": True})
+
+    def test_audit_captures_sanitized_http_context_and_workers_remain_unattributed(self):
+        class Session:
+            def add(self, _item):
+                pass
+
+        audit_token = begin_audit_request_context(
+            client_ip="2001:db8::1\n",
+            user_agent=" Agent\t" + "x" * 600,
+        )
+        try:
+            audit = record_audit(Session(), actor_school_id="T1", actor_role="teacher", action="TEST", entity_type="exam", entity_id=1)
+        finally:
+            reset_audit_request_context(audit_token)
+        worker_audit = record_audit(Session(), actor_school_id=None, actor_role="system", action="WORK", entity_type="job", entity_id=2)
+
+        self.assertEqual(audit.client_ip, "2001:db8::1")
+        self.assertEqual(audit.user_agent, "Agent" + "x" * 507)
+        self.assertEqual(len(audit.user_agent), 512)
+        self.assertIsNone(worker_audit.client_ip)
+        self.assertIsNone(worker_audit.user_agent)
 
     def test_outbox_propagates_request_id_without_payload_secrets(self):
         class Session:

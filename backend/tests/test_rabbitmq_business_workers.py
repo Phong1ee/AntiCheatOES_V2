@@ -188,7 +188,7 @@ class RabbitMqBusinessWorkerTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.db.get(StudentExam, ("S1", self.exam.exam_id)).final_score, Decimal("72.00"))
 
-    def test_anti_cheat_analytics_cannot_change_authoritative_enforcement(self):
+    def test_anti_cheat_telemetry_does_not_duplicate_authoritative_events_in_shared_audit(self):
         self.attempt.status = AttemptStatus.terminated
         self.attempt.score = Decimal("0.00")
         self.attempt.violation_count = 5
@@ -198,13 +198,13 @@ class RabbitMqBusinessWorkerTests(unittest.TestCase):
 
         attempt = self.db.get(Attempt, self.attempt.attempt_id)
         self.assertEqual((attempt.status, attempt.score, attempt.violation_count), (AttemptStatus.terminated, Decimal("0.00"), 5))
-        self.assertEqual(self.db.query(AuditLog).filter(AuditLog.action == "ANTI_CHEAT_ANALYTICS_RECORDED").count(), 1)
+        self.assertEqual(self.db.query(AuditLog).filter(AuditLog.action == "ANTI_CHEAT_ANALYTICS_RECORDED").count(), 0)
 
-    def test_notification_analytics_and_import_handlers_are_persisted_or_pending_execution(self):
+    def test_internal_telemetry_handlers_do_not_write_shared_audit(self):
         handle_notification_requested({"event_id": "notification-event", "event_type": "notification.requested", "aggregate_type": "attempt", "aggregate_id": str(self.attempt.attempt_id)}, self.db)
         handle_analytics_event({"event_id": "analytics-event", "event_type": "analytics.permission_updated", "aggregate_type": "teacher_permission", "aggregate_id": "T1"}, self.db)
         self.db.commit()
-        self.assertEqual(self.db.query(AuditLog).filter(AuditLog.action.in_(["NOTIFICATION_REQUEST_RECORDED", "ANALYTICS_EVENT_RECORDED"])).count(), 2)
+        self.assertEqual(self.db.query(AuditLog).filter(AuditLog.action.in_(["NOTIFICATION_REQUEST_RECORDED", "ANALYTICS_EVENT_RECORDED"])).count(), 0)
 
         job = BackgroundJob(job_type=BackgroundJobType.user_import, requested_by="A1", business_key_hash="a" * 64)
         self.db.add(job)

@@ -19,6 +19,11 @@ _SENSITIVE_KEY_PARTS = (
     "image",
     "biometric",
     "answer",
+    "essay",
+    "file",
+    "xlsx",
+    "connection",
+    "dsn",
 )
 _MAX_METADATA_ITEMS = 20
 _MAX_METADATA_DEPTH = 3

@@ -755,6 +755,9 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_log_actor_created", "actor_school_id", "created_at"),
         Index("ix_audit_log_entity_created", "entity_type", "entity_id", "created_at"),
+        Index("ix_audit_log_created", "created_at"),
+        Index("ix_audit_log_action_created", "action", "created_at"),
+        Index("ix_audit_log_role_created", "actor_role", "created_at"),
     )
 
     audit_log_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -764,8 +767,10 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    # Prompt 15 will populate this from request middleware when it is available.
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'SUCCESS'"))
+    client_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )

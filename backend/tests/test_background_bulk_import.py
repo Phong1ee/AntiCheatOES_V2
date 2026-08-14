@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, OutboxEvent, Question, Subject, User, UserRole
+from src.a_db_config import AuditLog, BackgroundJob, BackgroundJobStatus, BackgroundJobType, OutboxEvent, Question, Subject, User, UserRole
 from src.route.adminRoute import _owned_import_job, import_users, import_users_from_rows
 from src.service.import_job_service import import_job_summary, queue_import_job
 from src.service.import_worker import handle_import_requested
@@ -103,9 +103,15 @@ class BackgroundBulkImportTests(unittest.TestCase):
         return job, duplicate
 
     def test_small_sync_import_remains_all_or_nothing(self):
-        result = import_users_from_rows(parse_user_import_xlsx(workbook_bytes(self._rows(2))), self.db)
+        result = import_users_from_rows(
+            parse_user_import_xlsx(workbook_bytes(self._rows(2))), self.db,
+            audit_actor=self.db.query(User).filter_by(school_id="A1").one(),
+        )
         self.assertEqual(result["imported_count"], 2)
         self.assertEqual(self.db.query(BackgroundJob).count(), 0)
+        audit = self.db.query(AuditLog).one()
+        self.assertEqual(audit.action, "USER_IMPORT_COMPLETED")
+        self.assertNotIn("password", str(audit.metadata_json).lower())
 
     def test_large_import_queues_compact_outbox_then_worker_completes_once(self):
         content = workbook_bytes(self._rows(3))
@@ -124,11 +130,20 @@ class BackgroundBulkImportTests(unittest.TestCase):
         self.assertEqual((completed.total_rows, completed.processed_rows, completed.success_rows, completed.failed_rows), (3, 3, 3, 0))
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 3)
         self.assertFalse(os.path.exists(os.path.join(self.temp.name, f"import_job_{job.job_id}.xlsx")))
+        completed_audits = self.db.query(AuditLog).filter_by(
+            action="USER_IMPORT_COMPLETED", entity_id=str(job.job_id)
+        ).all()
+        self.assertEqual(len(completed_audits), 1)
+        self.assertEqual(completed_audits[0].outcome, "SUCCESS")
+        self.assertNotIn("password", str(completed_audits[0].metadata_json).lower())
 
         # A restart/redelivery after completion does not run the importer twice.
         handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
         self.db.commit()
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 3)
+        self.assertEqual(self.db.query(AuditLog).filter_by(
+            action="USER_IMPORT_COMPLETED", entity_id=str(job.job_id)
+        ).count(), 1)
 
     def test_invalid_large_import_fails_without_creating_any_users(self):
         job, _ = self._queue(workbook_bytes(self._rows(2, invalid=True)), 2)
@@ -137,6 +152,17 @@ class BackgroundBulkImportTests(unittest.TestCase):
         failed = self.db.get(BackgroundJob, job.job_id)
         self.assertEqual(failed.status, BackgroundJobStatus.failed)
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 0)
+        failed_audit = self.db.query(AuditLog).filter_by(
+            action="USER_IMPORT_FAILED", entity_id=str(job.job_id)
+        ).one()
+        self.assertEqual(failed_audit.outcome, "FAILED")
+        self.assertNotIn("password", str(failed_audit.metadata_json).lower())
+
+        handle_import_requested({"event_type": "import.requested", "aggregate_id": str(job.job_id)}, self.db)
+        self.db.commit()
+        self.assertEqual(self.db.query(AuditLog).filter_by(
+            action="USER_IMPORT_FAILED", entity_id=str(job.job_id)
+        ).count(), 1)
 
     def test_same_source_uses_one_job_and_status_hides_source_details(self):
         content = workbook_bytes(self._rows(2))
@@ -165,6 +191,25 @@ class BackgroundBulkImportTests(unittest.TestCase):
         self.assertEqual(result["status"], "PENDING")
         self.assertEqual(self.db.query(User).filter(User.school_id.like("S%")).count(), 0)
         self.assertEqual(self.db.get(BackgroundJob, result["jobId"]).requested_by, "A1")
+        self.assertEqual(self.db.query(AuditLog).one().action, "USER_IMPORT_QUEUED")
+
+    def test_large_question_api_import_audits_the_durable_queue_once(self):
+        from fastapi import UploadFile
+        from src.route.adminRoute import import_question_bank
+
+        self.db.add(Subject(subject_id="DB", subject_name="Databases", subject_description="Database concepts"))
+        self.db.commit()
+        with patch("src.route.adminRoute.should_background_import", return_value=True):
+            result = __import__("asyncio").run(
+                import_question_bank(
+                    UploadFile(filename="questions.docx", file=BytesIO(question_document_bytes())), "DB",
+                    {"school_id": "A1", "role": "admin"}, {}, self.db,
+                )
+            )
+        audit = self.db.query(AuditLog).one()
+        self.assertTrue(result["background"])
+        self.assertEqual((audit.action, audit.entity_type, audit.entity_id), ("QUESTION_IMPORT_QUEUED", "background_job", str(result["jobId"])))
+        self.assertEqual(audit.metadata_json["subject_id"], "DB")
 
     def test_question_import_reuses_existing_taxonomy_importer_in_background(self):
         self.db.add(Subject(subject_id="DB", subject_name="Databases", subject_description="Database concepts"))

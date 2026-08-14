@@ -238,11 +238,11 @@ def add_exam_to_database(
             db,
             actor_school_id=teacher.school_id,
             actor_role=teacher.role,
-            action="EXAM_PUBLISHED" if request.status == "published" else "EXAM_UPDATED",
+            action="EXAM_CREATED",
             entity_type="exam",
             entity_id=exam.exam_id,
             metadata={
-                "status": request.status,
+                "subject_id": exam.subject_id, "status": request.status,
                 "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata(),
             },
         )
@@ -274,6 +274,7 @@ def update_exam_in_database(
             require_active_subject_assignment(
                 db, current_user["school_id"], request.subject_id
             )
+        previous_status = exam.status.value if hasattr(exam.status, "value") else str(exam.status)
         exam.title = request.title.strip()
         incoming_examcode = _normalize_exam_code(request.examcode)
         exam.examcode = incoming_examcode
@@ -293,10 +294,10 @@ def update_exam_in_database(
             db,
             actor_school_id=current_user["school_id"],
             actor_role=current_user.get("role"),
-            action="EXAM_PUBLISHED" if request.status == "published" else "EXAM_UPDATED",
+            action="EXAM_PUBLISHED" if request.status == "published" and previous_status != "published" else "EXAM_UPDATED",
             entity_type="exam",
             entity_id=exam.exam_id,
-            metadata={"status": request.status, "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata()},
+            metadata={"subject_id": exam.subject_id, "status": request.status, "changed_fields": sorted(request.model_fields_set), "invalidation": teacher_exam_updated(exam.exam_id).as_event_metadata()},
         )
         db.commit()
         deliver_invalidation(teacher_exam_updated(exam.exam_id))
@@ -353,6 +354,7 @@ def duplicate_exam(
         )
         _copy_exam_settings(db, source.exam_id, duplicate.exam_id)
         _copy_pool_configuration(db, source.exam_id, duplicate.exam_id)
+        record_audit(db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"), action="EXAM_DUPLICATED", entity_type="exam", entity_id=duplicate.exam_id, metadata={"source_exam_id": source.exam_id, "subject_id": duplicate.subject_id, "status": "draft"})
 
         db.commit()
         db.refresh(duplicate)
@@ -415,6 +417,7 @@ def update_result_visibility(
     try:
         exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         exam.result_visibility = request.result_visibility
+        record_audit(db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"), action="EXAM_RESULT_VISIBILITY_UPDATED", entity_type="exam", entity_id=exam.exam_id, metadata={"subject_id": exam.subject_id, "result_visibility": exam.result_visibility.value if hasattr(exam.result_visibility, "value") else str(exam.result_visibility)})
         db.commit()
         db.refresh(exam)
         return {
@@ -458,7 +461,7 @@ def delete_exam_from_database(
             action="EXAM_DELETED",
             entity_type="exam",
             entity_id=exam_id,
-            metadata={"invalidation": teacher_exam_updated(exam_id).as_event_metadata()},
+            metadata={"subject_id": exam.subject_id, "status": exam.status.value if hasattr(exam.status, "value") else str(exam.status), "invalidation": teacher_exam_updated(exam_id).as_event_metadata()},
         )
         db.commit()
         deliver_invalidation(teacher_exam_updated(exam_id))

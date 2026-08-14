@@ -611,6 +611,7 @@ def create_draft_question(payload: QuestionBankPayload, current_user: dict = Dep
         db.flush()
         _replace_taxonomy(db, question, chapters, los)
         _replace_options(db, question, payload)
+        record_audit(db, actor_school_id=teacher.school_id, actor_role=teacher.role, action="QUESTION_CREATED", entity_type="question", entity_id=question.question_id, metadata={"subject_id": question.subject_id, "question_status": _status(question)})
         db.commit()
         return _serialize_detail(_refresh_question(db, question.question_id), teacher, db)
     except HTTPException:
@@ -663,6 +664,7 @@ def update_question(
                 db.add(QuestionRevision(question_id=question.question_id, version_number=next_version, question_status="pending", edited_by=teacher.school_id, approved_by=None, approved_at=None, rejection_reason=None, **values))
         else:
             raise HTTPException(status_code=409, detail="Question cannot be edited")
+        db.flush()
         record_audit(
             db,
             actor_school_id=teacher.school_id,
@@ -670,7 +672,7 @@ def update_question(
             action="QUESTION_EDITED",
             entity_type="question",
             entity_id=question.question_id,
-            metadata={"question_status": question_status},
+            metadata={"subject_id": question.subject_id, "question_status": question_status},
         )
         db.commit()
         invalidate_teacher_question_bank()
@@ -700,6 +702,7 @@ def submit_question(question_id: int, current_user: dict = Depends(verify_token)
         _validate_taxonomy_for_payload(db, payload)
         _validate_submit_payload(payload)
         question.question_status = QuestionStatus.pending
+        record_audit(db, actor_school_id=teacher.school_id, actor_role=teacher.role, action="QUESTION_SUBMITTED", entity_type="question", entity_id=question.question_id, metadata={"subject_id": question.subject_id, "question_status": "pending"})
         db.commit()
         return _serialize_detail(_refresh_question(db, question_id), teacher, db)
     except HTTPException:
@@ -750,7 +753,7 @@ def delete_question(
             action="QUESTION_DELETED",
             entity_type="question",
             entity_id=question_id,
-            metadata={"question_status": question_status},
+            metadata={"subject_id": question.subject_id, "question_status": question_status},
         )
         db.commit()
         invalidate_teacher_question_bank()
@@ -781,6 +784,7 @@ def delete_pending_revision(question_id: int, current_user: dict = Depends(verif
                 raise HTTPException(status_code=409, detail="Pending revision is no longer pending")
             raise HTTPException(status_code=404, detail="Pending revision not found")
         _require_subject_permission(db, teacher, pending.subject_id)
+        record_audit(db, actor_school_id=teacher.school_id, actor_role=teacher.role, action="QUESTION_PENDING_REVISION_DISCARDED", entity_type="question", entity_id=question.question_id, metadata={"subject_id": pending.subject_id, "revision_id": pending.revision_id, "question_status": "approved"})
         db.delete(pending)
         db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)

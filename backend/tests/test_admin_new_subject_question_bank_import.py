@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from src.a_db_config import Chapter, ChapterLO, LO, LOQuestion, Question, Subject, User
+from src.a_db_config import AuditLog, Chapter, ChapterLO, LO, LOQuestion, Question, Subject, User
 from src.route.adminRoute import build_new_subject_import_preview, import_new_subject_question_bank_data
 from src.service.question_bank_import_parser import parse_question_bank_text
 
@@ -100,6 +100,9 @@ class AdminNewSubjectQuestionBankImportTests(unittest.TestCase):
         self.assertEqual(questions[0].created_by, "A1")
         self.assertEqual(questions[0].question_status.value, "approved")
         self.assertEqual(len(questions[0].lo_questions), 3)
+        audit = self.db.query(AuditLog).one()
+        self.assertEqual(audit.action, "QUESTION_IMPORT_COMPLETED")
+        self.assertTrue(audit.metadata_json["new_subject"])
 
     def test_confirmation_is_required_and_existing_subject_remains_blocked(self):
         with self.assertRaises(HTTPException) as raised:

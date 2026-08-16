@@ -5,6 +5,7 @@ import { eventCategory, eventLabel, formatEventDetails } from '../../../anti-che
 import { normalizeSearchText } from '../../../utils/search';
 import {
   Shield,
+  Trophy,
   RefreshCw,
   AlertTriangle,
   XCircle,
@@ -64,12 +65,14 @@ interface Attempt {
   id: string;
   studentName: string;
   studentId: string;
+  attemptNo: number | null;
   attemptStatus: AttemptStatus;
+  /** This attempt alone determines the student's recorded result. */
+  isFinalResult: boolean;
+  /** Eligible to feed the final score (all of them, when averaging). */
+  countsTowardResult: boolean;
   violations: { count: number; max: number };
   aiFlags: AiFlag[];
-  lastEvent: string;
-  lastActivity: string;
-  lastViolationAt?: string;
   startTime?: string;
   submittedAt?: string;
   antiCheatStatus: AntiCheatStatus;
@@ -102,10 +105,11 @@ function mapAttempt(attempt: MonitorAttempt): Attempt {
   const status = attempt.attemptStatus.replace('_', '-') as AttemptStatus;
   return {
     id: String(attempt.attemptId), studentName: attempt.studentName, studentId: attempt.studentId,
+    attemptNo: attempt.attemptNo ?? null,
+    isFinalResult: attempt.isFinalResult ?? false,
+    countsTowardResult: attempt.countsTowardResult ?? false,
     attemptStatus: status, violations: { count: attempt.violationCount, max: attempt.violationLimit },
-    aiFlags: [], aiFlagCount: attempt.aiFlagCount, lastEvent: attempt.lastEventType ? eventLabel(attempt.lastEventType) : '-',
-    lastActivity: String(attempt.lastEventAt ?? ''),
-    lastViolationAt: attempt.lastViolationAt ? String(attempt.lastViolationAt) : undefined,
+    aiFlags: [], aiFlagCount: attempt.aiFlagCount,
     startTime: attempt.startTime ? String(attempt.startTime) : undefined,
     submittedAt: attempt.submittedAt ? String(attempt.submittedAt) : undefined,
     antiCheatStatus: status === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean',
@@ -182,15 +186,23 @@ const aiFlagColor: Record<AiFlag['type'], string> = {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function OverviewCard({ icon: Icon, value, label, color }: { icon: typeof Shield; value: number; label: string; color: string }) {
+/**
+ * One cell of the summary strip. Tones reuse the same status hues as the table
+ * badges so a colour means the same thing in both places, and each tile carries
+ * an icon plus a label so the state never rests on colour alone.
+ */
+function StatTile({ icon: Icon, value, label, tint, chip, ink }: {
+  icon: typeof Shield; value: number; label: string; tint: string; chip: string; ink: string;
+}) {
+  const empty = value === 0;
   return (
-    <div className="bg-white rounded-2xl shadow-sm p-5 flex items-center gap-4">
-      <div className={`size-11 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
-        <Icon className="size-5 text-white" />
+    <div className={`flex items-center gap-3 px-5 py-4 transition-colors ${empty ? 'bg-white' : tint}`}>
+      <div className={`size-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm ${empty ? 'bg-gray-200' : chip}`}>
+        <Icon className="size-4 text-white" />
       </div>
-      <div>
-        <p className="text-2xl font-semibold text-gray-800 leading-none">{value}</p>
-        <p className="text-xs text-gray-500 mt-1">{label}</p>
+      <div className="min-w-0">
+        <p className={`text-2xl font-semibold leading-none ${empty ? 'text-gray-300' : ink}`}>{value}</p>
+        <p className="text-xs text-gray-500 mt-1 truncate">{label}</p>
       </div>
     </div>
   );
@@ -208,7 +220,12 @@ function EmptyState({ icon: Icon, title, description }: { icon: typeof Shield; t
   );
 }
 
-function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => void }) {
+function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
+  attempt: Attempt;
+  onClose: () => void;
+  /** Opens this attempt's graded result; absent while the attempt is still running. */
+  onViewExamResult?: () => void;
+}) {
   const ac = acConfig[attempt.antiCheatStatus];
   const AcIcon = ac.icon;
 
@@ -446,10 +463,17 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
             Add Review Note
           </Button>
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" className="text-teal-600 border-teal-200 hover:bg-teal-50">
-              <Zap className="size-4 mr-1.5" />
-              View Exam Result
-            </Button>
+            {onViewExamResult && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-teal-600 border-teal-200 hover:bg-teal-50"
+                onClick={onViewExamResult}
+              >
+                <Zap className="size-4 mr-1.5" />
+                View Exam Result
+              </Button>
+            )}
             <Button size="sm" onClick={onClose} className="bg-gray-800 hover:bg-gray-900 text-white">
               Close
             </Button>
@@ -462,7 +486,24 @@ function AttemptDrawer({ attempt, onClose }: { attempt: Attempt; onClose: () => 
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function AntiCheatMonitor() {
+export interface AntiCheatTarget {
+  subjectId: string;
+  examId: string;
+  studentId: string;
+  /** When set, the drawer opens straight onto this attempt. */
+  attemptId?: number | null;
+  /** Bumped per navigation so repeat requests for the same student re-fire. */
+  requestKey: number;
+}
+
+interface AntiCheatMonitorProps {
+  initialTarget?: AntiCheatTarget | null;
+  onTargetHandled?: (requestKey: number) => void;
+  /** Switches to the results tab with this attempt's detail already open. */
+  onViewExamResult?: (target: { examId: string; attemptId: number }) => void;
+}
+
+export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamResult }: AntiCheatMonitorProps = {}) {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
@@ -477,6 +518,7 @@ export function AntiCheatMonitor() {
   const [drawerAttempt, setDrawerAttempt] = useState<Attempt | null>(null);
   const pollingInFlight = useRef(false);
   const detailPollingInFlight = useRef(false);
+  const initialTargetRef = useRef(initialTarget);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
   const selectedExam = selectedSubject?.exams.find((e) => e.id === selectedExamId) ?? null;
@@ -540,7 +582,84 @@ export function AntiCheatMonitor() {
     }
   };
 
-  useEffect(() => { teacherAntiCheatService.subjects().then((items: MonitorSubject[]) => setSubjects(items.map((item) => ({ id: item.subjectId, code: item.code, name: item.name, exams: [] })))); }, []);
+  // Skipped when arriving via a deep link, which loads the subject list itself
+  // as part of its chain and would otherwise be clobbered by this.
+  useEffect(() => {
+    if (initialTargetRef.current) return;
+    teacherAntiCheatService.subjects().then((items: MonitorSubject[]) => setSubjects(items.map((item) => ({ id: item.subjectId, code: item.code, name: item.name, exams: [] }))));
+  }, []);
+
+  /**
+   * Deep link from the exam results table: walk subject -> exam -> student so
+   * the monitor opens already scoped to that one student's attempts.
+   */
+  useEffect(() => {
+    if (!initialTarget) return undefined;
+    const target = initialTarget;
+    let disposed = false;
+
+    const open = async () => {
+      setMonitorError(null);
+      setSelectedSubjectId(target.subjectId);
+      setSelectedExamId(target.examId);
+      setSelectedStudent(null);
+      setAttemptPage(null);
+      setAssignedStudents([]);
+      setSearch('');
+      setAttemptStatusFilter('all');
+      setAntiCheatFilter('all');
+      try {
+        const [subjectItems, examItems] = await Promise.all([
+          teacherAntiCheatService.subjects(),
+          teacherAntiCheatService.exams(target.subjectId),
+        ]);
+        if (disposed) return;
+        setSubjects(subjectItems.map((item: MonitorSubject) => ({
+          id: item.subjectId,
+          code: item.code,
+          name: item.name,
+          exams: item.subjectId !== target.subjectId ? [] : examItems.map((exam: MonitorExam) => ({
+            id: String(exam.examId),
+            name: exam.title,
+            date: String(exam.startTime ?? ''),
+            attempts: [],
+          })),
+        })));
+
+        const students = await teacherAntiCheatService.students(target.examId);
+        if (disposed) return;
+        setAssignedStudents(students);
+
+        const match = students.find((student) => student.studentId === target.studentId) ?? null;
+        if (!match) {
+          setMonitorError('That student is no longer assigned to this exam.');
+          return;
+        }
+        setSelectedStudent(match);
+
+        const page = await teacherAntiCheatService.studentAttempts(target.examId, match.studentId, 1);
+        if (disposed) return;
+        setAttemptPage(page);
+        if (target.attemptId) {
+          const detail = await teacherAntiCheatService.detail(target.attemptId);
+          if (disposed) return;
+          setDrawerAttempt(mapDetail(detail));
+        }
+        const mapped = page.items.map(mapAttempt);
+        setSubjects((current) => current.map((subject) => subject.id !== target.subjectId ? subject : {
+          ...subject,
+          exams: subject.exams.map((exam) => exam.id === target.examId ? { ...exam, attempts: mapped } : exam),
+        }));
+      } catch {
+        if (!disposed) setMonitorError('Unable to open the anti-cheat record for this student.');
+      } finally {
+        if (!disposed) onTargetHandled?.(target.requestKey);
+      }
+    };
+
+    void open();
+    return () => { disposed = true; };
+  }, [initialTarget?.requestKey]);
 
   useEffect(() => {
     if (!selectedExamId || !selectedSubjectId || !selectedStudent) return;
@@ -601,6 +720,18 @@ export function AntiCheatMonitor() {
     return matchSearch && matchAttempt && matchAC;
   });
 
+  const resultStrategy = attemptPage?.resultStrategy ?? 'highest';
+  const finalAttemptId = attemptPage?.finalAttemptId ?? null;
+
+  /** Loads full detail for an attempt and opens the drawer on it. */
+  const openAttempt = (attemptId: number, fallback?: Attempt) => {
+    teacherAntiCheatService.detail(attemptId)
+      .then((detail) => setDrawerAttempt(mapDetail(detail)))
+      .catch(() => {
+        if (fallback) setDrawerAttempt(fallback);
+        else setMonitorError('Unable to open that attempt.');
+      });
+  };
   const hasFilters = search || attemptStatusFilter !== 'all' || antiCheatFilter !== 'all';
 
   const counts = {
@@ -615,10 +746,12 @@ export function AntiCheatMonitor() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="rounded-2xl shadow-sm px-6 py-5 flex items-start justify-between gap-4 flex-wrap bg-gradient-to-r from-teal-50 via-white to-blue-50 border border-teal-100/70">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800 flex items-center gap-2.5">
-              <Shield className="size-6 text-teal-600" />
+              <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 shadow-sm">
+                <Shield className="size-5 text-white" />
+              </span>
               Anti-Cheat Monitor
             </h1>
             <p className="text-sm text-gray-500 mt-1">Monitor violations, AI flags, and terminated attempts for a selected exam.</p>
@@ -708,16 +841,53 @@ export function AntiCheatMonitor() {
         {/* Selected student's attempts */}
         {selectedExamId && selectedExam && selectedStudent && (
           <>
-            <div className="flex items-center justify-between gap-4">
-              <div><p className="text-sm text-gray-500">Attempts for</p><h2 className="text-lg font-semibold text-gray-800">{selectedStudent.studentName} <span className="text-sm font-normal text-gray-400">({selectedStudent.studentId})</span></h2></div>
-              <Button variant="outline" size="sm" onClick={() => { setSelectedStudent(null); setAttemptPage(null); }}><ChevronLeft className="mr-1.5 size-4" />Back to students</Button>
-            </div>
-            {/* Overview cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <OverviewCard icon={Zap}           value={counts.active}     label="Active Attempts"  color="bg-blue-500" />
-              <OverviewCard icon={AlertTriangle} value={counts.warning}    label="Warning"          color="bg-amber-400" />
-              <OverviewCard icon={Bot}           value={counts.flagged}    label="AI Flagged"       color="bg-violet-500" />
-              <OverviewCard icon={XCircle}       value={counts.terminated} label="Terminated"       color="bg-red-500" />
+            {/* Student summary: identity, scope and counts in one surface */}
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-teal-500 via-blue-500 to-violet-500" />
+              <div className="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-teal-50/60 to-transparent">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="size-11 rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <User className="size-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-gray-800 truncate">{selectedStudent.studentName}</h2>
+                    <p className="text-sm text-gray-400 truncate">
+                      {selectedStudent.studentId}
+                      {attemptPage ? ` · ${attemptPage.total} attempt${attemptPage.total === 1 ? '' : 's'}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {finalAttemptId !== null && (
+                    <Button
+                      size="sm"
+                      className="bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-600 hover:to-blue-700"
+                      onClick={() => openAttempt(finalAttemptId)}
+                      title="Open the attempt that determines this student's recorded score"
+                    >
+                      <Trophy className="mr-1.5 size-4" />
+                      Final result
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setSelectedStudent(null); setAttemptPage(null); }}
+                  >
+                    <ChevronLeft className="mr-1.5 size-4" />Back to students
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 divide-x-2 divide-white">
+                <StatTile icon={Zap}           value={counts.active}     label="Active attempts"
+                  tint="bg-blue-50"   chip="bg-gradient-to-br from-blue-500 to-blue-600"     ink="text-blue-700" />
+                <StatTile icon={AlertTriangle} value={counts.warning}    label="Warning"
+                  tint="bg-amber-50"  chip="bg-gradient-to-br from-amber-400 to-amber-500"   ink="text-amber-700" />
+                <StatTile icon={Bot}           value={counts.flagged}    label="AI flagged"
+                  tint="bg-violet-50" chip="bg-gradient-to-br from-violet-500 to-violet-600" ink="text-violet-700" />
+                <StatTile icon={XCircle}       value={counts.terminated} label="Terminated"
+                  tint="bg-red-50"    chip="bg-gradient-to-br from-red-500 to-red-600"       ink="text-red-700" />
+              </div>
             </div>
 
             {/* Filter bar */}
@@ -780,12 +950,11 @@ export function AntiCheatMonitor() {
                 <TableHeader>
                   <TableRow className="bg-gray-50 border-b border-gray-100">
                     <TableHead className="text-xs font-medium text-gray-500">Student</TableHead>
-                    <TableHead className="text-xs font-medium text-gray-500">Attempt</TableHead>
+                    <TableHead className="text-xs font-medium text-gray-500 text-center">Attempt</TableHead>
+                    <TableHead className="text-xs font-medium text-gray-500">Status</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Direct Violations</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">AI Flags</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Flag Summary</TableHead>
-                    <TableHead className="text-xs font-medium text-gray-500">Last Event</TableHead>
-                    <TableHead className="text-xs font-medium text-gray-500">Activity</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Anti-Cheat</TableHead>
                     <TableHead />
                   </TableRow>
@@ -797,11 +966,35 @@ export function AntiCheatMonitor() {
                     const as_ = asConfig[attempt.attemptStatus];
 
                     return (
-                      <TableRow key={attempt.id} className="hover:bg-gray-50 transition-colors">
+                      <TableRow
+                        key={attempt.id}
+                        className={`transition-colors ${
+                          attempt.isFinalResult
+                            ? 'bg-teal-50/70 hover:bg-teal-50'
+                            : 'hover:bg-gray-50'
+                        }`}
+                      >
                         <TableCell>
                           <div>
                             <p className="text-sm text-gray-800">{attempt.studentName}</p>
                             <p className="text-xs text-gray-400">{attempt.studentId}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`text-sm font-medium ${attempt.isFinalResult ? 'text-teal-800' : 'text-gray-700'}`}>
+                              {attempt.attemptNo === null ? '-' : `#${attempt.attemptNo}`}
+                            </span>
+                            {attempt.isFinalResult ? (
+                              <Badge className="text-[10px] border-0 bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-500 hover:to-blue-600">
+                                <Trophy className="size-2.5 mr-1" />
+                                Final result
+                              </Badge>
+                            ) : attempt.countsTowardResult && resultStrategy === 'average' ? (
+                              <Badge className="text-[10px] border-0 bg-teal-100 text-teal-800 hover:bg-teal-100">
+                                Counts
+                              </Badge>
+                            ) : null}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -837,13 +1030,6 @@ export function AntiCheatMonitor() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <p className="text-sm text-gray-600">{attempt.lastEvent}</p>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-sm text-gray-400">{attempt.lastActivity || '-'}</p>
-                          {attempt.lastViolationAt && <p className="mt-1 text-[11px] text-red-500">Violation {attempt.lastViolationAt}</p>}
-                        </TableCell>
-                        <TableCell>
                           <Badge variant="outline" className={`text-xs ${ac.cls}`}>
                             <AcIcon className="size-3 mr-1" />
                             {ac.label}
@@ -853,11 +1039,7 @@ export function AntiCheatMonitor() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              teacherAntiCheatService.detail(Number(attempt.id))
-                                .then((detail) => setDrawerAttempt(mapDetail(detail)))
-                                .catch(() => setDrawerAttempt(attempt));
-                            }}
+                            onClick={() => openAttempt(Number(attempt.id), attempt)}
                             className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 text-xs"
                           >
                             View
@@ -870,7 +1052,7 @@ export function AntiCheatMonitor() {
 
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-12 text-gray-400 text-sm">
+                      <TableCell colSpan={8} className="text-center py-12 text-gray-400 text-sm">
                         {attempts.length === 0
                           ? 'No attempt data available for this exam.'
                           : 'No attempts match your filters.'}
@@ -891,7 +1073,17 @@ export function AntiCheatMonitor() {
       </div>
 
       {drawerAttempt && (
-        <AttemptDrawer attempt={drawerAttempt} onClose={() => setDrawerAttempt(null)} />
+        <AttemptDrawer
+          attempt={drawerAttempt}
+          onClose={() => setDrawerAttempt(null)}
+          // A running attempt has no graded result to show yet.
+          onViewExamResult={onViewExamResult && selectedExamId && drawerAttempt.attemptStatus !== 'in-progress'
+            ? () => {
+                onViewExamResult({ examId: selectedExamId, attemptId: Number(drawerAttempt.id) });
+                setDrawerAttempt(null);
+              }
+            : undefined}
+        />
       )}
     </div>
   );

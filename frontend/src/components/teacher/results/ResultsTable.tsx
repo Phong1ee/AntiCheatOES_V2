@@ -21,6 +21,7 @@ import {
 } from '../../ui/dropdown-menu';
 import {
   Eye,
+  ShieldAlert,
   Download,
   ArrowUpDown,
   ArrowUp,
@@ -53,6 +54,8 @@ interface ResultsTableProps {
   refreshKey: number;
   filters: ResultsFilterValue;
   onViewDetail: (attemptId: number) => void;
+  /** Opens the anti-cheat monitor on this exam and student. */
+  onViewAntiCheat: (studentId: string) => void;
 }
 
 const CSV_HEADERS = ['Student ID', 'Name', 'Final Score (/100)', 'Correct Answers', 'Total Questions', 'Time Spent', 'Status', 'Submitted At'];
@@ -76,61 +79,113 @@ interface AttemptsModalProps {
   onViewAttempt: (attemptId: number) => void;
 }
 
+/** Score bands drive the meter fill, its track (a lighter step of the same hue) and the value ink. */
+function scoreBand(score: number): { ink: string; fill: string; track: string } {
+  if (score >= 90) return { ink: 'text-green-600', fill: 'bg-green-500', track: 'bg-green-100' };
+  if (score >= 75) return { ink: 'text-blue-600', fill: 'bg-blue-500', track: 'bg-blue-100' };
+  if (score >= 60) return { ink: 'text-amber-600', fill: 'bg-amber-500', track: 'bg-amber-100' };
+  return { ink: 'text-red-600', fill: 'bg-red-500', track: 'bg-red-100' };
+}
+
 function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
   const finalAttemptId = result.attemptId;
+  const scored = result.attempts.filter((attempt) => !attempt.provisional);
+  const bestScore = scored.length > 0 ? Math.max(...scored.map((attempt) => attempt.score)) : null;
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <div className="size-10 bg-teal-100 rounded-xl flex items-center justify-center">
-              <History className="size-5 text-teal-600" />
+        <div className="h-1 bg-gradient-to-r from-teal-500 via-blue-500 to-violet-500" />
+        <div className="flex items-center justify-between p-5 bg-gradient-to-r from-teal-50/70 to-transparent">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="size-10 rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 shadow-sm flex items-center justify-center flex-shrink-0">
+              <History className="size-5 text-white" />
             </div>
-            <div>
-              <h2 className="text-gray-800 text-base">{result.name}</h2>
-              <p className="text-xs text-gray-500">
+            <div className="min-w-0">
+              <h2 className="text-gray-800 text-base font-semibold truncate">{result.name}</h2>
+              <p className="text-xs text-gray-500 truncate">
                 {result.studentId} · {result.attempts.length} attempt{result.attempts.length !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
           >
             <X className="size-4" />
           </button>
+        </div>
+
+        {/* Summary: the answer the teacher came for, before the detail */}
+        <div className="grid grid-cols-3 divide-x-2 divide-white border-y border-gray-100">
+          <div className="px-5 py-3 bg-teal-50">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Final score</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className={`text-xl font-semibold ${result.provisional ? 'text-gray-400' : scoreBand(result.score).ink}`}>
+                {result.provisional ? '--' : result.score.toFixed(2)}
+              </span>
+              {!result.provisional && result.passed !== null && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${result.passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {result.passed ? 'Pass' : 'Fail'}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="px-5 py-3 bg-gray-50">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Best attempt</p>
+            <p className="mt-1 text-xl font-semibold text-gray-700">
+              {bestScore === null ? '--' : bestScore.toFixed(2)}
+            </p>
+          </div>
+          <div className="px-5 py-3 bg-gray-50">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Pass mark</p>
+            <p className="mt-1 text-xl font-semibold text-gray-700">{result.passingScore}</p>
+          </div>
         </div>
 
         {/* Attempts list */}
         <div className="p-5 space-y-3 max-h-[420px] overflow-y-auto">
           {[...result.attempts].reverse().map((attempt) => {
             const isFinal = finalAttemptId === attempt.attemptId;
+            const band = scoreBand(attempt.score);
+            const scale = attempt.gradingScale || 100;
+            const pct = attempt.provisional ? 0 : Math.max(0, Math.min(100, (attempt.score / scale) * 100));
             return (
               <div
                 key={attempt.attemptId}
-                className={`rounded-xl border p-4 ${isFinal ? 'border-teal-200 bg-teal-50/50' : 'border-gray-100 bg-gray-50'}`}
+                className={`rounded-xl border p-4 transition-colors ${
+                  isFinal
+                    ? 'border-teal-300 bg-gradient-to-r from-teal-50 to-white ring-1 ring-teal-100'
+                    : 'border-gray-100 bg-gray-50/70 hover:bg-gray-50'
+                }`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {/* Attempt badge */}
-                    <div className={`size-9 rounded-full flex items-center justify-center text-sm font-medium ${isFinal ? 'bg-teal-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`size-9 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${
+                      isFinal
+                        ? 'bg-gradient-to-br from-teal-500 to-blue-600 text-white shadow-sm'
+                        : 'bg-white border border-gray-200 text-gray-600'
+                    }`}>
                       {attempt.attemptNumber ?? '?'}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">Attempt {attempt.attemptNumber ?? '?'}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-gray-700">Attempt {attempt.attemptNumber ?? '?'}</span>
                         {isFinal && (
-                          <span className="inline-flex items-center gap-1 text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
-                            <Trophy className="size-3" />
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full text-white bg-gradient-to-r from-teal-500 to-blue-600 shadow-sm">
+                            <Trophy className="size-2.5" />
                             Final
                           </span>
                         )}
                         {attempt.status === 'late' && (
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Late</span>
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Late</span>
+                        )}
+                        {attempt.provisional && (
+                          <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">Pending grading</span>
                         )}
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">
@@ -144,13 +199,13 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    {/* Stats */}
+                  <div className="flex items-center gap-4 flex-shrink-0">
                     <div className="text-right">
-                      <p className={`text-lg font-medium ${attempt.score >= 90 ? 'text-green-600' : attempt.score >= 75 ? 'text-blue-600' : attempt.score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {attempt.score.toFixed(2)} / 100
+                      <p className={`text-lg font-semibold ${attempt.provisional ? 'text-gray-400' : band.ink}`}>
+                        {attempt.provisional ? '--' : attempt.score.toFixed(2)}
+                        <span className="text-xs font-normal text-gray-400"> / {scale}</span>
                       </p>
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
+                      <div className="flex items-center justify-end gap-2 text-xs text-gray-400">
                         <span className="flex items-center gap-1">
                           <CheckCircle className="size-3" />
                           {attempt.correctAnswers}/{attempt.totalQuestions}
@@ -162,17 +217,24 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
                       </div>
                     </div>
 
-                    {/* View button */}
                     <Button
                       size="sm"
-                      variant="outline"
-                      className="text-xs"
+                      variant={isFinal ? 'default' : 'outline'}
+                      className={`text-xs ${isFinal ? 'bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700' : ''}`}
                       onClick={() => { onViewAttempt(attempt.attemptId); onClose(); }}
                     >
                       <Eye className="size-3 mr-1" />
                       View
                     </Button>
                   </div>
+                </div>
+
+                {/* Meter: makes attempts comparable at a glance */}
+                <div className={`mt-3 h-1.5 w-full rounded-full overflow-hidden ${attempt.provisional ? 'bg-gray-200' : band.track}`}>
+                  <div
+                    className={`h-full rounded-full transition-all ${band.fill}`}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
               </div>
             );
@@ -192,7 +254,7 @@ function AttemptsModal({ result, onClose, onViewAttempt }: AttemptsModalProps) {
   );
 }
 
-export function ResultsTable({ examId, examName, refreshKey, filters, onViewDetail }: ResultsTableProps) {
+export function ResultsTable({ examId, examName, refreshKey, filters, onViewDetail, onViewAntiCheat }: ResultsTableProps) {
   const [results, setResults] = useState<StudentResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -380,7 +442,7 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     {getSortIcon('status')}
                   </button>
                 </TableHead>
-                <TableHead className="text-center">Actions</TableHead>
+                <TableHead className="text-center">Anti-cheat</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -449,15 +511,18 @@ export function ResultsTable({ examId, examName, refreshKey, filters, onViewDeta
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-2">
-                        {result.attemptId !== null && (
+                        {result.attempts.length > 0 ? (
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onViewDetail(result.attemptId as number)}
+                            onClick={() => onViewAntiCheat(result.studentId)}
+                            title={`Open the anti-cheat monitor for ${result.name} on this exam`}
                           >
-                            <Eye className="size-4 mr-1" />
+                            <ShieldAlert className="size-4 mr-1" />
                             View
                           </Button>
+                        ) : (
+                          <span className="text-gray-400 text-xs">No attempt</span>
                         )}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

@@ -23,6 +23,7 @@ export interface ExamResultSummary extends ExamResultStatsApi {
   examId: number;
   examName: string;
   subject: string;
+  subjectId: string | null;
   date: string | null;
   endDate: string | null;
   duration: number | null;
@@ -33,6 +34,7 @@ export interface ExamResultsOverview extends ExamResultStatsApi {
   examId: number;
   examName: string;
   subject: string;
+  subjectId: string | null;
   startDate: string | null;
   endDate: string | null;
   status: ExamResultStatus;
@@ -83,6 +85,8 @@ export interface StudentAttemptQuestion {
 
 export interface StudentAttemptDetail {
   attemptId: number;
+  attemptNumber: number | null;
+  examName: string;
   studentId: string | null;
   studentName: string;
   score: number;

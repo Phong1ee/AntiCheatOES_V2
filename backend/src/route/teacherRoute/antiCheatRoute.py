@@ -1,6 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from database import get_db
+from src.a_db_config import ExamSetting
 from src.a_db_config.config import get_db_connection
 from src.middleware.authMiddleware import verify_token
+from src.service.result_strategy_service import (
+    representative_attempt,
+    submitted_attempts_by_student,
+)
 
 router = APIRouter(prefix="/anti-cheat")
 
@@ -89,7 +97,13 @@ def students(exam_id: int, user=Depends(teacher)):
     WHERE se.exam_id=%s GROUP BY se.student_id,u.full_name ORDER BY u.full_name,se.student_id""", (exam_id,))
 
 @router.get("/exams/{exam_id}/students/{student_id}/attempts")
-def student_attempts(exam_id: int, student_id: str, page: int = Query(1, ge=1), user=Depends(teacher)):
+def student_attempts(
+    exam_id: int,
+    student_id: str,
+    page: int = Query(1, ge=1),
+    user=Depends(teacher),
+    db: Session = Depends(get_db),
+):
     """Return a selected assigned student's attempts, with a stable server-side page size."""
     owned_exam(exam_id, user["school_id"])
     assigned = rows("SELECT 1 FROM student_exam WHERE exam_id=%s AND student_id=%s", (exam_id, student_id))
@@ -105,10 +119,48 @@ def student_attempts(exam_id: int, student_id: str, page: int = Query(1, ge=1), 
     FROM attempt a JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=a.exam_id
     {ATTEMPT_EVENT_SUMMARY_JOIN}
     WHERE a.exam_id=%s AND a.student_id=%s ORDER BY a.attempt_id DESC LIMIT %s OFFSET %s""", (exam_id, exam_id, student_id, page_size, offset))
-    return {"items": items, "page": page, "pageSize": page_size, "total": total, "totalPages": (total + page_size - 1) // page_size}
+
+    # Mark which attempts feed the final score, reusing the same service the
+    # grading pipeline uses so the monitor cannot disagree with the result.
+    setting = db.get(ExamSetting, exam_id)
+    strategy = setting.result_strategy.value if setting and setting.result_strategy else "highest"
+    counting = submitted_attempts_by_student(db, exam_id, student_id).get(student_id, [])
+    counting_ids = {attempt.attempt_id for attempt in counting}
+    # "average" blends every counting attempt, so no single one is the result.
+    final = representative_attempt(strategy, counting) if strategy != "average" else None
+    final_id = final.attempt_id if final else None
+    for item in items:
+        item["countsTowardResult"] = item["attemptId"] in counting_ids
+        item["isFinalResult"] = item["attemptId"] == final_id
+
+    return {
+        "items": items,
+        "page": page,
+        "pageSize": page_size,
+        "total": total,
+        "totalPages": (total + page_size - 1) // page_size,
+        "resultStrategy": strategy,
+        # Exposed page-independently so the UI can jump to it even when the
+        # attempt falls on another page.
+        "finalAttemptId": final_id,
+    }
 
 @router.get("/attempts/{attempt_id}")
 def detail(attempt_id:int,user=Depends(teacher)):
-    base=rows("""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,a.termination_reason terminationReason,e.exam_id examId,e.title,COALESCE(es.anti_cheat_enabled,0) antiCheatEnabled,COALESCE(es.violation_limit,5) violationLimit FROM attempt a JOIN exam e ON e.exam_id=a.exam_id JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=e.exam_id WHERE a.attempt_id=%s AND e.manage_by=%s""",(attempt_id,user["school_id"]))
+    # aiFlagCount/flagged are part of the MonitorAttempt contract, so this must
+    # summarise events the same way the list endpoints do.
+    base=rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,a.termination_reason terminationReason,e.exam_id examId,e.title,COALESCE(es.anti_cheat_enabled,0) antiCheatEnabled,COALESCE(es.violation_limit,5) violationLimit,
+    COALESCE(ev.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(ev.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged,
+    COALESCE(ev.cameraFlagCount,0) cameraFlagCount,COALESCE(ev.audioFlagCount,0) audioFlagCount,COALESCE(ev.browserViolationCount,0) browserViolationCount
+    FROM attempt a JOIN exam e ON e.exam_id=a.exam_id JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=e.exam_id
+    LEFT JOIN (
+        SELECT attempt_id,
+            SUM(CASE WHEN event_type IN ({AI_EVENT_TYPES}) THEN 1 ELSE 0 END) aiFlagCount,
+            SUM(CASE WHEN event_type IN ({CAMERA_AI_EVENT_TYPES}) THEN 1 ELSE 0 END) cameraFlagCount,
+            SUM(CASE WHEN event_type IN ({AUDIO_EVENT_TYPES}) THEN 1 ELSE 0 END) audioFlagCount,
+            SUM(CASE WHEN source='browser' AND is_violation=1 THEN 1 ELSE 0 END) browserViolationCount
+        FROM exam_event WHERE attempt_id=%s GROUP BY attempt_id
+    ) ev ON ev.attempt_id=a.attempt_id
+    WHERE a.attempt_id=%s AND e.manage_by=%s""",(attempt_id,attempt_id,user["school_id"]))
     if not base: raise HTTPException(404,"Attempt not found or not authorized")
     return {"attempt":base[0],"breakdown":rows("SELECT event_type eventType,COUNT(*) count FROM exam_event WHERE attempt_id=%s AND is_violation=1 GROUP BY event_type",(attempt_id,)),"timeline":rows("SELECT event_type eventType,event_timestamp eventTimestamp,source,details,metadata,is_violation isViolation FROM exam_event WHERE attempt_id=%s ORDER BY event_timestamp,event_id",(attempt_id,))}

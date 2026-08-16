@@ -9,25 +9,35 @@ from src.a_db_config import Attempt, AttemptStatus, EssayAnswer, Exam, ExamSetti
 from src.service.scoring_service import SCORE_QUANTUM
 
 
-def submitted_attempts_by_student(db: Session, exam_id: int) -> dict[str, list[Attempt]]:
-    attempts = (
-        db.query(Attempt)
-        .filter(
-            Attempt.exam_id == exam_id,
-            Attempt.submitted_at.isnot(None),
-            Attempt.status.in_([AttemptStatus.submitted, AttemptStatus.terminated]),
-            Attempt.score_scale_version == 3,
-        )
-        .order_by(Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id)
-        .all()
+def submitted_attempts_by_student(
+    db: Session, exam_id: int, student_id: str | None = None
+) -> dict[str, list[Attempt]]:
+    """Attempts eligible to form a final score, keyed by student.
+
+    Pass student_id to scope the scan to one student; callers that need the
+    whole exam leave it None.
+    """
+    attempt_query = db.query(Attempt).filter(
+        Attempt.exam_id == exam_id,
+        Attempt.submitted_at.isnot(None),
+        Attempt.status.in_([AttemptStatus.submitted, AttemptStatus.terminated]),
+        Attempt.score_scale_version == 3,
     )
-    pending_attempt_ids = {
-        attempt_id
-        for attempt_id, answer_text in db.query(EssayAnswer.attempt_id, EssayAnswer.answer_text)
+    pending_query = (
+        db.query(EssayAnswer.attempt_id, EssayAnswer.answer_text)
         .join(Attempt, Attempt.attempt_id == EssayAnswer.attempt_id)
         .filter(Attempt.exam_id == exam_id)
         .filter(EssayAnswer.score.is_(None))
-        .all()
+    )
+    if student_id is not None:
+        attempt_query = attempt_query.filter(Attempt.student_id == student_id)
+        pending_query = pending_query.filter(Attempt.student_id == student_id)
+    attempts = attempt_query.order_by(
+        Attempt.attempt_no, Attempt.submitted_at, Attempt.attempt_id
+    ).all()
+    pending_attempt_ids = {
+        attempt_id
+        for attempt_id, answer_text in pending_query.all()
         if answer_text and answer_text.strip()
     }
     by_student: dict[str, list[Attempt]] = {}
@@ -118,7 +128,7 @@ def set_result_strategy(db: Session, exam: Exam, strategy: ResultStrategy) -> st
 
 def sync_student_final_score(db: Session, exam: Exam, student_id: str) -> Decimal | None:
     settings = get_or_create_exam_settings(db, exam.exam_id)
-    attempts = submitted_attempts_by_student(db, exam.exam_id).get(student_id, [])
+    attempts = submitted_attempts_by_student(db, exam.exam_id, student_id).get(student_id, [])
     student_exam = db.get(StudentExam, (student_id, exam.exam_id))
     if student_exam is None:
         return None

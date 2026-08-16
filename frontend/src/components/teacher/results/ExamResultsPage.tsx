@@ -17,9 +17,22 @@ import { LoadingState } from '../common/LoadingState';
 
 interface ExamResultsPageProps {
   initialExamId?: string | null;
+  /** Opens this attempt's detail modal on arrival. */
+  initialAttemptId?: number | null;
+  /** Bumped per navigation so a repeat request for the same attempt re-fires. */
+  initialAttemptKey?: number;
+  onInitialAttemptHandled?: (requestKey: number) => void;
+  /** Switches to the anti-cheat tab, pre-scoped to this exam and student. */
+  onViewAntiCheat?: (target: { subjectId: string; examId: string; studentId: string; attemptId?: number | null }) => void;
 }
 
-export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
+export function ExamResultsPage({
+  initialExamId,
+  initialAttemptId,
+  initialAttemptKey,
+  onInitialAttemptHandled,
+  onViewAntiCheat,
+}: ExamResultsPageProps) {
   const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState('results');
@@ -53,6 +66,14 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
   useEffect(() => {
     if (initialExamId) setSelectedExamId(initialExamId);
   }, [initialExamId]);
+
+  // Consumed once per navigation, so closing the modal doesn't re-open it.
+  useEffect(() => {
+    if (initialAttemptKey === undefined || initialAttemptId == null) return;
+    setSelectedAttemptId(initialAttemptId);
+    onInitialAttemptHandled?.(initialAttemptKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAttemptKey]);
 
   const handleFilterChange = (value: ResultsFilterValue) => {
     setFilters(value);
@@ -231,6 +252,14 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
                     refreshKey={refreshKey}
                     filters={filters}
                     onViewDetail={setSelectedAttemptId}
+                    onViewAntiCheat={(studentId) => {
+                      if (!overview.subjectId || !examId) return;
+                      onViewAntiCheat?.({
+                        subjectId: overview.subjectId,
+                        examId: String(examId),
+                        studentId,
+                      });
+                    }}
                   />
                 </TabsContent>
 
@@ -249,6 +278,15 @@ export function ExamResultsPage({ initialExamId }: ExamResultsPageProps) {
           examId={examId}
           attemptId={selectedAttemptId}
           onClose={() => setSelectedAttemptId(null)}
+          onViewAntiCheat={overview?.subjectId ? (studentId, attemptId) => {
+            onViewAntiCheat?.({
+              subjectId: overview.subjectId as string,
+              examId: String(examId),
+              studentId,
+              attemptId,
+            });
+            setSelectedAttemptId(null);
+          } : undefined}
         />
       )}
 

@@ -518,6 +518,7 @@ def list_exam_results(
             "examId": exam.exam_id,
             "examName": exam.title,
             "subject": exam.subject.subject_name if exam.subject else "General",
+            "subjectId": exam.subject_id,
             "date": exam.start_time.isoformat() if exam.start_time else None,
             "endDate": exam.end_time.isoformat() if exam.end_time else None,
             "duration": exam.duration_minutes,
@@ -541,6 +542,9 @@ def get_exam_results_overview(
         "examId": exam.exam_id,
         "examName": exam.title,
         "subject": exam.subject.subject_name if exam.subject else "General",
+        # Lets the results table deep-link into the anti-cheat monitor, which
+        # navigates subject -> exam -> student.
+        "subjectId": exam.subject_id,
         "startDate": exam.start_time.isoformat() if exam.start_time else None,
         "endDate": exam.end_time.isoformat() if exam.end_time else None,
         "status": _SCHEDULE_STATUS_MAP.get(get_exam_status(exam, datetime.now()), "scheduled"),
@@ -593,7 +597,7 @@ def get_student_attempt_detail(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    _owned_exam(db, exam_id, teacher.school_id)
+    exam = _owned_exam(db, exam_id, teacher.school_id)
 
     attempt = db.query(Attempt).filter(Attempt.attempt_id == attempt_id, Attempt.exam_id == exam_id).first()
     if not attempt:
@@ -623,7 +627,14 @@ def get_student_attempt_detail(
                 .filter(EssayAnswer.attempt_id == attempt_id, EssayAnswer.question_id == question.question_id)
                 .first()
             )
-            is_correct = essay.score is not None and essay.score > 0 if essay else None
+            # An essay is only right or wrong once it has been graded. A blank
+            # submission is skipped, and an ungraded one is still unknown -
+            # neither is a wrong answer the student actually gave.
+            answered = bool(essay and (essay.answer_text or "").strip())
+            if not answered or essay.score is None:
+                is_correct = None
+            else:
+                is_correct = essay.score > 0
             questions.append({
                 "questionNumber": index,
                 "question": question_text,
@@ -668,6 +679,8 @@ def get_student_attempt_detail(
     raw_earned, raw_possible = _attempt_raw_totals(db, attempt_id)
     return {
         "attemptId": attempt.attempt_id,
+        "attemptNumber": attempt.attempt_no,
+        "examName": exam.title,
         "studentId": student.school_id if student else None,
         "studentName": student.full_name if student else "Unknown",
         "score": _score_value(attempt.score),

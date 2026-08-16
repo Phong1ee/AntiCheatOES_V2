@@ -27,6 +27,19 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     requestKey: number;
   } | null>(null);
   const questionBankNavigationSequence = useRef(0);
+  const [antiCheatTarget, setAntiCheatTarget] = useState<{
+    subjectId: string;
+    examId: string;
+    studentId: string;
+    attemptId?: number | null;
+    requestKey: number;
+  } | null>(null);
+  const antiCheatNavigationSequence = useRef(0);
+  const [resultsAttemptTarget, setResultsAttemptTarget] = useState<{
+    attemptId: number;
+    requestKey: number;
+  } | null>(null);
+  const resultsNavigationSequence = useRef(0);
   const { setUser } = useUserRole();
 
   // Set user role on mount
@@ -58,6 +71,20 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
 
   const handleNavigateToResults = (examId: string) => {
     setResultsExamId(examId);
+    setActiveTab('results');
+  };
+
+  const handleViewAntiCheat = (target: { subjectId: string; examId: string; studentId: string; attemptId?: number | null }) => {
+    setAntiCheatTarget({ ...target, requestKey: ++antiCheatNavigationSequence.current });
+    setActiveTab('anticheat');
+  };
+
+  const handleViewExamResult = (target: { examId: string; attemptId: number }) => {
+    setResultsExamId(target.examId);
+    setResultsAttemptTarget({
+      attemptId: target.attemptId,
+      requestKey: ++resultsNavigationSequence.current,
+    });
     setActiveTab('results');
   };
 
@@ -95,9 +122,25 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
           }}
         />
       ) : activeTab === 'results' ? (
-        <ExamResultsPage initialExamId={resultsExamId} />
+        <ExamResultsPage
+          initialExamId={resultsExamId}
+          initialAttemptId={resultsAttemptTarget?.attemptId ?? null}
+          initialAttemptKey={resultsAttemptTarget?.requestKey}
+          onInitialAttemptHandled={(requestKey) => {
+            setResultsAttemptTarget((current) => (
+              current?.requestKey === requestKey ? null : current
+            ));
+          }}
+          onViewAntiCheat={handleViewAntiCheat}
+        />
       ) : activeTab === 'anticheat' ? (
-        <AntiCheatMonitor />
+        <AntiCheatMonitor
+          initialTarget={antiCheatTarget}
+          onViewExamResult={handleViewExamResult}
+          onTargetHandled={(requestKey) => {
+            setAntiCheatTarget((current) => (current?.requestKey === requestKey ? null : current));
+          }}
+        />
       ) : activeTab === 'profile' ? (
         <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
           <ProfileSettings />

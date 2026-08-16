@@ -18,8 +18,16 @@ import {
   TrendingUp,
   Award,
   ArrowLeft,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  Bot,
+  ChevronRight,
+  FileText,
 } from 'lucide-react';
 import { teacherResultsService, downloadCsv } from '../../../services/teacher-results.service';
+import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
+import type { MonitorDetail } from '../../../types/teacher-anti-cheat';
 import type { StudentAttemptDetail } from '../../../types/teacher-results';
 import { LoadingState } from '../common/LoadingState';
 
@@ -27,11 +35,38 @@ interface StudentDetailModalProps {
   examId: number;
   attemptId: number;
   onClose: () => void;
+  /** Opens the anti-cheat monitor on this student's attempt. */
+  onViewAntiCheat?: (studentId: string, attemptId: number) => void;
 }
 
-export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetailModalProps) {
+/** Mirrors the derivation used by the anti-cheat monitor so both agree. */
+const antiCheatTone = {
+  clean: {
+    label: 'Clean', icon: ShieldCheck, rail: 'border-l-green-500',
+    band: 'bg-green-50 border-b-green-200', chip: 'bg-green-500', ink: 'text-green-700',
+    btn: 'bg-white border-green-300 text-green-700 hover:bg-green-100 hover:text-green-800',
+  },
+  warning: {
+    label: 'Warning', icon: ShieldAlert, rail: 'border-l-amber-500',
+    band: 'bg-amber-50 border-b-amber-200', chip: 'bg-amber-500', ink: 'text-amber-700',
+    btn: 'bg-white border-amber-300 text-amber-700 hover:bg-amber-100 hover:text-amber-800',
+  },
+  flagged: {
+    label: 'AI Flagged', icon: Bot, rail: 'border-l-violet-500',
+    band: 'bg-violet-50 border-b-violet-200', chip: 'bg-violet-500', ink: 'text-violet-700',
+    btn: 'bg-white border-violet-300 text-violet-700 hover:bg-violet-100 hover:text-violet-800',
+  },
+  terminated: {
+    label: 'Terminated', icon: ShieldX, rail: 'border-l-red-500',
+    band: 'bg-red-50 border-b-red-200', chip: 'bg-red-500', ink: 'text-red-700',
+    btn: 'bg-white border-red-300 text-red-700 hover:bg-red-100 hover:text-red-800',
+  },
+} as const;
+
+export function StudentDetailModal({ examId, attemptId, onClose, onViewAntiCheat }: StudentDetailModalProps) {
   const [activeTab, setActiveTab] = useState('answers');
   const [attempt, setAttempt] = useState<StudentAttemptDetail | null>(null);
+  const [antiCheat, setAntiCheat] = useState<MonitorDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +89,17 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
       cancelled = true;
     };
   }, [examId, attemptId]);
+
+  // Secondary and non-blocking: the answer view still works without it.
+  useEffect(() => {
+    let cancelled = false;
+    setAntiCheat(null);
+    teacherAntiCheatService
+      .detail(attemptId)
+      .then((data) => { if (!cancelled) setAntiCheat(data); })
+      .catch(() => { if (!cancelled) setAntiCheat(null); });
+    return () => { cancelled = true; };
+  }, [attemptId]);
 
   if (loading || error || !attempt) {
     return (
@@ -89,116 +135,135 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
     downloadCsv(`${attempt.studentId ?? attempt.attemptId}_result.csv`, headers, rows);
   };
 
+  const stats = [
+    { icon: CheckCircle, value: String(correctCount),   label: 'Correct',   tint: 'bg-green-50',  chip: 'bg-green-500',  ink: 'text-green-700' },
+    { icon: XCircle,     value: String(incorrectCount), label: 'Incorrect', tint: 'bg-red-50',    chip: 'bg-red-500',    ink: 'text-red-700' },
+    { icon: AlertCircle, value: String(skippedCount),   label: 'Skipped',   tint: 'bg-amber-50',  chip: 'bg-amber-500',  ink: 'text-amber-700' },
+    { icon: Clock,       value: attempt.timeSpent,      label: 'Time',      tint: 'bg-blue-50',   chip: 'bg-blue-500',   ink: 'text-blue-700' },
+  ];
+
+  const stamp = (value: string) => new Date(value).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col">
-        {/* Header with Gradient Background */}
-        <div className="relative bg-gradient-to-r from-teal-500 to-blue-600 p-6 text-white rounded-t-2xl flex-shrink-0">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {/* max-h + flex lets the answer list own the leftover height instead of a
+          hardcoded chrome offset, which was starving it on short viewports. */}
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex-shrink-0 bg-gradient-to-r from-teal-500 to-blue-600 px-5 py-3.5 text-white flex items-center gap-4">
+          <div className="size-11 bg-white/20 rounded-xl flex items-center justify-center border border-white/30 flex-shrink-0">
+            <User className="size-5 text-white" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {/* Which exam and which attempt - the modal can be reached straight
+                from the anti-cheat monitor, without the exam page for context. */}
+            <p className="flex items-center gap-1.5 text-[11px] text-teal-100 leading-none mb-1">
+              <FileText className="size-3 flex-shrink-0" />
+              <span className="truncate">{attempt.examName}</span>
+              {attempt.attemptNumber !== null && (
+                <span className="flex-shrink-0 rounded-full bg-white/20 border border-white/30 px-1.5 py-0.5 text-[10px] font-medium">
+                  Attempt {attempt.attemptNumber}
+                </span>
+              )}
+            </p>
+            <h2 className="text-lg font-semibold leading-tight truncate">{attempt.studentName}</h2>
+            <p className="text-xs text-teal-100 truncate">
+              {attempt.studentId ?? 'N/A'}
+              {attempt.startTime && ` · started ${stamp(attempt.startTime)}`}
+              {attempt.submitTime && ` · submitted ${stamp(attempt.submitTime)}`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 bg-white/20 rounded-xl px-3 py-1.5 border border-white/30 flex-shrink-0">
+            <Trophy className="size-4 text-amber-300" />
+            <span className="text-xl font-semibold leading-none">{attempt.score.toFixed(2)}</span>
+            <span className="text-xs text-teal-100">/ 100</span>
+          </div>
+
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="absolute top-4 right-4 text-white hover:bg-white/20"
+            className="text-white hover:bg-white/20 flex-shrink-0 size-8 p-0"
           >
-            <X className="size-5" />
+            <X className="size-4" />
           </Button>
-
-          <div className="flex items-start gap-6">
-            {/* Avatar */}
-            <div className="size-20 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-white/30">
-              <User className="size-10 text-white" />
-            </div>
-
-            {/* Student Info */}
-            <div className="flex-1">
-              <h2 className="text-2xl mb-1">{attempt.studentName}</h2>
-              <p className="text-teal-100 mb-4">Student ID: {attempt.studentId ?? 'N/A'}</p>
-
-              <div className="flex flex-wrap items-center gap-4 text-sm">
-                {attempt.startTime && (
-                  <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-lg">
-                    <Calendar className="size-4" />
-                    <span>
-                      Started: {new Date(attempt.startTime).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                )}
-                {attempt.submitTime && (
-                  <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-lg">
-                    <CheckCircle className="size-4" />
-                    <span>
-                      Submitted: {new Date(attempt.submitTime).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Score Badge */}
-            <div className="text-center bg-white/20 backdrop-blur-sm px-6 py-4 rounded-2xl border-2 border-white/30">
-              <Trophy className="size-8 mx-auto mb-2 text-amber-300" />
-              <p className="text-4xl mb-1">{attempt.score.toFixed(2)}</p>
-              <p className="text-sm text-teal-100">Score / 100</p>
-            </div>
-          </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-4 gap-4 p-6 bg-gradient-to-br from-gray-50 to-white border-b border-gray-200">
-          <Card className="shadow-md rounded-xl border-0 bg-gradient-to-br from-green-50 to-emerald-50">
-            <CardContent className="p-4 text-center">
-              <div className="size-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                <CheckCircle className="size-6 text-green-600" />
-              </div>
-              <p className="text-2xl text-green-700 mb-1">{correctCount}</p>
-              <p className="text-xs text-gray-600">Correct</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md rounded-xl border-0 bg-gradient-to-br from-red-50 to-pink-50">
-            <CardContent className="p-4 text-center">
-              <div className="size-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                <XCircle className="size-6 text-red-600" />
-              </div>
-              <p className="text-2xl text-red-700 mb-1">{incorrectCount}</p>
-              <p className="text-xs text-gray-600">Incorrect</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md rounded-xl border-0 bg-gradient-to-br from-amber-50 to-orange-50">
-            <CardContent className="p-4 text-center">
-              <div className="size-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                <AlertCircle className="size-6 text-amber-600" />
-              </div>
-              <p className="text-2xl text-amber-700 mb-1">{skippedCount}</p>
-              <p className="text-xs text-gray-600">Skipped</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md rounded-xl border-0 bg-gradient-to-br from-blue-50 to-cyan-50">
-            <CardContent className="p-4 text-center">
-              <div className="size-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                <Clock className="size-6 text-blue-600" />
-              </div>
-              <p className="text-xl text-blue-700 mb-1">{attempt.timeSpent}</p>
-              <p className="text-xs text-gray-600">Time Spent</p>
-            </CardContent>
-          </Card>
+        {/* Stat strip */}
+        <div className="flex-shrink-0 grid grid-cols-4 divide-x-2 divide-white border-b border-gray-200">
+          {stats.map(({ icon: Icon, value, label, tint, chip, ink }) => (
+            <div key={label} className={`flex items-center gap-2.5 px-4 py-2.5 ${tint}`}>
+              <span className={`size-7 rounded-lg flex items-center justify-center flex-shrink-0 ${chip}`}>
+                <Icon className="size-3.5 text-white" />
+              </span>
+              <span className="min-w-0">
+                <span className={`block text-base font-semibold leading-none ${ink}`}>{value}</span>
+                <span className="block text-[11px] text-gray-500 mt-0.5">{label}</span>
+              </span>
+            </div>
+          ))}
         </div>
+
+        {/* Anti-cheat */}
+        {antiCheat && (() => {
+          const record = antiCheat.attempt;
+          const status = String(record.attemptStatus).replace('_', '-') === 'terminated'
+            ? 'terminated'
+            : record.flagged
+            ? 'flagged'
+            : record.violationCount > 0
+            ? 'warning'
+            : 'clean';
+          const tone = antiCheatTone[status];
+          const ToneIcon = tone.icon;
+          return (
+            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-b-2 border-l-4 ${tone.band} ${tone.rail}`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`size-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm ${tone.chip}`}>
+                  <ToneIcon className="size-5 text-white" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      Anti-cheat
+                    </span>
+                    <span className={`text-sm font-semibold ${tone.ink}`}>{tone.label}</span>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-0.5 truncate">
+                    <span className={`font-semibold ${tone.ink}`}>{record.violationCount}</span>
+                    <span className="text-gray-400">/{record.violationLimit}</span> violations
+                    {' · '}
+                    <span className={`font-semibold ${record.aiFlagCount > 0 ? 'text-violet-700' : 'text-gray-500'}`}>
+                      {record.aiFlagCount}
+                    </span> AI flag{record.aiFlagCount === 1 ? '' : 's'}
+                    {record.terminationReason && (
+                      <span className="text-red-600"> · {record.terminationReason}</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              {onViewAntiCheat && attempt.studentId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`text-xs flex-shrink-0 shadow-sm ${tone.btn}`}
+                  onClick={() => onViewAntiCheat(attempt.studentId as string, attemptId)}
+                >
+                  More detail
+                  <ChevronRight className="size-3 ml-1" />
+                </Button>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-          <div className="px-6 pt-4 border-b border-gray-200">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+          <div className="flex-shrink-0 px-5 pt-3 pb-2 border-b border-gray-200">
             <TabsList className="bg-gray-100 p-1 rounded-lg">
               <TabsTrigger
                 value="answers"
@@ -218,142 +283,108 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
           {/* Answer Details Tab */}
           <TabsContent
             value="answers"
-            className="flex-1 overflow-y-auto p-6 space-y-4 mt-0 scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-100"
-            style={{ maxHeight: 'calc(90vh - 480px)' }}
+            className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 mt-0 scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-100"
           >
-            {attempt.questions.map((q) => (
-              <Card
-                key={q.questionNumber}
-                className={`shadow-lg rounded-2xl overflow-hidden border-l-4 ${
-                  q.isCorrect === true
-                    ? 'border-l-green-500 bg-gradient-to-r from-green-50/50 to-white'
-                    : q.isCorrect === false
-                    ? 'border-l-red-500 bg-gradient-to-r from-red-50/50 to-white'
-                    : 'border-l-amber-500 bg-gradient-to-r from-amber-50/50 to-white'
-                }`}
-              >
-                <CardContent className="p-5">
-                  {/* Question Header */}
-                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <div className="flex items-start gap-3 flex-1">
-                      {/* Status Icon */}
-                      <div className="flex-shrink-0 mt-1">
-                        {q.isCorrect === true && (
-                          <div className="size-10 bg-green-100 rounded-full flex items-center justify-center">
-                            <CheckCircle className="size-6 text-green-600" />
+            {attempt.questions.map((q) => {
+              const answered = Boolean(q.studentAnswer);
+              const tone = q.isCorrect === true
+                ? { rail: 'border-l-green-500', chip: 'bg-green-100 text-green-600', box: 'bg-green-50 border-green-200' }
+                : q.isCorrect === false
+                ? { rail: 'border-l-red-500', chip: 'bg-red-100 text-red-600', box: 'bg-red-50 border-red-200' }
+                : { rail: 'border-l-amber-500', chip: 'bg-amber-100 text-amber-600', box: 'bg-amber-50 border-amber-200' };
+              const StatusIcon = q.isCorrect === true ? CheckCircle : q.isCorrect === false ? XCircle : AlertCircle;
+              return (
+                <div
+                  key={q.questionNumber}
+                  className={`rounded-xl border border-gray-200 border-l-4 bg-white ${tone.rail}`}
+                >
+                  <div className="p-4">
+                    {/* Question header */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                        <span className={`size-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${tone.chip}`}>
+                          <StatusIcon className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            <Badge className="bg-gray-800 text-white text-[10px] px-1.5 py-0">Q{q.questionNumber}</Badge>
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0 ${
+                                q.type === 'mcq'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : q.type === 'true-false'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}
+                            >
+                              {q.type === 'mcq' ? 'Multiple Choice' : q.type === 'true-false' ? 'True/False' : 'Essay'}
+                            </Badge>
                           </div>
-                        )}
-                        {q.isCorrect === false && (
-                          <div className="size-10 bg-red-100 rounded-full flex items-center justify-center">
-                            <XCircle className="size-6 text-red-600" />
-                          </div>
-                        )}
-                        {q.isCorrect === null && (
-                          <div className="size-10 bg-amber-100 rounded-full flex items-center justify-center">
-                            <AlertCircle className="size-6 text-amber-600" />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Question Text */}
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge className="bg-gray-800 text-white">
-                            Question {q.questionNumber}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={
-                              q.type === 'mcq'
-                                ? 'bg-blue-100 text-blue-700 border-blue-200'
-                                : q.type === 'true-false'
-                                ? 'bg-purple-100 text-purple-700 border-purple-200'
-                                : 'bg-amber-100 text-amber-700 border-amber-200'
-                            }
-                          >
-                            {q.type === 'mcq'
-                              ? 'Multiple Choice'
-                              : q.type === 'true-false'
-                              ? 'True/False'
-                              : 'Essay'}
-                          </Badge>
+                          <p className="text-sm text-gray-800 leading-snug">{q.question}</p>
                         </div>
-                        <p className="text-gray-800 text-lg">{q.question}</p>
                       </div>
-                    </div>
 
-                    {/* Points */}
-                    <div className="text-right bg-white rounded-lg px-4 py-2 shadow-sm border border-gray-200">
-                      <p className="text-2xl text-gray-800">
-                        {q.points}
-                        <span className="text-lg text-gray-400">/{q.maxPoints}</span>
-                      </p>
-                      <p className="text-xs text-gray-500">points</p>
-                    </div>
-                  </div>
-
-                  {/* Answers Comparison */}
-                  <div className="grid md:grid-cols-2 gap-4">
-                    {/* Student Answer */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <User className="size-4 text-gray-600" />
-                        <p className="text-sm text-gray-600">Student's Answer</p>
-                      </div>
-                      <div
-                        className={`p-4 rounded-xl border-2 ${
-                          q.isCorrect === true
-                            ? 'bg-green-50 border-green-200'
-                            : q.isCorrect === false
-                            ? 'bg-red-50 border-red-200'
-                            : 'bg-amber-50 border-amber-200'
-                        }`}
-                      >
-                        <p className="text-gray-800">
-                          {q.studentAnswer || (
-                            <span className="text-gray-400 italic">Not answered</span>
-                          )}
+                      <div className="text-right flex-shrink-0 leading-none">
+                        <p className="text-base font-semibold text-gray-800">
+                          {q.points}
+                          <span className="text-xs font-normal text-gray-400">/{q.maxPoints}</span>
                         </p>
-                        {q.isCorrect === true && (
-                          <div className="flex items-center gap-1 mt-2 text-green-700">
-                            <CheckCircle className="size-4" />
-                            <span className="text-xs">Correct!</span>
-                          </div>
-                        )}
-                        {q.isCorrect === false && (
-                          <div className="flex items-center gap-1 mt-2 text-red-700">
-                            <XCircle className="size-4" />
-                            <span className="text-xs">Incorrect</span>
-                          </div>
-                        )}
+                        <p className="text-[10px] text-gray-400 mt-0.5">points</p>
                       </div>
                     </div>
 
-                    {/* Correct Answer */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Award className="size-4 text-green-600" />
-                        <p className="text-sm text-gray-600">Correct Answer</p>
+                    {/* Answers */}
+                    <div className="grid md:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <p className="flex items-center gap-1.5 text-[11px] text-gray-500 mb-1">
+                          <User className="size-3" />
+                          Student&apos;s Answer
+                        </p>
+                        <div className={`px-3 py-2 rounded-lg border text-sm ${tone.box}`}>
+                          <p className="text-gray-800">
+                            {q.studentAnswer || <span className="text-gray-400 italic">Not answered</span>}
+                          </p>
+                          {/* An unanswered question is reported as such rather than
+                              as a wrong answer the student actually gave. */}
+                          <p className={`flex items-center gap-1 mt-1 text-[11px] ${
+                            !answered ? 'text-gray-500' : q.isCorrect === true ? 'text-green-700' : 'text-red-700'
+                          }`}>
+                            {!answered ? (
+                              <><AlertCircle className="size-3" />No answer submitted</>
+                            ) : q.isCorrect === true ? (
+                              <><CheckCircle className="size-3" />Correct</>
+                            ) : q.isCorrect === false ? (
+                              <><XCircle className="size-3" />Incorrect</>
+                            ) : null}
+                          </p>
+                        </div>
                       </div>
-                      <div className="p-4 rounded-xl border-2 bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-                        <p className="text-gray-800">{q.correctAnswer ?? 'Manual grading'}</p>
-                        <div className="flex items-center gap-1 mt-2 text-green-700">
-                          <Star className="size-4 fill-green-600" />
-                          <span className="text-xs">Reference answer</span>
+
+                      <div>
+                        <p className="flex items-center gap-1.5 text-[11px] text-gray-500 mb-1">
+                          <Award className="size-3 text-green-600" />
+                          Correct Answer
+                        </p>
+                        <div className="px-3 py-2 rounded-lg border border-green-200 bg-green-50 text-sm">
+                          <p className="text-gray-800">{q.correctAnswer ?? 'Manual grading'}</p>
+                          <p className="flex items-center gap-1 mt-1 text-[11px] text-green-700">
+                            <Star className="size-3 fill-green-600" />
+                            Reference answer
+                          </p>
                         </div>
                       </div>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                </div>
+              );
+            })}
           </TabsContent>
 
           {/* Statistics Tab */}
           <TabsContent
             value="statistics"
-            className="flex-1 overflow-y-auto p-6 mt-0 scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-100"
-            style={{ maxHeight: 'calc(90vh - 480px)' }}
+            className="flex-1 min-h-0 overflow-y-auto p-5 mt-0 scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-100"
           >
             <div className="max-w-3xl mx-auto space-y-6">
               {/* Performance Overview */}
@@ -509,17 +540,19 @@ export function StudentDetailModal({ examId, attemptId, onClose }: StudentDetail
         </Tabs>
 
         {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gradient-to-br from-gray-50 to-white rounded-b-2xl flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 bg-gray-50 flex-shrink-0">
           <Button
             variant="outline"
+            size="sm"
             onClick={onClose}
-            className="px-6 hover:bg-gray-100 border-gray-300"
+            className="hover:bg-gray-100 border-gray-300"
           >
             <ArrowLeft className="size-4 mr-2" />
             Back to Results
           </Button>
           <Button
             variant="outline"
+            size="sm"
             onClick={exportResult}
             className="hover:bg-green-50 hover:border-green-300 border-green-200"
           >

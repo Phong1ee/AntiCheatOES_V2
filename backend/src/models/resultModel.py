@@ -437,7 +437,9 @@ def _get_attempt_questions(cursor, attempt_id: int):
                 "id": row["question_id"],
                 "type": "essay",
                 "topic": row["subject_id"],
-                "isCorrect": row["essay_score"] is not None and int(row["essay_score"] or 0) > 0,
+                # Blank and pending essays are not wrong answers; grading_status
+                # above already separates them, so mirror that here.
+                "isCorrect": None if grading_status != "graded" else int(row["essay_score"] or 0) > 0,
                 "question": question_text,
                 "studentAnswer": essay_answer,
                 "correctAnswer": None,

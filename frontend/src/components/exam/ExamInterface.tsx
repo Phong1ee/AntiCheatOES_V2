@@ -78,7 +78,12 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const refreshWarningShownRef = useRef(false);
   const examEndingRef = useRef(false);
 
-  const shouldIgnoreAntiCheatEvents = useCallback(() => examEndingRef.current, []);
+  // Both flags matter: examEnding covers submit/termination, and the exit ref
+  // covers a deliberate exit, which is cleared a tick after fullscreenchange.
+  const shouldIgnoreAntiCheatEvents = useCallback(
+    () => examEndingRef.current || intentionalFullscreenExitRef.current,
+    [],
+  );
 
   const exitFullscreenIntentionally = useCallback(async () => {
     if (!document.fullscreenElement) return;
@@ -397,8 +402,10 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
 
   if (aiRuntimeActive && aiRuntime.readiness === "error") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security runtime error</h1><p className="mt-3 text-sm leading-6 text-slate-600">Anti-cheat monitoring was interrupted. Restore camera and audio monitoring to continue the exam.</p><div className="mt-6 flex gap-3"><button className="flex-1 rounded-lg border border-slate-300 px-5 py-3 font-medium text-slate-700 hover:bg-slate-50" onClick={handleNormalExit}>Return to Dashboard</button><button className="flex-1 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={aiRuntime.retry}>Retry</button></div></div></div>;
   if (aiRuntimeActive && aiRuntime.readiness === "loading") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Preparing secure exam</h1><p className="mt-3 text-sm leading-6 text-slate-600">Camera and microphone monitoring are being initialized. Please wait.</p></div></div>;
-  if (fullscreenLocked && antiCheatEnabled) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security check required</h1><p className="mt-3 text-sm leading-6 text-slate-600">Return to fullscreen before continuing. If camera or microphone access was lost, resume from Dashboard after granting permission.</p><button className="mt-6 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={() => void returnToFullscreen()}>Return to Fullscreen</button>{submitError && <p className="mt-4 text-sm text-red-600">{submitError}</p>}</div><ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={!isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} /></div>;
 
+  // A restored attempt can also land here out of fullscreen, with no violation
+  // to announce - the gate has to follow the lock, not the warning.
+  const fullscreenGateOpen = fullscreenLocked && antiCheatEnabled && !isTerminated;
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
@@ -410,6 +417,8 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
-    <ViolationWarningDialog open={showViolationWarning} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={violationType === "FULLSCREEN_EXIT" && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} />
+    {/* This dialog is the whole fullscreen gate: while locked it stays open, its
+        only button is Return to Fullscreen, and answering is blocked underneath. */}
+    <ViolationWarningDialog open={showViolationWarning || fullscreenGateOpen} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={(violationType === "FULLSCREEN_EXIT" || fullscreenGateOpen) && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} error={fullscreenGateOpen ? submitError : null} />
   </div>;
 }

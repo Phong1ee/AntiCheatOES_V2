@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { attemptSessionStorage } from "../services/attempt-session.storage";
+import { isChargeableViolation, isFullscreenExitReportable } from "../anti-cheat/anti-cheat-lifecycle";
 import type { IncidentReporter } from "../anti-cheat/incident-reporter";
 
 type EventType = "TAB_HIDDEN" | "WINDOW_BLUR" | "FULLSCREEN_EXIT" | "COPY_ATTEMPT" | "PASTE_ATTEMPT" | "CUT_ATTEMPT" | "PRINT_ATTEMPT" | "BLOCKED_SHORTCUT" | "CAMERA_TRACK_MUTED" | "CAMERA_TRACK_ENDED" | "MIC_TRACK_MUTED" | "MIC_TRACK_ENDED";
@@ -17,29 +18,45 @@ export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream,
   const lastViolationBurst = useRef(0);
   const unloading = useRef(false);
   const mediaIssueAt = useRef(new Map<MediaStreamTrack, number>());
+  // Whether fullscreen was actually held, so leaving it is a distinct user act.
+  const heldFullscreen = useRef(false);
 
   useEffect(() => {
     if (!active) {
       unloading.current = false;
       lastViolationBurst.current = 0;
+      heldFullscreen.current = false;
       mediaIssueAt.current.clear();
     }
   }, [active, attemptId]);
 
   const { report } = reporter;
-  const send = useCallback(async (eventType: EventType, source: "browser" | "camera" | "microphone") => {
+  const send = useCallback(async (eventType: EventType, source: "browser" | "camera" | "microphone", ownAction = false) => {
     if (!active || !attemptId || unloading.current || shouldIgnoreEvents()) return;
     const now = Date.now();
-    if (now - lastViolationBurst.current < 1_500) return;
+    if (!isChargeableViolation(now, lastViolationBurst.current, ownAction)) return;
     lastViolationBurst.current = now;
     await report({ eventType, source });
   }, [active, attemptId, report, shouldIgnoreEvents]);
 
   useEffect(() => {
     if (!active || !attemptId) return;
+    heldFullscreen.current = Boolean(document.fullscreenElement);
     const onVisibility = () => { if (document.hidden) void send("TAB_HIDDEN", "browser"); };
     const onBlur = () => void send("WINDOW_BLUR", "browser");
-    const onFullscreen = () => { if (!document.fullscreenElement && !unloading.current) { onFullscreenLost(); void send("FULLSCREEN_EXIT", "browser"); } };
+    // send() applies shouldIgnoreEvents() itself, but the lock must honour it
+    // too - otherwise an exam-ending exit records no violation yet still gates
+    // the student behind the security screen.
+    const onFullscreen = () => {
+      if (document.fullscreenElement) { heldFullscreen.current = true; return; }
+      if (!isFullscreenExitReportable(false, unloading.current, shouldIgnoreEvents())) return;
+      // Giving up fullscreen we were holding is always the student's own act, so
+      // it is charged however fast they cycle out and back in.
+      const ownAction = heldFullscreen.current;
+      heldFullscreen.current = false;
+      onFullscreenLost();
+      void send("FULLSCREEN_EXIT", "browser", ownAction);
+    };
     const clipboard = (type: "COPY_ATTEMPT" | "PASTE_ATTEMPT" | "CUT_ATTEMPT") => (event: ClipboardEvent) => { event.preventDefault(); void send(type, "browser"); };
     const onCopy = clipboard("COPY_ATTEMPT"); const onPaste = clipboard("PASTE_ATTEMPT"); const onCut = clipboard("CUT_ATTEMPT");
     const onPrint = (event: Event) => { event.preventDefault(); void send("PRINT_ATTEMPT", "browser"); };
@@ -54,7 +71,7 @@ export function useAntiCheatMonitoring({ active, examId, attemptId, mediaStream,
     document.addEventListener("copy", onCopy); document.addEventListener("paste", onPaste); document.addEventListener("cut", onCut);
     window.addEventListener("beforeprint", onPrint); window.addEventListener("keydown", onKeyDown); window.addEventListener("pagehide", onPageHide);
     return () => { document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("blur", onBlur); document.removeEventListener("fullscreenchange", onFullscreen); document.removeEventListener("copy", onCopy); document.removeEventListener("paste", onPaste); document.removeEventListener("cut", onCut); window.removeEventListener("beforeprint", onPrint); window.removeEventListener("keydown", onKeyDown); window.removeEventListener("pagehide", onPageHide); };
-  }, [active, attemptId, onFullscreenLost, send]);
+  }, [active, attemptId, onFullscreenLost, send, shouldIgnoreEvents]);
 
   useEffect(() => {
     if (!active || !mediaStream) return;

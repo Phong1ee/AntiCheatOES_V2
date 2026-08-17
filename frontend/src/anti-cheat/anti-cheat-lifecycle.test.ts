@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isBrowserMonitoringActive, startSecuredAttempt, type PreparedSecurityRuntime } from './anti-cheat-lifecycle';
+import { isBrowserMonitoringActive, isChargeableViolation, isFullscreenExitReportable, startSecuredAttempt, type PreparedSecurityRuntime } from './anti-cheat-lifecycle';
 
 const runtime = (): PreparedSecurityRuntime => ({ stop: vi.fn(), resetForAttemptStart: vi.fn() });
 
@@ -84,5 +84,40 @@ describe('secured attempt lifecycle', () => {
     [false, 'in_progress', true, false],
   ])('uses official attempt state, not AI readiness, for browser monitoring', (enabled, status, armed, expected) => {
     expect(isBrowserMonitoringActive(enabled, status, armed)).toBe(expected);
+  });
+
+  it.each([
+    ['is still held', true, false, false, false],
+    ['ends mid-exam', false, false, false, true],
+    ['ends because the page is unloading', false, true, false, false],
+    ['is dropped by the exam itself on submit, termination, or exit', false, false, true, false],
+  ])('does not gate the student when fullscreen %s', (_case, inFullscreen, unloading, ignoring, expected) => {
+    expect(isFullscreenExitReportable(inFullscreen, unloading, ignoring)).toBe(expected);
+  });
+
+  it.each([
+    ['collateral from the same action', 1_000, 900, false, false],
+    ['collateral once the burst window has passed', 3_000, 900, false, true],
+    ['the student acting again inside the window', 1_000, 900, true, true],
+  ])('charges %s', (_case, now, lastBurstAt, ownAction, expected) => {
+    expect(isChargeableViolation(now, lastBurstAt, ownAction)).toBe(expected);
+  });
+
+  it('charges every fullscreen exit however fast the student cycles out and back', () => {
+    // Escape spam: five exits, all well inside one 1.5s burst window.
+    const exits = [0, 200, 400, 600, 800];
+    const charge = (ownAction: boolean) => {
+      let lastBurstAt = -Infinity;
+      return exits.filter((at) => {
+        if (!isChargeableViolation(at, lastBurstAt, ownAction)) return false;
+        lastBurstAt = at;
+        return true;
+      });
+    };
+
+    // Treated as collateral, the window swallows all but the first - the hole
+    // that let a student exit indefinitely without reaching the limit.
+    expect(charge(false)).toEqual([0]);
+    expect(charge(true)).toEqual(exits);
   });
 });

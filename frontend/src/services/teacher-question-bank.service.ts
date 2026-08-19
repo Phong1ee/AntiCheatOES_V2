@@ -7,6 +7,7 @@ import type {
   QuestionEditPayload,
   QuestionListResponse,
   QuestionPayload,
+  QuestionStatusCounts,
   SubjectCountResponse,
 } from "../types/question-bank";
 
@@ -27,6 +28,15 @@ export const teacherQuestionBankService = {
   async listMine(params: QuestionBankListParams): Promise<QuestionListResponse> {
     const { data } = await apiClient.get<QuestionListResponse>("/api/teacher/question-bank/mine", {
       params: withoutEmptyParams(params),
+    });
+    return data;
+  },
+
+  async mineStatusCounts(params: QuestionBankListParams): Promise<QuestionStatusCounts> {
+    const { status, page, page_size, ...scope } = params;
+    void status; void page; void page_size;
+    const { data } = await apiClient.get<QuestionStatusCounts>("/api/teacher/question-bank/mine/status-counts", {
+      params: withoutEmptyParams(scope),
     });
     return data;
   },

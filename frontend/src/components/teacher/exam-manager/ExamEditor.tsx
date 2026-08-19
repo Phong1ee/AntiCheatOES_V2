@@ -56,6 +56,8 @@ interface ExamEditorProps {
     expectedVersion?: number;
   }) => Promise<void>;
   onSaved: () => Promise<void>;
+  /** Records a version a write already claimed, without refetching the manager. */
+  onExamVersionChange?: (examId: string, version: number) => void;
   onStatusChange: (examId: string, status: ExamStatus) => Promise<void>;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
   /** Lets the page warn before the teacher navigates away from unsaved work. */
@@ -73,7 +75,7 @@ const scheduleKey = (raw: string) => {
   return date && time ? `${date}T${time.slice(0, 5)}` : '';
 };
 
-export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onStatusChange, onViewInQuestionBank, onDirtyChange }: ExamEditorProps) {
+export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave, onSaved, onExamVersionChange, onStatusChange, onViewInQuestionBank, onDirtyChange }: ExamEditorProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('');
@@ -586,6 +588,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                 expectedVersion={exam?.version}
                 canCreateContent={subjects.some((item) => item.subject_id === subjectId)}
                 onSaved={onSaved}
+                onVersionClaimed={(version) => onExamVersionChange?.(examId, version)}
                 onViewInQuestionBank={onViewInQuestionBank}
                 onDirtyChange={handleQuestionsDirty}
               />

@@ -30,6 +30,8 @@ interface QuestionPoolModalProps {
   onClose: () => void;
   /** Import lands in the exam right away; the host reloads its list. */
   onImported: () => Promise<void>;
+  /** A write claimed this exam version; recording it avoids a manager refetch. */
+  onVersionClaimed?: (version: number) => void;
 }
 
 const statusClass: Record<QuestionImportCandidate['question_status'], string> = {
@@ -46,7 +48,7 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
   current_teacher_school_id: '',
 };
 
-export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, poolDraft, onPoolDraftChange, allowManual = true, expectedVersion, onClose, onImported, onPoolSaved }: QuestionPoolModalProps) {
+export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, poolDraft, onPoolDraftChange, allowManual = true, expectedVersion, onClose, onImported, onVersionClaimed, onPoolSaved }: QuestionPoolModalProps) {
   const [mode, setMode] = useState<'manual' | 'pool'>(allowManual ? 'manual' : 'pool');
   const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
   // Whole candidates (not just ids) so a multi-page selection can be staged
@@ -157,6 +159,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
       setImporting(true);
       setError(null);
       const result = await questionService.importFromBank(examId, payload);
+      onVersionClaimed?.(result.version);
       await onImported();
       setSelected(new Map());
       toast.success(`${result.imported_count} question${result.imported_count === 1 ? '' : 's'} imported.`);

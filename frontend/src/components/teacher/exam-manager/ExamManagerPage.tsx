@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CreateExamDialog, type CreateExamDraft } from "./CreateExamDialog";
 import { ExamEditor } from "./ExamEditor";
@@ -62,6 +62,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
   const [subjects, setSubjects] = useState<TeacherSubject[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(initialExamId ?? null);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<EditorTab | undefined>(initialTab);
@@ -74,7 +75,11 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
 
   const loadManagerData = async () => {
     try {
-      setLoading(true);
+      // Only the first load may blank the page. Later refreshes happen while the
+      // editor is open, and unmounting it there resets its tab and its unsaved
+      // edits - the editor's own guard against re-hydrating cannot survive a
+      // remount, because its ref is recreated with it.
+      if (!hasLoadedRef.current) setLoading(true);
       setLoadError(null);
       const [apiExams, apiSubjects] = await Promise.all([
         teacherExamService.list(),
@@ -91,6 +96,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Failed to load exams.");
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
   };
@@ -173,6 +179,14 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
 
   const refreshExam = async () => { await loadManagerData(); };
 
+  /** A write claimed a new exam version. Reloading the whole manager for that
+   *  blanks the editor, so only the version this exam carries is updated. */
+  const applyExamVersion = (examId: string, version: number) => {
+    setExams((current) => current.map((exam) => (
+      exam.id === examId ? { ...exam, version } : exam
+    )));
+  };
+
   const handleDeleteExam = async (examId: string) => {
     await teacherExamService.delete(Number(examId), exams.find((exam) => exam.id === examId)?.version);
     const remaining = exams.filter((exam) => exam.id !== examId);
@@ -240,6 +254,7 @@ export function ExamManagerPage({ initialExamId, initialTab, onViewInQuestionBan
           onDirtyChange={setEditorDirty}
           onSave={handleSaveExam}
           onSaved={refreshExam}
+          onExamVersionChange={applyExamVersion}
           onStatusChange={handleStatusChange}
           onViewInQuestionBank={onViewInQuestionBank}
         />

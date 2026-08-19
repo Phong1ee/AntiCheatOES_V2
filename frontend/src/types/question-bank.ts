@@ -120,6 +120,9 @@ export interface QuestionBankListParams extends QuestionBankFilters {
   page_size?: number;
 }
 
+/** Totals per My Questions tab, for the current scope and filters but every status. */
+export type QuestionStatusCounts = Record<QuestionStatus | "all", number>;
+
 export interface QuestionOptionPayload {
   options_id?: number;
   options_text: string;

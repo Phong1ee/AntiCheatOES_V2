@@ -68,6 +68,24 @@ export const teacherBulkDataRequestService = {
     return data;
   },
 
+  /** The import template with the Subject block pre-filled for one assigned subject. */
+  async downloadQuestionTemplate(subjectId: string): Promise<void> {
+    const { data } = await apiClient.get("/api/teacher/bulk-data-requests/question-bank-template", {
+      params: { subject_id: subjectId },
+      responseType: "blob",
+    });
+    triggerDownload(data as Blob, `question-bank-${subjectId}.docx`);
+  },
+
+  /** The subject's existing chapters and learning objectives, to copy names from. */
+  async downloadQuestionGuideline(subjectId: string): Promise<void> {
+    const { data } = await apiClient.get("/api/teacher/bulk-data-requests/question-bank-guideline", {
+      params: { subject_id: subjectId },
+      responseType: "blob",
+    });
+    triggerDownload(data as Blob, `question-bank-${subjectId}-guideline.docx`);
+  },
+
   async downloadRequest(request: Pick<TeacherBulkDataRequest, "request_id" | "original_filename">): Promise<void> {
     const { data } = await apiClient.get(`/api/teacher/bulk-data-requests/${request.request_id}/download`, {
       responseType: "blob",

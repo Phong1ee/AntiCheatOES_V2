@@ -103,6 +103,8 @@ export interface QuestionImportCandidateResponse {
 
 export interface ImportQuestionsResponse {
   success: boolean;
+  /** The exam version this import claimed; the next write must send it. */
+  version: number;
   imported_count: number;
   imported_question_ids: number[];
   automatically_distributed: boolean;
@@ -197,7 +199,66 @@ export interface PoolPreview {
   }>;
 }
 
+/** What one document import did, so the teacher can see it reused rather than copied. */
+export interface ExamQuestionImportSummary {
+  success: boolean;
+  /** Every question the file placed in the exam, newly linked or already there. */
+  question_ids: number[];
+  /** The exam version this import claimed; the next write must send it. */
+  version: number;
+  reused: number;
+  proposed_edit: number;
+  updated_own: number;
+  created: number;
+  already_in_exam: number;
+  attached: number;
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 export const questionService = {
+  /** Question document template, with this exam's subject already filled in. */
+  async downloadExamQuestionTemplate(examId: number): Promise<void> {
+    const { data } = await apiClient.get(`/api/teacher/exams/${examId}/question-template`, {
+      responseType: "blob",
+    });
+    triggerDownload(data as Blob, `exam-${examId}-questions.docx`);
+  },
+
+  /** Adds the questions in a filled template to the exam. */
+  async importExamQuestionsDocument(
+    examId: number,
+    file: File,
+    expectedVersion?: number,
+  ): Promise<ExamQuestionImportSummary> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await apiClient.post<ExamQuestionImportSummary>(
+      `/api/teacher/exams/${examId}/questions/import-document`,
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        params: expectedVersion !== undefined ? { expected_version: expectedVersion } : undefined,
+      },
+    );
+    return data;
+  },
+
+  /** The chapters and learning objectives available to this exam's subject. */
+  async downloadExamQuestionGuideline(examId: number): Promise<void> {
+    const { data } = await apiClient.get(`/api/teacher/exams/${examId}/question-guideline`, {
+      responseType: "blob",
+    });
+    triggerDownload(data as Blob, `exam-${examId}-questions-guideline.docx`);
+  },
+
   async create(payload: CreateQuestionRequest & { expected_version?: number }): Promise<number> {
     const { data } = await apiClient.post<{ question_id: number }>("/api/teacher/add-question", payload);
     return data.question_id;
@@ -218,13 +279,23 @@ export const questionService = {
     return data;
   },
 
-  async removeFromExam(examId: number, questionId: number, expectedVersion?: number): Promise<void> {
-    await apiClient.delete(`/api/teacher/${examId}/delete-question/${questionId}`, { params: { expected_version: expectedVersion } });
+  async removeFromExam(
+    examId: number,
+    questionId: number,
+    expectedVersion?: number,
+  ): Promise<{ version: number }> {
+    const { data } = await apiClient.delete<{ success: boolean; version: number }>(
+      `/api/teacher/${examId}/delete-question/${questionId}`,
+      { params: { expected_version: expectedVersion } },
+    );
+    return data;
   },
 
   async bulkRemove(examId: number, questionIds: number[], expectedVersion?: number) {
     const { data } = await apiClient.post<{
       success: boolean;
+      /** The exam version this write claimed; the next write must send it. */
+      version: number;
       removed_count: number;
       removed_question_ids: number[];
     }>(`/api/teacher/${examId}/questions/bulk-remove`, { question_ids: questionIds, expected_version: expectedVersion });

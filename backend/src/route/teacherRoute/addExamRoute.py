@@ -31,6 +31,7 @@ from src.models.teacher.requestModel.TeacherExamRequest import (
     TeacherResultVisibilityRequest,
     TeacherExamStatusRequest,
 )
+from src.service.exam_schedule_service import describe_conflicts, find_schedule_conflicts
 from src.service.teacher_subject_service import require_active_subject_assignment
 from src.service.exam_version_service import claim_exam_version
 from src.service.audit_service import record_audit
@@ -97,6 +98,15 @@ def _serialize(db: Session, exam: Exam) -> dict:
         ),
         "version": exam.version,
     }
+
+
+def _assert_no_schedule_conflict(db: Session, exam: Exam) -> None:
+    """Reject a window that would sit open alongside another exam's, for shared students."""
+    conflicts = find_schedule_conflicts(
+        db, exam_id=exam.exam_id, start_time=exam.start_time, end_time=exam.end_time
+    )
+    if conflicts:
+        raise HTTPException(status_code=409, detail=describe_conflicts(conflicts))
 
 
 def _validate_publishable(db: Session, exam: Exam) -> None:
@@ -232,6 +242,7 @@ def add_exam_to_database(
         )
         db.add(exam)
         db.flush()
+        _assert_no_schedule_conflict(db, exam)
         if request.status == "published":
             _validate_publishable(db, exam)
         record_audit(
@@ -285,6 +296,8 @@ def update_exam_in_database(
         exam.subject_id = request.subject_id
         exam.start_time = request.start_time
         exam.end_time = request.end_time
+        # After the new window is applied, so the check sees what is being saved.
+        _assert_no_schedule_conflict(db, exam)
         if request.status == "published":
             _validate_publishable(db, exam)
         exam.status = request.status

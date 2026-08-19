@@ -28,6 +28,9 @@ import {
   CheckCircle2,
   ArrowLeft,
   ExternalLink,
+  FileText,
+  BookOpenCheck,
+  Upload,
 } from 'lucide-react';
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
@@ -85,6 +88,8 @@ interface QuestionsTabProps {
   expectedVersion?: number;
   canCreateContent: boolean;
   onSaved: () => Promise<void>;
+  /** A write claimed this exam version; recording it avoids a manager refetch. */
+  onVersionClaimed?: (version: number) => void;
   onViewInQuestionBank: (questionId: number, tab: 'bank' | 'mine') => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
@@ -109,13 +114,16 @@ const questionSnapshot = (question: Question) => JSON.stringify({
 const poolRuleKey = (rule: Pick<PoolRule, 'chapter_id' | 'lo_id' | 'difficulty'>) =>
   `${rule.chapter_id}:${rule.lo_id ?? 'all'}:${rule.difficulty}`;
 
-export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateContent, onSaved, onViewInQuestionBank, onDirtyChange }: QuestionsTabProps) {
+export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateContent, onSaved, onVersionClaimed, onViewInQuestionBank, onDirtyChange }: QuestionsTabProps) {
   // Load questions based on examId
   const initialQuestions: Question[] = [];
 
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(questions[0]?.id || null);
   const [showQuestionPool, setShowQuestionPool] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState<'template' | 'guideline' | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const [poolConfig, setPoolConfig] = useState<PoolConfig | null>(null);
   const [isPoolMode, setIsPoolMode] = useState(false);
   const [activePoolRuleId, setActivePoolRuleId] = useState<number | null>(null);
@@ -338,8 +346,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     try {
       setIsDeleting(true);
       if (!questionToDelete.id.startsWith('new-') && examId) {
-        await questionService.removeFromExam(Number(examId), Number(questionToDelete.id), expectedVersion);
-        await onSaved();
+        const removal = await questionService.removeFromExam(Number(examId), Number(questionToDelete.id), expectedVersion);
+        onVersionClaimed?.(removal.version);
       }
       const remaining = questions.filter((question) => question.id !== questionToDelete.id);
       setQuestions(remaining);
@@ -505,8 +513,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     try {
       setBulkBusy(true);
       if (persistedIds.length > 0) {
-        await questionService.bulkRemove(Number(examId), persistedIds, expectedVersion);
-        await onSaved();
+        const removal = await questionService.bulkRemove(Number(examId), persistedIds, expectedVersion);
+        onVersionClaimed?.(removal.version);
       }
       const remaining = questions.filter((question) => !selectedIds.has(question.id));
       const unsavedRemaining = remaining.filter((question) => question.id.startsWith('new-'));
@@ -589,6 +597,52 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
    * question the teacher has edited keeps its local version, everything else
    * takes the server's, and unsaved new questions are appended untouched.
    */
+  const uploadFilledTemplate = async (file: File | undefined) => {
+    if (!file || !examId || examId.startsWith('new-')) return;
+    setUploadingDocument(true);
+    try {
+      const summary = await questionService.importExamQuestionsDocument(Number(examId), file, expectedVersion);
+      // Importing claims a new exam version. Recording it keeps the next write
+      // valid without refetching the manager and blanking the editor.
+      onVersionClaimed?.(summary.version);
+      // The file just asked for these questions, so a removal still staged for
+      // one of them is stale - leaving it would delete them on the next save.
+      setPendingRemovals((current) => {
+        const next = new Set(current);
+        summary.question_ids.forEach((questionId) => next.delete(String(questionId)));
+        return next;
+      });
+      await handleImported();
+      // Reusing and proposing are the interesting outcomes, so say which happened.
+      const parts = [
+        summary.created ? `${summary.created} created` : null,
+        summary.reused ? `${summary.reused} reused from the bank` : null,
+        summary.proposed_edit ? `${summary.proposed_edit} sent for review as an edit` : null,
+        summary.updated_own ? `${summary.updated_own} of your drafts updated` : null,
+        summary.already_in_exam ? `${summary.already_in_exam} already in this exam` : null,
+      ].filter(Boolean);
+      toast.success(`${summary.attached} question${summary.attached === 1 ? '' : 's'} added. ${parts.join(', ')}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to import the questions.');
+    } finally {
+      setUploadingDocument(false);
+      if (documentInputRef.current) documentInputRef.current.value = '';
+    }
+  };
+
+  const downloadExamDocument = async (kind: 'template' | 'guideline') => {
+    if (!examId || examId.startsWith('new-')) return;
+    setTemplateDownloading(kind);
+    try {
+      if (kind === 'template') await questionService.downloadExamQuestionTemplate(Number(examId));
+      else await questionService.downloadExamQuestionGuideline(Number(examId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Unable to prepare the ${kind}.`);
+    } finally {
+      setTemplateDownloading(null);
+    }
+  };
+
   const handleImported = useCallback(async () => {
     if (!examId || examId.startsWith('new-')) return;
     const serverQuestions = mapQuestions(await questionService.getExamQuestions(Number(examId)));
@@ -677,9 +731,19 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     try {
       setQuestionsSaving(true);
       setSaveError(null);
+      // Every write below claims a new exam version. Only the first may assert
+      // the version this tab loaded with; re-asserting it on the next write
+      // would fail as a stale save against the version we just claimed.
+      let pendingVersionCheck = expectedVersion;
+      const claimVersion = () => {
+        const version = pendingVersionCheck;
+        pendingVersionCheck = undefined;
+        return version;
+      };
       const removalIds = [...pendingRemovals].filter((id) => !id.startsWith('new-')).map(Number);
       if (removalIds.length > 0) {
-        await questionService.bulkRemove(Number(examId), removalIds);
+        const removal = await questionService.bulkRemove(Number(examId), removalIds, claimVersion());
+        onVersionClaimed?.(removal.version);
       }
       for (const question of changedQuestions) {
         // New question: create in the exam with the full payload
@@ -696,11 +760,11 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             options: payload.options,
             exam_id: Number(examId),
             max_score: payload.max_score,
-            expected_version: expectedVersion,
+            expected_version: claimVersion(),
           });
         } else if (!question.canEditContent) {
           // Cannot edit content: only max_score may change
-          await questionService.updateInExam(Number(examId), Number(question.id), { max_score: question.maxScore, expected_version: expectedVersion });
+          await questionService.updateInExam(Number(examId), Number(question.id), { max_score: question.maxScore, expected_version: claimVersion() });
         } else {
           // Editable content: full update path; pool candidates saved via pool API
           const isTrueFalse = question.type === 'true-false';
@@ -731,7 +795,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             question_status: question.status ?? 'draft',
             max_score: question.maxScore,
             options,
-            expected_version: expectedVersion,
+            expected_version: claimVersion(),
           };
 
           if (isPoolMode && activePoolRuleId !== null && question.id && !question.id.startsWith('new-')) {
@@ -1010,6 +1074,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
               setPoolConfig(null);
               await loadQuestions();
             }}
+            onVersionClaimed={onVersionClaimed}
             onPoolSaved={async (config) => {
               await handleAddPoolConfig(config);
               await onSaved();
@@ -1165,6 +1230,55 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             <Database className="size-4 shrink-0" />
             <span className="min-w-0 break-words">Import from Question Bank</span>
           </Button>
+
+          {/* Prepare questions offline: the template arrives scoped to this
+              exam's subject, and the guideline lists the names to reuse. */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-auto min-h-9 min-w-0 whitespace-normal py-2 text-center"
+              onClick={() => void downloadExamDocument('template')}
+              disabled={!examId || examId.startsWith('new-') || templateDownloading !== null}
+            >
+              {templateDownloading === 'template'
+                ? <Loader2 className="size-4 shrink-0 animate-spin" />
+                : <FileText className="size-4 shrink-0" />}
+              <span className="min-w-0 break-words">Template</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-auto min-h-9 min-w-0 whitespace-normal py-2 text-center"
+              onClick={() => void downloadExamDocument('guideline')}
+              disabled={!examId || examId.startsWith('new-') || templateDownloading !== null}
+            >
+              {templateDownloading === 'guideline'
+                ? <Loader2 className="size-4 shrink-0 animate-spin" />
+                : <BookOpenCheck className="size-4 shrink-0" />}
+              <span className="min-w-0 break-words">Guideline</span>
+            </Button>
+          </div>
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-auto min-h-9 w-full min-w-0 whitespace-normal py-2 text-center"
+            onClick={() => documentInputRef.current?.click()}
+            disabled={!examId || examId.startsWith('new-') || uploadingDocument}
+          >
+            {uploadingDocument
+              ? <Loader2 className="size-4 shrink-0 animate-spin" />
+              : <Upload className="size-4 shrink-0" />}
+            <span className="min-w-0 break-words">Upload Filled Template</span>
+          </Button>
+          <input
+            ref={documentInputRef}
+            type="file"
+            accept=".docx,.pdf"
+            className="hidden"
+            onChange={(event) => void uploadFilledTemplate(event.target.files?.[0])}
+          />
         </div>
 
         {isPoolMode && poolConfig && activePoolRuleId === null ? (
@@ -1685,6 +1799,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             setPoolConfig(null);
             await loadQuestions();
           }}
+          onVersionClaimed={onVersionClaimed}
           onPoolSaved={async (config) => {
             await handleAddPoolConfig(config);
             await onSaved();

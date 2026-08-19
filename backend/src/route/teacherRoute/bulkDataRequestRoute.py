@@ -13,11 +13,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
-from src.a_db_config import BulkDataRequest, BulkDataRequestStatus, BulkDataRequestType, Subject, User, UserRole
+from src.a_db_config import BulkDataRequest, BulkDataRequestStatus, BulkDataRequestType, Chapter, ChapterLO, LO, Subject, User, UserRole
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
 from src.service import bulk_data_request_storage as storage
 from src.service.audit_service import record_audit
 from src.service.question_bank_import_parser import QuestionBankParseError, parse_question_bank_document
+from src.service.question_bank_template_service import build_subject_guideline, build_subject_template
 from src.service.teacher_subject_service import require_active_subject_assignment
 from src.service.user_import_service import UserImportParseError, parse_user_import_xlsx
 
@@ -259,6 +260,72 @@ def list_bulk_data_requests(
     total = query.with_entities(func.count(BulkDataRequest.request_id)).scalar() or 0
     items = query.order_by(BulkDataRequest.created_at.desc(), BulkDataRequest.request_id.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {"items": [_serialize_request(item, db) for item in items], "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("/question-bank-template")
+def download_question_bank_template(
+    subject_id: str = Query(min_length=1, max_length=20),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """The import template with the Subject block already filled in.
+
+    Subject name and description come from the database rather than the caller,
+    so the file cannot disagree with the subject it is prepared for.
+    """
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    require_active_subject_assignment(db, teacher.school_id, subject_id)
+    subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    content = build_subject_template(subject.subject_id, subject.subject_name, subject.subject_description or "")
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="question-bank-{subject.subject_id}.docx"'},
+    )
+
+
+@router.get("/question-bank-guideline")
+def download_question_bank_guideline(
+    subject_id: str = Query(min_length=1, max_length=20),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """The subject's existing Chapters and Learning Objectives, to copy names from."""
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    require_active_subject_assignment(db, teacher.school_id, subject_id)
+    subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    rows = (
+        db.query(Chapter.chapter_id, Chapter.chapter_name, LO.lo_name)
+        .outerjoin(ChapterLO, ChapterLO.chapter_id == Chapter.chapter_id)
+        .outerjoin(LO, LO.lo_id == ChapterLO.lo_id)
+        .filter(Chapter.subject_id == subject_id)
+        .order_by(Chapter.chapter_name, LO.lo_name)
+        .all()
+    )
+    chapters: list[tuple[str, list[str]]] = []
+    by_chapter: dict[int, int] = {}
+    for chapter_id, chapter_name, lo_name in rows:
+        if chapter_id not in by_chapter:
+            by_chapter[chapter_id] = len(chapters)
+            chapters.append((chapter_name, []))
+        if lo_name:
+            chapters[by_chapter[chapter_id]][1].append(lo_name)
+    content = build_subject_guideline(
+        subject.subject_id, subject.subject_name, subject.subject_description or "", chapters
+    )
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="question-bank-{subject.subject_id}-guideline.docx"'},
+    )
 
 
 @router.get("/{request_id}/download")

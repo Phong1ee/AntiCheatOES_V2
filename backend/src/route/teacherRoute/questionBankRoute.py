@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -228,6 +228,76 @@ def _serialize_edit_revision(revision: QuestionRevision, has_pending_revision: b
         "rejection_reason": revision.rejection_reason,
         "created_at": revision.created_at.isoformat() if revision.created_at else None,
         "updated_at": revision.updated_at.isoformat() if revision.updated_at else None,
+    }
+
+
+def _mine_scope_filter(db: Session, teacher_school_id: str):
+    """What "My Questions" covers: questions this teacher authored, plus their
+    outstanding proposals on questions someone else authored. Keyed on created_by
+    alone, a proposal against another teacher's approved question reached Admin
+    but appeared nowhere on the teacher's side, under any status filter.
+
+    Only the teacher's latest revision counts, matching _revision_metadata, so a
+    row can never arrive here without the pending/rejected state the list badges.
+    """
+    own_revision = aliased(QuestionRevision)
+    newer_own_revision = aliased(QuestionRevision)
+    outstanding_revision_exists = db.query(own_revision.revision_id).filter(
+        own_revision.question_id == Question.question_id,
+        own_revision.edited_by == teacher_school_id,
+        own_revision.question_status.in_(["pending", "rejected"]),
+        ~db.query(newer_own_revision.revision_id).filter(
+            newer_own_revision.question_id == own_revision.question_id,
+            newer_own_revision.edited_by == teacher_school_id,
+            newer_own_revision.version_number > own_revision.version_number,
+        ).exists(),
+    ).exists()
+    return or_(Question.created_by == teacher_school_id, outstanding_revision_exists)
+
+
+def _mine_status_conditions(db: Session, teacher_school_id: str) -> dict[str, object]:
+    """The effective status each My Questions tab means.
+
+    An approved question carrying this teacher's outstanding proposal reads as
+    pending (or rejected), not approved. The list and the tab counts must derive
+    that from one place, or the badges disagree with what the tab opens.
+    """
+    pending_revision_exists = db.query(QuestionRevision.revision_id).filter(
+        QuestionRevision.question_id == Question.question_id,
+        QuestionRevision.edited_by == teacher_school_id,
+        QuestionRevision.question_status == "pending",
+    ).exists()
+    rejected_revision = aliased(QuestionRevision)
+    newer_revision = aliased(QuestionRevision)
+    latest_rejected_revision_exists = db.query(rejected_revision.revision_id).filter(
+        rejected_revision.question_id == Question.question_id,
+        rejected_revision.edited_by == teacher_school_id,
+        rejected_revision.question_status == "rejected",
+        ~db.query(newer_revision.revision_id).filter(
+            newer_revision.question_id == rejected_revision.question_id,
+            newer_revision.edited_by == teacher_school_id,
+            newer_revision.version_number > rejected_revision.version_number,
+        ).exists(),
+    ).exists()
+    return {
+        "draft": Question.question_status == QuestionStatus.draft,
+        "pending": or_(
+            Question.question_status == QuestionStatus.pending,
+            and_(Question.question_status == QuestionStatus.approved, pending_revision_exists),
+        ),
+        "approved": and_(
+            Question.question_status == QuestionStatus.approved,
+            ~pending_revision_exists,
+            ~latest_rejected_revision_exists,
+        ),
+        "rejected": or_(
+            Question.question_status == QuestionStatus.rejected,
+            and_(
+                Question.question_status == QuestionStatus.approved,
+                ~pending_revision_exists,
+                latest_rejected_revision_exists,
+            ),
+        ),
     }
 
 
@@ -468,55 +538,42 @@ def list_my_questions(
     subject_ids = _active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
-    query = _base_question_query(db).filter(Question.created_by == teacher.school_id)
+    query = _base_question_query(db).filter(_mine_scope_filter(db, teacher.school_id))
     query = query.filter(Question.subject_id.in_(subject_ids))
     if status_filter:
-        pending_revision_exists = db.query(QuestionRevision.revision_id).filter(
-            QuestionRevision.question_id == Question.question_id,
-            QuestionRevision.edited_by == teacher.school_id,
-            QuestionRevision.question_status == "pending",
-        ).exists()
-        rejected_revision = aliased(QuestionRevision)
-        newer_revision = aliased(QuestionRevision)
-        latest_rejected_revision_exists = db.query(rejected_revision.revision_id).filter(
-            rejected_revision.question_id == Question.question_id,
-            rejected_revision.edited_by == teacher.school_id,
-            rejected_revision.question_status == "rejected",
-            ~db.query(newer_revision.revision_id).filter(
-                newer_revision.question_id == rejected_revision.question_id,
-                newer_revision.edited_by == teacher.school_id,
-                newer_revision.version_number > rejected_revision.version_number,
-            ).exists(),
-        ).exists()
-        if status_filter == "pending":
-            query = query.filter(
-                or_(
-                    Question.question_status == QuestionStatus.pending,
-                    and_(Question.question_status == QuestionStatus.approved, pending_revision_exists),
-                )
-            )
-        elif status_filter == "approved":
-            query = query.filter(
-                Question.question_status == QuestionStatus.approved,
-                ~pending_revision_exists,
-                ~latest_rejected_revision_exists,
-            )
-        elif status_filter == "rejected":
-            query = query.filter(
-                or_(
-                    Question.question_status == QuestionStatus.rejected,
-                    and_(
-                        Question.question_status == QuestionStatus.approved,
-                        ~pending_revision_exists,
-                        latest_rejected_revision_exists,
-                    ),
-                )
-            )
-        else:
-            query = query.filter(Question.question_status == status_filter)
+        conditions = _mine_status_conditions(db, teacher.school_id)
+        query = query.filter(conditions.get(status_filter, Question.question_status == status_filter))
     query = _apply_filters(query, subject_id, chapter_id, lo_id, search, question_type, difficulty)
     questions, total = _list_questions(query, page, page_size)
     return {"items": [_serialize_item(item, teacher, False, db, subject_ids) for item in questions], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/mine/status-counts")
+def count_my_questions_by_status(
+    subject_id: str | None = None, chapter_id: int | None = None, lo_id: int | None = None, search: str | None = None,
+    question_type: QuestionTypeLiteral | None = None, difficulty: QuestionDifficultyLiteral | None = None,
+    current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db),
+):
+    """One total per tab, for the same scope and filters the list uses.
+
+    Deliberately takes no status, page or page_size: a tab badge must not change
+    because of which tab is open or which page of it is loaded.
+    """
+    del role_check
+    teacher = _teacher(db, current_user["school_id"])
+    subject_ids = _active_subject_ids(db, teacher.school_id)
+    if subject_id and subject_id not in subject_ids:
+        raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
+    query = db.query(Question).filter(_mine_scope_filter(db, teacher.school_id), Question.subject_id.in_(subject_ids))
+    query = _apply_filters(query, subject_id, chapter_id, lo_id, search, question_type, difficulty)
+    conditions = _mine_status_conditions(db, teacher.school_id)
+    names = ("draft", "pending", "approved", "rejected")
+    # distinct, because the taxonomy filters above can join a question twice.
+    row = query.with_entities(
+        func.count(func.distinct(Question.question_id)),
+        *[func.count(func.distinct(case((conditions[name], Question.question_id)))) for name in names],
+    ).one()
+    return {"all": row[0] or 0, **{name: row[index] or 0 for index, name in enumerate(names, start=1)}}
 
 
 @router.get("/subjects")
@@ -524,7 +581,7 @@ def list_subject_counts(scope: Literal["bank", "mine"] = "bank", current_user: d
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     subject_ids = _active_subject_ids(db, teacher.school_id)
-    filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [Question.created_by == teacher.school_id]
+    filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [_mine_scope_filter(db, teacher.school_id)]
     rows = db.query(Subject.subject_id, Subject.subject_name, Subject.subject_description, func.count(Question.question_id).label("question_count")).filter(Subject.subject_id.in_(subject_ids)).outerjoin(Question, (Subject.subject_id == Question.subject_id) & filters[0]).group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description).order_by(Subject.subject_name).all()
     total = db.query(func.count(Question.question_id)).filter(*filters, Question.subject_id.in_(subject_ids)).scalar() or 0
     no_subject_count = 0

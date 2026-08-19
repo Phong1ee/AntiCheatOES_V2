@@ -17,6 +17,7 @@ import type {
   QuestionBankTab,
   QuestionDetail,
   QuestionStatus,
+  QuestionStatusCounts,
   SubjectCount,
 } from "../../../types/question-bank";
 
@@ -132,27 +133,32 @@ export function QuestionBankPage({
 
   const refresh = () => setReloadKey((current) => current + 1);
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<QuestionStatus | "all", number> = {
-      all: questions.length,
-      draft: 0,
-      pending: 0,
-      approved: 0,
-      rejected: 0,
-    };
+  // Everything the counts depend on except which tab is open and which page of
+  // it is loaded - those must never move a badge.
+  const countsScope = useMemo(() => {
+    const { status, page: _page, page_size: _pageSize, ...scope } = queryParams;
+    void status;
+    void _page;
+    void _pageSize;
+    return scope;
+  }, [queryParams]);
+  const countsIdentity = useMemo(() => JSON.stringify(countsScope), [countsScope]);
 
-    questions.forEach((question) => {
-      const displayStatus =
-        question.question_status === "approved" && question.has_pending_revision
-          ? "pending"
-          : question.question_status === "approved" && question.revision_rejection_reason
-            ? "rejected"
-            : question.question_status;
-      counts[displayStatus] += 1;
-    });
+  const [statusCounts, setStatusCounts] = useState<QuestionStatusCounts | undefined>();
 
-    return counts;
-  }, [questions]);
+  useEffect(() => {
+    if (activeTab !== "mine") {
+      setStatusCounts(undefined);
+      return undefined;
+    }
+    let cancelled = false;
+    teacherQuestionBankService
+      .mineStatusCounts(countsScope)
+      .then((data) => { if (!cancelled) setStatusCounts(data); })
+      .catch(() => { if (!cancelled) setStatusCounts(undefined); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, countsIdentity, reloadKey]);
 
   const visibleQuestions = useMemo(() => {
     if (activeTab !== "mine" || !filters.status) return questions;
@@ -167,8 +173,9 @@ export function QuestionBankPage({
     });
   }, [activeTab, filters.status, questions]);
 
-  const visibleTotal =
-    activeTab === "mine" && filters.status ? visibleQuestions.length : total;
+  // visibleQuestions only hides the previous tab's rows while the next fetch is
+  // in flight - the server owns the filtering, so its total is the real one.
+  const visibleTotal = total;
 
   const mobileSubjectItems = useMemo(
     () => [

@@ -1,7 +1,11 @@
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -33,6 +37,9 @@ from src.models.teacher.requestModel.QuestionsSelectFromBank import QuestionsSel
 from src.models.teacher.requestModel.ExamQuestionPoolRequest import BulkQuestionIdsRequest
 from src.service.teacher_subject_service import active_subject_ids, require_active_subject_assignment
 from src.service.exam_version_service import claim_exam_version
+from src.service.exam_question_import_service import ImportTaxonomyError, apply_document_import
+from src.service.question_bank_import_parser import QuestionBankParseError, parse_question_bank_document
+from src.service.question_bank_template_service import build_subject_guideline, build_subject_template
 
 router = APIRouter()
 
@@ -328,6 +335,150 @@ def _clone_question(
     return clone
 
 
+DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _exam_subject(db: Session, exam_id: int, school_id: str) -> Subject:
+    """The exam's subject, for a teacher who manages the exam."""
+    exam = _owned_exam(db, exam_id, school_id)
+    if not exam.subject_id:
+        raise HTTPException(status_code=400, detail="Set the exam's subject before preparing questions")
+    subject = db.query(Subject).filter(Subject.subject_id == exam.subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return subject
+
+
+@router.get("/exams/{exam_id}/question-template")
+def download_exam_question_template(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """The question document template, filled with this exam's subject."""
+    del role_check
+    subject = _exam_subject(db, exam_id, current_user["school_id"])
+    content = build_subject_template(subject.subject_id, subject.subject_name, subject.subject_description or "")
+    return Response(
+        content=content,
+        media_type=DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="exam-{exam_id}-questions.docx"'},
+    )
+
+
+@router.get("/exams/{exam_id}/question-guideline")
+def download_exam_question_guideline(
+    exam_id: int,
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """The chapters and learning objectives available to this exam's subject."""
+    del role_check
+    subject = _exam_subject(db, exam_id, current_user["school_id"])
+    rows = (
+        db.query(Chapter.chapter_id, Chapter.chapter_name, LO.lo_name)
+        .outerjoin(ChapterLO, ChapterLO.chapter_id == Chapter.chapter_id)
+        .outerjoin(LO, LO.lo_id == ChapterLO.lo_id)
+        .filter(Chapter.subject_id == subject.subject_id)
+        .order_by(Chapter.chapter_name, LO.lo_name)
+        .all()
+    )
+    chapters: list[tuple[str, list[str]]] = []
+    position: dict[int, int] = {}
+    for chapter_id, chapter_name, lo_name in rows:
+        if chapter_id not in position:
+            position[chapter_id] = len(chapters)
+            chapters.append((chapter_name, []))
+        if lo_name:
+            chapters[position[chapter_id]][1].append(lo_name)
+    content = build_subject_guideline(
+        subject.subject_id, subject.subject_name, subject.subject_description or "", chapters
+    )
+    return Response(
+        content=content,
+        media_type=DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="exam-{exam_id}-questions-guideline.docx"'},
+    )
+
+
+MAX_IMPORT_FILE_SIZE = 5 * 1024 * 1024
+_IMPORT_SUFFIXES = {".docx", ".pdf"}
+
+
+@router.post("/exams/{exam_id}/questions/import-document", status_code=status.HTTP_201_CREATED)
+async def import_exam_questions_from_document(
+    exam_id: int,
+    file: UploadFile = File(...),
+    expected_version: int | None = Query(default=None, ge=1),
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(TEACHER_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Add the questions in a filled template to this exam.
+
+    A question already in the bank is reused rather than copied; one whose text
+    matches but whose content differs is treated as an edit of it.
+    """
+    del role_check
+    suffix = Path(file.filename or "").suffix.casefold()
+    if suffix not in _IMPORT_SUFFIXES:
+        raise HTTPException(status_code=422, detail="Upload the filled template as .docx or a text-based .pdf")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The uploaded file is empty")
+    if len(content) > MAX_IMPORT_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="The file exceeds the 5 MB limit")
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temporary_file:
+            temporary_file.write(content)
+            temporary_path = Path(temporary_file.name)
+        parsed = parse_question_bank_document(temporary_path)
+    except QuestionBankParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+    try:
+        teacher = _teacher(db, current_user["school_id"])
+        exam = claim_exam_version(db, exam_id, teacher.school_id, expected_version)
+        if not exam.subject_id:
+            raise HTTPException(status_code=400, detail="Set the exam's subject before importing questions")
+        require_active_subject_assignment(db, teacher.school_id, exam.subject_id)
+        if parsed.subject.subject_id != exam.subject_id:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"The file is for subject {parsed.subject.subject_id}, but this exam is "
+                    f"{exam.subject_id}. Download the template from this exam."
+                ),
+            )
+        if not parsed.questions:
+            raise HTTPException(status_code=422, detail="The file contains no questions")
+        _leave_pool_for_manual_edit(db, exam)
+        summary = apply_document_import(db, exam, teacher, parsed.questions)
+        db.commit()
+        db.refresh(exam)
+        # The caller needs the claimed version back, or its next write is stale.
+        return {"success": True, "version": exam.version, **summary}
+    except ImportTaxonomyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The questions could not be imported because related data changed") from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.post("/add-question", status_code=status.HTTP_201_CREATED)
 def add_question_to_database(
     request: QuestionAddToDBRequest,
@@ -529,13 +680,15 @@ def delete_question_from_exam(
     """Remove only the exam_question association; keep reusable question data."""
     del role_check
     try:
-        claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
         link = db.query(ExamQuestion).filter_by(exam_id=exam_id, question_id=question_id).first()
         if not link:
             raise HTTPException(status_code=404, detail="Question not found in the exam")
         db.delete(link)
         db.commit()
-        return {"success": True, "message": "Question removed from exam"}
+        db.refresh(exam)
+        # The caller needs the claimed version back, or its next write is stale.
+        return {"success": True, "version": exam.version, "message": "Question removed from exam"}
     except HTTPException:
         db.rollback()
         raise
@@ -551,7 +704,7 @@ def bulk_remove_questions_from_exam(
 ):
     del role_check
     try:
-        claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
+        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
         existing_ids = {
             row[0]
             for row in db.query(ExamQuestion.question_id)
@@ -572,8 +725,11 @@ def bulk_remove_questions_from_exam(
             ExamQuestion.question_id.in_(request.question_ids),
         ).delete(synchronize_session=False)
         db.commit()
+        db.refresh(exam)
         return {
             "success": True,
+            # The caller needs the claimed version back, or its next write is stale.
+            "version": exam.version,
             "removed_count": len(existing_ids),
             "removed_question_ids": sorted(existing_ids),
         }
@@ -834,8 +990,10 @@ def add_questions_to_exam_from_question_bank(
             for question_id in question_ids
         )
         db.commit()
+        db.refresh(exam)
         return {
             "success": True,
+            "version": exam.version,
             "imported_count": len(question_ids),
             "imported_question_ids": question_ids,
             "automatically_distributed": False,

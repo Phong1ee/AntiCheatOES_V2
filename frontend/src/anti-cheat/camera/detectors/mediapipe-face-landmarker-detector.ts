@@ -1,4 +1,5 @@
 import { CAMERA_AI_CONFIG, FACE_LANDMARKER_MODEL_URL, FACE_LANDMARKER_WASM_URL } from '../../camera-ai.config';
+import { analyzeFaceLandmarks } from '../face-analyzer';
 import { classifyFaceCount, type CameraFaceDetectionResult, type CameraFaceDetector } from './camera-face-detector';
 
 export class MediaPipeFaceLandmarkerDetector implements CameraFaceDetector {
@@ -21,8 +22,13 @@ export class MediaPipeFaceLandmarkerDetector implements CameraFaceDetector {
   async detect(source: CanvasImageSource, timestampMs: number): Promise<CameraFaceDetectionResult> {
     if (!this.landmarker) throw new Error('Face Landmarker has not loaded.');
     const start = performance.now();
-    const faceCount = this.landmarker.detectForVideo(source, timestampMs).faceLandmarks.length;
-    return { faceCount, predictedClass: classifyFaceCount(faceCount), inferenceMs: performance.now() - start };
+    const observation = analyzeFaceLandmarks(this.landmarker.detectForVideo(source, timestampMs).faceLandmarks);
+    return {
+      faceCount: observation.faceCount,
+      predictedClass: classifyFaceCount(observation.faceCount),
+      inferenceMs: performance.now() - start,
+      observation,
+    };
   }
 
   dispose(): void { this.landmarker?.close(); this.landmarker = null; }

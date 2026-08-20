@@ -1,26 +1,44 @@
-import type { FaceLandmarker } from '@mediapipe/tasks-vision';
-import { CAMERA_AI_CONFIG, FACE_LANDMARKER_MODEL_URL, FACE_LANDMARKER_WASM_URL } from '../camera-ai.config';
+import {
+  CAMERA_AI_CONFIG,
+  CAMERA_FACE_DIAGNOSTICS,
+  CAMERA_FALLBACK_FACE_MODEL,
+  CAMERA_PRIMARY_FACE_MODEL,
+  type ProductionCameraModel,
+} from '../camera-ai.config';
 import { TemporalIncidentFilter } from '../temporal-filter';
 import type { CameraAiIncident } from '../anti-cheat.types';
 import { PerformanceController } from '../performance-controller';
-import { analyzeFaceLandmarks } from './face-analyzer';
+import type { CameraFaceDetectionResult, CameraFaceDetector } from './detectors/camera-face-detector';
+import { MediaPipeFaceLandmarkerDetector } from './detectors/mediapipe-face-landmarker-detector';
 
 type IncidentHandler = (incident: CameraAiIncident) => void;
 type RuntimeErrorHandler = (error: Error) => void;
 
+export interface CameraFaceRuntimeDependencies {
+  primaryDetector?: CameraFaceDetector;
+  fallbackDetector?: CameraFaceDetector;
+  createPrimaryDetector?: () => Promise<CameraFaceDetector>;
+  createFallbackDetector?: () => Promise<CameraFaceDetector>;
+}
+
 export class CameraFaceRuntime {
-  private landmarker: FaceLandmarker | null = null;
+  private detector: CameraFaceDetector | null = null;
+  private activeModel: ProductionCameraModel = CAMERA_PRIMARY_FACE_MODEL;
+  private readonly primaryDetector: CameraFaceDetector | null;
+  private readonly fallbackDetector: CameraFaceDetector | null;
+  private readonly createPrimaryDetector: () => Promise<CameraFaceDetector>;
+  private readonly createFallbackDetector: () => Promise<CameraFaceDetector>;
   private timer: number | null = null;
   private inferenceInFlight = false;
+  private fallbackStarting = false;
   private stopped = false;
   private video: HTMLVideoElement | null = null;
   private readonly filter = new TemporalIncidentFilter();
   private readonly performance = new PerformanceController('face');
-  private smoothedYaw: number | null = null;
-  private smoothedPitch: number | null = null;
-  private smoothedGaze: number | null = null;
   private processedFrames = 0;
   private skippedFrames = 0;
+  private incidents = 0;
+  private lastResult: CameraFaceDetectionResult | null = null;
   private lastDiagnosticsAt = 0;
   private lastDiagnosticFrameCount = 0;
 
@@ -28,7 +46,16 @@ export class CameraFaceRuntime {
     private readonly stream: MediaStream,
     private onIncident: IncidentHandler,
     private readonly onRuntimeError: RuntimeErrorHandler = () => {},
-  ) {}
+    dependencies: CameraFaceRuntimeDependencies = {},
+  ) {
+    this.primaryDetector = dependencies.primaryDetector ?? null;
+    this.fallbackDetector = dependencies.fallbackDetector ?? null;
+    this.createPrimaryDetector = dependencies.createPrimaryDetector ?? (async () => {
+      const { YuNetFaceDetector } = await import('./detectors/yunet-face-detector');
+      return new YuNetFaceDetector();
+    });
+    this.createFallbackDetector = dependencies.createFallbackDetector ?? (async () => new MediaPipeFaceLandmarkerDetector());
+  }
 
   setIncidentHandler(onIncident: IncidentHandler): void {
     this.onIncident = onIncident;
@@ -36,39 +63,25 @@ export class CameraFaceRuntime {
 
   resetForAttemptStart(): void {
     this.filter.reset();
-    this.smoothedYaw = null;
-    this.smoothedPitch = null;
-    this.smoothedGaze = null;
   }
 
   async start(): Promise<void> {
     const track = this.stream.getVideoTracks()[0];
     if (!track || track.readyState !== 'live') throw new Error('A live camera track is required for camera analysis.');
-    // Dynamic import keeps the MediaPipe runtime and remote task model out of disabled exams.
-    const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
-    const vision = await FilesetResolver.forVisionTasks(FACE_LANDMARKER_WASM_URL);
-    if (this.stopped) return;
-    this.landmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: FACE_LANDMARKER_MODEL_URL },
-      runningMode: 'VIDEO',
-      numFaces: 2,
-      minFaceDetectionConfidence: CAMERA_AI_CONFIG.minFaceDetectionConfidence,
-      minFacePresenceConfidence: CAMERA_AI_CONFIG.minFacePresenceConfidence,
-      minTrackingConfidence: CAMERA_AI_CONFIG.minTrackingConfidence,
-      outputFaceBlendshapes: false,
-      outputFacialTransformationMatrixes: false,
-    });
-    if (this.stopped) {
-      this.landmarker.close();
-      this.landmarker = null;
-      return;
+    try {
+      await this.activatePrimary();
+    } catch (primaryError) {
+      await this.activateFallback(primaryError);
     }
+    if (this.stopped) return;
+
     this.video = document.createElement('video');
     this.video.srcObject = this.stream;
     this.video.muted = true;
     this.video.playsInline = true;
     await this.video.play();
-    this.logDiagnostics('ready', { faceCount: 0, yaw: 0, pitch: 0, gazeOffset: null });
+    if (this.stopped) return;
+    this.logDiagnostics('ready');
     this.schedule();
   }
 
@@ -76,12 +89,43 @@ export class CameraFaceRuntime {
     this.stopped = true;
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
-    this.landmarker?.close();
-    this.landmarker = null;
+    void this.detector?.dispose();
+    this.detector = null;
     if (this.video) {
       this.video.pause();
       this.video.srcObject = null;
       this.video = null;
+    }
+  }
+
+  private async activatePrimary(): Promise<void> {
+    const detector = this.primaryDetector ?? await this.createPrimaryDetector();
+    await detector.load();
+    if (this.stopped) {
+      await detector.dispose();
+      return;
+    }
+    this.detector = detector;
+    this.activeModel = CAMERA_PRIMARY_FACE_MODEL;
+  }
+
+  private async activateFallback(cause: unknown): Promise<void> {
+    if (this.fallbackStarting || this.stopped) return;
+    this.fallbackStarting = true;
+    try {
+      this.logFallback(cause);
+      await this.detector?.dispose();
+      this.detector = null;
+      const fallback = this.fallbackDetector ?? await this.createFallbackDetector();
+      await fallback.load();
+      if (this.stopped) {
+        await fallback.dispose();
+        return;
+      }
+      this.detector = fallback;
+      this.activeModel = CAMERA_FALLBACK_FACE_MODEL;
+    } finally {
+      this.fallbackStarting = false;
     }
   }
 
@@ -93,7 +137,7 @@ export class CameraFaceRuntime {
   }
 
   private async inferLatestFrame(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.fallbackStarting) return;
     if (this.inferenceInFlight) {
       this.skippedFrames += 1;
       return;
@@ -103,56 +147,50 @@ export class CameraFaceRuntime {
       this.onRuntimeError(new Error('The camera track is no longer live.'));
       return;
     }
-    if (!this.landmarker) return;
+    if (!this.video || !this.detector) return;
+
     this.inferenceInFlight = true;
     try {
-      if (this.stopped || !this.landmarker || !this.video) return;
-      const startedAt = performance.now();
-      const result = this.landmarker.detectForVideo(this.video, performance.now());
-      this.performance.record(performance.now() - startedAt);
+      const result = await this.detector.detect(this.video, performance.now());
+      this.performance.record(result.inferenceMs);
       this.processedFrames += 1;
-      this.handleObservation(this.smoothObservation(analyzeFaceLandmarks(result.faceLandmarks)));
+      this.lastResult = result;
+      this.handleObservation(result.faceCount);
     } catch (cause) {
-      if (!this.stopped) this.onRuntimeError(cause instanceof Error ? cause : new Error('Camera analysis stopped unexpectedly.'));
+      if (this.activeModel === CAMERA_PRIMARY_FACE_MODEL) {
+        void this.activateFallback(cause).catch((fallbackError) => {
+          if (!this.stopped) this.onRuntimeError(fallbackError instanceof Error ? fallbackError : new Error('Camera analysis stopped unexpectedly.'));
+        });
+      } else if (!this.stopped) {
+        this.onRuntimeError(cause instanceof Error ? cause : new Error('Camera analysis stopped unexpectedly.'));
+      }
     } finally {
       this.inferenceInFlight = false;
     }
   }
 
-  private handleObservation(observation: ReturnType<typeof analyzeFaceLandmarks>): void {
+  private handleObservation(faceCount: number): void {
     const now = performance.now();
-    // Head/gaze-away detection was unreliable (frequent false positives) and no
-    // longer counts as a violation; only face presence/count is enforced.
     const incidents = [
-      this.filter.observe('NO_FACE_DETECTED', observation.faceCount === 0, now, CAMERA_AI_CONFIG.noFaceDurationMs, {}),
-      this.filter.observe('MULTIPLE_FACES_DETECTED', observation.faceCount >= 2, now, CAMERA_AI_CONFIG.multipleFacesDurationMs, { faceCount: observation.faceCount }),
+      this.filter.observe('NO_FACE_DETECTED', faceCount === 0, now, CAMERA_AI_CONFIG.noFaceDurationMs, {}),
+      this.filter.observe('MULTIPLE_FACES_DETECTED', faceCount >= 2, now, CAMERA_AI_CONFIG.multipleFacesDurationMs, { faceCount }),
     ];
-    incidents.forEach((incident) => { if (incident) this.onIncident(incident); });
-    this.logDiagnostics('running', observation);
+    incidents.forEach((incident) => {
+      if (incident) {
+        this.incidents += 1;
+        this.onIncident(incident);
+      }
+    });
+    this.logDiagnostics('running');
   }
 
-  private smoothObservation(observation: ReturnType<typeof analyzeFaceLandmarks>): ReturnType<typeof analyzeFaceLandmarks> {
-    if (observation.faceCount !== 1) {
-      this.smoothedYaw = null;
-      this.smoothedPitch = null;
-      this.smoothedGaze = null;
-      return observation;
-    }
-
-    const smooth = (previous: number | null, value: number) => previous === null
-      ? value
-      : previous + CAMERA_AI_CONFIG.smoothingAlpha * (value - previous);
-    this.smoothedYaw = smooth(this.smoothedYaw, observation.yaw);
-    this.smoothedPitch = smooth(this.smoothedPitch, observation.pitch);
-    this.smoothedGaze = observation.gazeOffset === null ? null : smooth(this.smoothedGaze, observation.gazeOffset);
-    const headAway = Math.abs(this.smoothedYaw) >= CAMERA_AI_CONFIG.headYawDegrees
-      || Math.abs(this.smoothedPitch) >= CAMERA_AI_CONFIG.headPitchDegrees;
-    const gazeAway = !headAway && this.smoothedGaze !== null && Math.abs(this.smoothedGaze) >= CAMERA_AI_CONFIG.gazeOffset;
-    return { ...observation, yaw: this.smoothedYaw, pitch: this.smoothedPitch, gazeOffset: this.smoothedGaze, headAway, gazeAway };
+  private logFallback(cause: unknown): void {
+    if (!CAMERA_FACE_DIAGNOSTICS) return;
+    console.warn('[AntiCheat camera] YuNet failed; starting MediaPipe fallback.', cause);
   }
 
-  private logDiagnostics(status: 'ready' | 'running', observation: ReturnType<typeof analyzeFaceLandmarks>): void {
-    if (!import.meta.env.DEV) return;
+  private logDiagnostics(status: 'ready' | 'running'): void {
+    if (!CAMERA_FACE_DIAGNOSTICS) return;
     const now = performance.now();
     if (status === 'running' && now - this.lastDiagnosticsAt < 2_000) return;
     const elapsedMs = now - this.lastDiagnosticsAt;
@@ -163,16 +201,15 @@ export class CameraFaceRuntime {
     this.lastDiagnosticFrameCount = this.processedFrames;
     console.debug('[AntiCheat camera]', {
       status,
-      workerMode: 'no',
+      activeModel: this.activeModel,
+      faceCount: this.lastResult?.faceCount ?? 0,
+      inferenceMs: this.lastResult?.inferenceMs ?? 0,
+      executionProvider: this.detector?.executionProvider ?? null,
       faceAiFps: Math.round(faceAiFps * 10) / 10,
       adaptiveFpsTarget: this.performance.targetFps,
-      averageInferenceMs: Math.round(this.performance.averageInferenceMs),
-      skippedFrames: this.skippedFrames,
       processedFrames: this.processedFrames,
-      faceCount: observation.faceCount,
-      yaw: Math.round(observation.yaw * 10) / 10,
-      pitch: Math.round(observation.pitch * 10) / 10,
-      gazeOffset: observation.gazeOffset === null ? null : Math.round(observation.gazeOffset * 100) / 100,
+      skippedFrames: this.skippedFrames,
+      incidents: this.incidents,
     });
   }
 }

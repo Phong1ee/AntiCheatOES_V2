@@ -1,9 +1,12 @@
+import type { FaceObservation } from '../../anti-cheat.types';
+
 export type FaceCountClass = 'NO_FACE' | 'ONE_FACE' | 'MULTIPLE_FACES';
 
 export interface CameraFaceDetectionResult {
   faceCount: number;
   predictedClass: FaceCountClass;
   inferenceMs: number;
+  observation?: FaceObservation;
 }
 
 export interface CameraFaceDetector {

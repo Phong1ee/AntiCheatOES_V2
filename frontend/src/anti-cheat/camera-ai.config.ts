@@ -23,7 +23,19 @@ export const FACE_LANDMARKER_MODEL_URL =
 export const SCRFD_10GF_MODEL_URL =
   import.meta.env.DEV ? '/__camera-evaluation-assets/scrfd_10gf.onnx' : '';
 export const BLAZEFACE_SHORT_MODEL_URL = import.meta.env.DEV ? '/__camera-evaluation-assets/blaze_face_short_range.tflite' : '';
-export const YUNET_MODEL_URL = import.meta.env.DEV ? '/__camera-evaluation-assets/face_detection_yunet_2023mar.onnx' : '';
+// Keep the comparison page on its development-only asset while exposing the
+// verified, redistributable copy at the path a production build will emit.
+export const YUNET_PRODUCTION_MODEL_URL =
+  `${import.meta.env.BASE_URL}models/camera/face_detection_yunet_2023mar.onnx`;
+export const YUNET_MODEL_URL = import.meta.env.DEV
+  ? '/__camera-evaluation-assets/face_detection_yunet_2023mar.onnx'
+  : YUNET_PRODUCTION_MODEL_URL;
+
+export type ProductionCameraModel = 'face_landmarker' | 'yunet';
+
+export const CAMERA_PRIMARY_FACE_MODEL: ProductionCameraModel = 'yunet';
+export const CAMERA_FALLBACK_FACE_MODEL: ProductionCameraModel = 'face_landmarker';
+export const CAMERA_FACE_DIAGNOSTICS = import.meta.env.DEV;
 
 export const CAMERA_MODEL_COMPARISON_ENABLED =
   import.meta.env.DEV && import.meta.env.VITE_ENABLE_CAMERA_MODEL_COMPARISON === 'true';

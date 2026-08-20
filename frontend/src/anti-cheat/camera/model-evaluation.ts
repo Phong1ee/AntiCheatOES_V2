@@ -3,7 +3,22 @@ import { CAMERA_AI_CONFIG } from '../camera-ai.config';
 import type { CameraAiEventType } from '../anti-cheat.types';
 import type { CameraFaceDetectionResult, FaceCountClass } from './detectors/camera-face-detector';
 
-export type CameraScenario = 'one_face_normal' | 'one_face_glasses' | 'one_face_head_movement' | 'one_face_far' | 'one_face_partial_occlusion' | 'one_face_low_light' | 'no_face' | 'multiple_faces_side' | 'multiple_faces_background' | 'multiple_faces_enter_leave';
+export type CameraScenario =
+  | 'no_face_normal'
+  | 'no_face_low_light'
+  | 'no_face_student_leaves'
+  | 'one_face_normal'
+  | 'one_face_glasses'
+  | 'one_face_head_movement'
+  | 'one_face_far'
+  | 'one_face_partial_occlusion'
+  | 'one_face_low_light'
+  | 'multiple_faces_side'
+  | 'multiple_faces_background'
+  | 'multiple_faces_second_face_far'
+  | 'multiple_faces_partial_occlusion'
+  | 'multiple_faces_low_light'
+  | 'multiple_faces_enter_leave';
 export type EvaluationMode = 'same_frame' | 'face_landmarker_performance' | 'blazeface_short_performance' | 'yunet_performance' | 'scrfd_10gf_performance';
 export interface EvaluationRow { session_id: string; scenario: CameraScenario; ground_truth_class: FaceCountClass; timestamp_ms: number; model_id: string; predicted_face_count: number; predicted_class: FaceCountClass; correct: boolean; inference_ms: number; execution_provider: string; incident?: CameraAiEventType; }
 export interface EvaluationSummary { model_id: string; scenario: CameraScenario; frames: number; accuracy: number; macro_f1: number; false_violation_rate: number; missed_violation_rate: number; no_face_recall: number; one_face_recall: number; multiple_faces_recall: number; avg_inference_ms: number; p95_inference_ms: number; effective_fps: number; skipped_frames: number; inference_errors: number; false_incidents: number; missed_incidents: number; }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import { ForgotPassword } from "./components/ForgotPassword";
@@ -10,7 +10,11 @@ import { UserRoleProvider } from "./contexts/UserRoleContext";
 import { authService } from "./services/auth.service";
 import { authStorage } from "./services/auth.storage";
 import { CAMERA_MODEL_COMPARISON_ENABLED } from "./anti-cheat/camera-ai.config";
-import { CameraModelComparison } from "./components/dev/CameraModelComparison";
+
+// Evaluation adapters stay out of the normal production module graph.
+const CameraModelComparison = import.meta.env.DEV
+  ? lazy(() => import("./components/dev/CameraModelComparison").then((module) => ({ default: module.CameraModelComparison })))
+  : null;
 
 type Page =
   | "login"
@@ -27,8 +31,8 @@ const SESSION_DURATION = 2 * 60 * 60 * 1000; // 2 hours
 
 export default function App() {
   // This route is deliberately outside authenticated product navigation.
-  if (CAMERA_MODEL_COMPARISON_ENABLED && window.location.pathname === "/dev/camera-model-comparison") {
-    return <CameraModelComparison />;
+  if (CAMERA_MODEL_COMPARISON_ENABLED && CameraModelComparison && window.location.pathname === "/dev/camera-model-comparison") {
+    return <Suspense fallback={<div>Loading camera evaluation...</div>}><CameraModelComparison /></Suspense>;
   }
   const [currentPage, setCurrentPage] = useState<Page>("login");
   const [isAuthenticated, setIsAuthenticated] = useState(false);

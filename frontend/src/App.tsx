@@ -9,6 +9,8 @@ import { Toaster } from "./components/ui/sonner";
 import { UserRoleProvider } from "./contexts/UserRoleContext";
 import { authService } from "./services/auth.service";
 import { authStorage } from "./services/auth.storage";
+import { CAMERA_MODEL_COMPARISON_ENABLED } from "./anti-cheat/camera-ai.config";
+import { CameraModelComparison } from "./components/dev/CameraModelComparison";
 
 type Page =
   | "login"
@@ -24,6 +26,10 @@ const SESSION_DURATION = 2 * 60 * 60 * 1000; // 2 hours
 // const SESSION_DURATION = 10 * 1000; // 10 seconds for testing
 
 export default function App() {
+  // This route is deliberately outside authenticated product navigation.
+  if (CAMERA_MODEL_COMPARISON_ENABLED && window.location.pathname === "/dev/camera-model-comparison") {
+    return <CameraModelComparison />;
+  }
   const [currentPage, setCurrentPage] = useState<Page>("login");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(null);

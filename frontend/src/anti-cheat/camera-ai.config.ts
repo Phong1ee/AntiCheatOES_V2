@@ -19,3 +19,11 @@ export const FACE_LANDMARKER_WASM_URL =
   `${import.meta.env.BASE_URL}mediapipe`;
 export const FACE_LANDMARKER_MODEL_URL =
   `${import.meta.env.BASE_URL}models/camera/face_landmarker.task`;
+
+export const SCRFD_10GF_MODEL_URL =
+  import.meta.env.DEV ? '/__camera-evaluation-assets/scrfd_10gf.onnx' : '';
+export const BLAZEFACE_SHORT_MODEL_URL = import.meta.env.DEV ? '/__camera-evaluation-assets/blaze_face_short_range.tflite' : '';
+export const YUNET_MODEL_URL = import.meta.env.DEV ? '/__camera-evaluation-assets/face_detection_yunet_2023mar.onnx' : '';
+
+export const CAMERA_MODEL_COMPARISON_ENABLED =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_CAMERA_MODEL_COMPARISON === 'true';

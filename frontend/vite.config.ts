@@ -3,9 +3,23 @@
   import react from '@vitejs/plugin-react-swc';
   import tailwindcss from '@tailwindcss/vite';
   import path from 'path';
+  import fs from 'node:fs';
 
   export default defineConfig({
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), {
+      name: 'camera-evaluation-model',
+      configureServer(server) {
+        // Serve the restricted candidate only in Vite development; builds never emit it.
+        server.middlewares.use('/__camera-evaluation-assets', (request, response) => {
+          const filename = path.basename(request.url ?? '');
+          const asset = path.resolve(__dirname, 'evaluation-assets', filename);
+          if (!['scrfd_10gf.onnx', 'blaze_face_short_range.tflite', 'face_detection_yunet_2023mar.onnx'].includes(filename)) { response.statusCode = 404; response.end(); return; }
+          if (!fs.existsSync(asset)) { response.statusCode = 404; response.end('SCRFD evaluation asset is unavailable.'); return; }
+          response.setHeader('Content-Type', 'application/octet-stream');
+          fs.createReadStream(asset).pipe(response);
+        });
+      },
+    }],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {

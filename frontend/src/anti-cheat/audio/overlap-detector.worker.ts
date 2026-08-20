@@ -2,59 +2,11 @@
 import * as ort from 'onnxruntime-web';
 import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
 import ortWasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
+import { analyzeSpeakerEvidence } from './speaker-evidence';
+import { OVERLAP_DETECTOR_CONFIG } from './overlap-detector.config';
 
 let session: ort.InferenceSession | null = null;
 let threshold = 0.55;
-
-function overlapEvidence(output: Float32Array): {
-  peakOverlapProbability: number;
-  p95OverlapProbability: number;
-  overlapFrameRatio: number;
-  longestContinuousOverlapMs: number;
-  recentContinuousOverlapMs: number;
-} {
-  const frameCount = Math.floor(output.length / 7);
-  // The newest speech is at the end of the 10-second window. Ignoring the
-  // older context keeps a short current overlap from being diluted by silence.
-  const firstFrame = Math.floor(frameCount * 0.75);
-  let frames = 0;
-  let peak = 0;
-  let matchingFrames = 0;
-  let longestRun = 0;
-  let currentRun = 0;
-  const probabilities: number[] = [];
-  for (let offset = firstFrame * 7; offset + 6 < output.length; offset += 7) {
-    let max = -Infinity;
-    for (let index = 0; index < 7; index += 1) max = Math.max(max, output[offset + index]);
-    let denominator = 0;
-    let overlap = 0;
-    for (let index = 0; index < 7; index += 1) {
-      const probability = Math.exp(output[offset + index] - max);
-      denominator += probability;
-      if (index >= 4) overlap += probability;
-    }
-    const overlapProbability = overlap / denominator;
-    probabilities.push(overlapProbability);
-    frames += 1;
-    peak = Math.max(peak, overlapProbability);
-    if (overlapProbability >= threshold) {
-      matchingFrames += 1;
-      currentRun += 1;
-      longestRun = Math.max(longestRun, currentRun);
-    }
-    else currentRun = 0;
-  }
-  const sorted = [...probabilities].sort((left, right) => left - right);
-  const p95 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
-  const frameDurationMs = frameCount ? 10_000 / frameCount : 0;
-  return {
-    peakOverlapProbability: peak,
-    p95OverlapProbability: p95,
-    overlapFrameRatio: frames ? matchingFrames / frames : 0,
-    longestContinuousOverlapMs: longestRun * frameDurationMs,
-    recentContinuousOverlapMs: currentRun * frameDurationMs,
-  };
-}
 
 self.onmessage = async (event: MessageEvent) => {
   try {
@@ -73,7 +25,12 @@ self.onmessage = async (event: MessageEvent) => {
     const input = new ort.Tensor('float32', samples, [1, 1, samples.length]);
     const result = await session.run({ [session.inputNames[0]]: input });
     const output = result[session.outputNames[0]].data as Float32Array;
-    self.postMessage({ type: 'result', generation: event.data.generation, ...overlapEvidence(output), inferenceMs: performance.now() - startedAt });
+    self.postMessage({
+      type: 'result',
+      generation: event.data.generation,
+      ...analyzeSpeakerEvidence(output, { ...OVERLAP_DETECTOR_CONFIG, overlapProbabilityThreshold: threshold }),
+      inferenceMs: performance.now() - startedAt,
+    });
   } catch (error) {
     self.postMessage({ type: 'error', generation: event.data.generation, message: error instanceof Error ? error.message : 'Overlap detector failed.' });
   }

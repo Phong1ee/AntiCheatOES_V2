@@ -17,7 +17,7 @@ export const MICROPHONE_AI_CONFIG = {
   positiveSpeechThreshold: 0.7,
   negativeSpeechThreshold: 0.55,
   realSpeechActivationMs: 750,
-  singleSpeechViolationDurationMs: 2_000,
+  // This resets VAD segmentation only; it does not create a single-voice violation.
   silenceRedemptionMs: 700,
   cooldownMs: 10_000,
 } as const;

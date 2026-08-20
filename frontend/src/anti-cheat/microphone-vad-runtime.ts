@@ -1,5 +1,4 @@
 import { MICROPHONE_AI_CONFIG } from './microphone-ai.config';
-import { SpeechTemporalFilter, type SpeechIncident } from './speech-temporal-filter';
 import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
 import ortWasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 
@@ -13,14 +12,12 @@ const onnxWasmPaths = {
 export class MicrophoneVadRuntime {
   private vad: MicVAD | null = null;
   private stopped = false;
-  private readonly filter = new SpeechTemporalFilter();
   private speechStartedAt: number | null = null;
   private realSpeechConfirmedAt: number | null = null;
   private lastDiagnosticsAt = 0;
 
   constructor(
     private readonly stream: MediaStream,
-    private readonly onIncident: (incident: SpeechIncident) => void,
     private readonly onSpeechFrame?: (probability: number, frame: Float32Array) => void,
     private readonly onSpeechConfirmed?: () => void,
     private readonly onRuntimeError: (error: Error) => void = () => {},
@@ -59,11 +56,6 @@ export class MicrophoneVadRuntime {
         } catch (cause) {
           this.onRuntimeError(cause instanceof Error ? cause : new Error('Speech analysis stopped unexpectedly.'));
         }
-        const incident = this.filter.observe(isSpeech, now);
-        if (incident) {
-          this.logDiagnostics('single speech confirmed', { finalSpeechDurationMs: incident.durationMs });
-          this.onIncident(incident);
-        }
         this.logDiagnostics('frame', { speechProbability: isSpeech });
       },
       onSpeechRealStart: () => {
@@ -80,7 +72,6 @@ export class MicrophoneVadRuntime {
         this.logDiagnostics('speech ended');
         this.speechStartedAt = null;
         this.realSpeechConfirmedAt = null;
-        this.filter.reset();
       },
     });
     if (this.stopped) {
@@ -93,14 +84,12 @@ export class MicrophoneVadRuntime {
 
   stop(): void {
     this.stopped = true;
-    this.filter.reset();
     const vad = this.vad;
     this.vad = null;
     if (vad) void vad.destroy();
   }
 
   resetForAttemptStart(): void {
-    this.filter.reset();
     this.speechStartedAt = null;
     this.realSpeechConfirmedAt = null;
   }

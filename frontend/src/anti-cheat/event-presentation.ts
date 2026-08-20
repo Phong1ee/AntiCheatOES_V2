@@ -1,7 +1,7 @@
 const CAMERA_EVENTS = new Set([
   'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED', 'HEAD_AWAY_SUSTAINED', 'GAZE_AWAY_SUSTAINED',
 ]);
-const AUDIO_EVENTS = new Set(['SPEECH_ACTIVITY_DETECTED', 'MULTIPLE_VOICES_DETECTED', 'MIC_TRACK_MUTED', 'MIC_TRACK_ENDED']);
+const AUDIO_EVENTS = new Set(['MULTIPLE_VOICES_DETECTED', 'MIC_TRACK_MUTED', 'MIC_TRACK_ENDED']);
 
 export type MonitorEventCategory = 'camera' | 'microphone' | 'browser' | 'system';
 

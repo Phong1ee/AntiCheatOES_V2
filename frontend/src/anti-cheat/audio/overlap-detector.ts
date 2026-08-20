@@ -8,6 +8,10 @@ export interface OverlapIncident {
   p95OverlapProbability: number;
   overlapFrameRatio: number;
   recentContinuousOverlapMs: number;
+  distinctSpeakerCount: number;
+  qualifyingSpeakerTurns: number;
+  speakerSwitches: number;
+  detectionMode: 'overlap' | 'turn_taking';
   inferenceMs: number;
   model: string;
 }
@@ -99,6 +103,10 @@ export class OverlapDetector {
     overlapFrameRatio?: number;
     longestContinuousOverlapMs?: number;
     recentContinuousOverlapMs?: number;
+    distinctSpeakerCount?: number;
+    qualifyingSpeakerTurns?: number;
+    speakerSwitches?: number;
+    detectionMode?: 'overlap' | 'turn_taking' | null;
     inferenceMs?: number;
   }): void {
     if (message.generation !== undefined && message.generation !== this.generation) return;
@@ -115,11 +123,14 @@ export class OverlapDetector {
     const overlapFrameRatio = message.overlapFrameRatio ?? 0;
     const durationMs = message.longestContinuousOverlapMs ?? 0;
     const recentContinuousOverlapMs = message.recentContinuousOverlapMs ?? 0;
+    const distinctSpeakerCount = message.distinctSpeakerCount ?? 0;
+    const qualifyingSpeakerTurns = message.qualifyingSpeakerTurns ?? 0;
+    const speakerSwitches = message.speakerSwitches ?? 0;
+    const detectionMode = message.detectionMode ?? null;
     const inferenceMs = Math.round(message.inferenceMs ?? 0);
-    this.logDiagnostics({ peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, durationMs, recentContinuousOverlapMs, inferenceMs });
-    // The Worker already proves the continuous overlap duration from its frame timeline.
-    if (peakOverlapProbability < OVERLAP_DETECTOR_CONFIG.overlapProbabilityThreshold || durationMs < OVERLAP_DETECTOR_CONFIG.sustainedOverlapMs) return;
-    this.onIncident({ durationMs, overlapProbability: peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, recentContinuousOverlapMs, inferenceMs, model: OVERLAP_DETECTOR_CONFIG.modelName });
+    this.logDiagnostics({ peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, durationMs, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, inferenceMs });
+    if (!detectionMode) return;
+    this.onIncident({ durationMs, overlapProbability: peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, detectionMode, inferenceMs, model: OVERLAP_DETECTOR_CONFIG.modelName });
   }
 
   resetForAttemptStart(): void {

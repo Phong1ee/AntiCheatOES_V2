@@ -150,7 +150,7 @@ class AntiCheatEventTests(unittest.TestCase):
     def test_metadata_is_persisted_and_source_is_server_mapped(self):
         cursor = _EventCursor()
         metadata = {"confidence": 0.82, "durationMs": 2300}
-        self._record(cursor, event("SPEECH_ACTIVITY_DETECTED", "speech-1", source="browser", metadata=metadata))
+        self._record(cursor, event("MULTIPLE_VOICES_DETECTED", "overlap-metadata-1", source="browser", metadata=metadata))
         self.assertEqual(cursor.event_rows[0]["source"], "microphone")
         self.assertEqual(json.loads(cursor.event_rows[0]["metadata"]), metadata)
 
@@ -195,6 +195,10 @@ class AntiCheatEventTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             AntiCheatEventRequest(
                 attemptId=10, clientEventId="system", eventType="ATTEMPT_TERMINATED", source="browser",
+            )
+        with self.assertRaises(ValidationError):
+            AntiCheatEventRequest(
+                attemptId=10, clientEventId="single-speech", eventType="SPEECH_ACTIVITY_DETECTED", source="microphone",
             )
         for value in ("", "x" * 65):
             with self.assertRaises(ValidationError):

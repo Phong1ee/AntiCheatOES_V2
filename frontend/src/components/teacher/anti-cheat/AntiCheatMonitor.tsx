@@ -94,7 +94,6 @@ function mapAiFlag(eventType: string, detectedAt: string): AiFlag | null {
     MULTIPLE_FACES_DETECTED: 'multiple-faces',
     GAZE_AWAY_SUSTAINED: 'gaze-away',
     HEAD_AWAY_SUSTAINED: 'head-away',
-    SPEECH_ACTIVITY_DETECTED: 'speech',
     MULTIPLE_VOICES_DETECTED: 'speech',
   };
   const type = flags[eventType];

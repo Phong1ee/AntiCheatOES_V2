@@ -7,6 +7,10 @@ export const OVERLAP_DETECTOR_CONFIG = {
   inferenceIntervalMs: 1_000,
   overlapProbabilityThreshold: 0.55,
   sustainedOverlapMs: 1_200,
+  recentOverlapWindowMs: 2_500,
+  turnTakingWindowMs: 8_000,
+  singleSpeakerProbabilityThreshold: 0.70,
+  minimumSpeakerTurnMs: 600,
+  minimumSpeakerSwitches: 2,
   cooldownMs: 10_000,
-  speechDecisionDelayMs: 750,
 } as const;

@@ -124,6 +124,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
         <li>Stay in fullscreen and do not switch tabs, windows, or minimize the browser.</li>
         <li>Copy, paste, cut, print, and blocked shortcuts are recorded.</li>
         <li>Camera and microphone must remain active. Refreshing is recorded when resumed.</li>
+        <li>Sit in a well-lit, quiet place so camera and microphone monitoring can work reliably.</li>
         <li>Use the same browser profile throughout this attempt. Switching browsers or browser profiles during an active exam is not allowed.</li>
         <li>All violations share one limit of <strong>{violationLimit}</strong>. Reaching it ends this attempt with 0 points.</li>
       </ul>

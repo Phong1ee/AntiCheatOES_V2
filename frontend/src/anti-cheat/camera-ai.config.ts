@@ -1,6 +1,6 @@
 export const CAMERA_AI_CONFIG = {
-  // Face Landmarker is intentionally capped on the main thread to protect exam interaction.
-  mainThreadMaxFps: 4,
+  // YuNet meets the 15 FPS browser evaluation budget; slower devices adapt below it.
+  mainThreadMaxFps: 15,
   noFaceDurationMs: 2_000,
   multipleFacesDurationMs: 1_500,
   headAwayDurationMs: 3_000,

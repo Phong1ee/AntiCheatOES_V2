@@ -45,21 +45,33 @@ function getInitials(name: string) {
   return (first + last).toUpperCase();
 }
 
+function getStoredFullName(): string {
+  if (typeof window === 'undefined') return 'User';
+  try {
+    const storedUser = JSON.parse(localStorage.getItem('user') ?? '{}') as {
+      full_name?: unknown;
+      fullname?: unknown;
+      fullName?: unknown;
+    };
+    const storedName = storedUser.full_name ?? storedUser.fullname ?? storedUser.fullName
+      ?? localStorage.getItem('full_name') ?? localStorage.getItem('fullname');
+    if (typeof storedName === 'string' && storedName.trim()) return storedName.trim();
+  } catch {
+    // A malformed legacy storage value must not prevent the navigation from rendering.
+  }
+
+  const token = localStorage.getItem('token');
+  const nameFromToken = token ? decodeJwtPayload(token)?.full_name : null;
+  return typeof nameFromToken === 'string' && nameFromToken.trim() ? nameFromToken.trim() : 'User';
+}
+
 export function Header({ activeTab, onTabChange, onLogout }: HeaderProps) {
-  const [fullName, setFullName] = useState<string>('User');
+  const [fullName, setFullName] = useState<string>(getStoredFullName);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setFullName('User');
-      return;
-    }
-
-    const payload = decodeJwtPayload(token);
-    const nameFromToken = payload?.full_name;
-    setFullName(typeof nameFromToken === 'string' && nameFromToken.trim() ? nameFromToken : 'User');
+    const refreshName = () => setFullName(getStoredFullName());
+    window.addEventListener('storage', refreshName);
+    return () => window.removeEventListener('storage', refreshName);
   }, []);
 
   const initials = useMemo(() => getInitials(fullName), [fullName]);

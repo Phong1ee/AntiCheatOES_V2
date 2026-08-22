@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { GraduationCap, LogOut, ChevronDown } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { useMyAvatar } from '../../hooks/useMyAvatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,6 +68,8 @@ function getStoredFullName(): string {
 
 export function Header({ activeTab, onTabChange, onLogout }: HeaderProps) {
   const [fullName, setFullName] = useState<string>(getStoredFullName);
+  // Shared with Profile Settings, so an upload there lands here immediately.
+  const { url: avatarUrl } = useMyAvatar();
 
   useEffect(() => {
     const refreshName = () => setFullName(getStoredFullName());
@@ -112,7 +115,7 @@ export function Header({ activeTab, onTabChange, onLogout }: HeaderProps) {
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">
                   <Avatar className="size-8">
-                    <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`} />
+                    <AvatarImage src={avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`} />
                     <AvatarFallback>{initials}</AvatarFallback>
                   </Avatar>
                   <span className="hidden sm:block text-sm text-gray-700">{fullName}</span>

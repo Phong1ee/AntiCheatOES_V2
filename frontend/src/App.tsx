@@ -10,6 +10,7 @@ import { UserRoleProvider } from "./contexts/UserRoleContext";
 import { authService } from "./services/auth.service";
 import { authStorage } from "./services/auth.storage";
 import { CAMERA_MODEL_COMPARISON_ENABLED } from "./anti-cheat/camera-ai.config";
+import { clearMyAvatar } from "./hooks/useMyAvatar";
 
 // Evaluation adapters stay out of the normal production module graph.
 const CameraModelComparison = import.meta.env.DEV
@@ -45,6 +46,9 @@ export default function App() {
     setCurrentPage("login");
 
     authStorage.clearToken();
+    // Drop the cached picture too, or the next person to sign in on this
+    // machine sees the previous user's face until their own request lands.
+    clearMyAvatar();
     localStorage.removeItem("user");
     localStorage.removeItem("role");
     localStorage.removeItem("loginTime");

@@ -282,6 +282,7 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     SELECT
         q.question_id,
         q.question_text,
+        q.question_image_mime,
         q.question_type,
         aq.question_point,
         aq.question_text_snapshot,
@@ -311,6 +312,7 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     SELECT
         q.question_id,
         q.question_text,
+        q.question_image_mime,
         q.question_type,
         eq.question_point
     FROM exam_question eq
@@ -362,6 +364,9 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
                 "id": row["question_id"],
                 "question_id": row["question_id"],
                 "text": row.get("question_text_snapshot") or row["question_text"],
+                # The bytes come from the image endpoint, so the attempt payload
+                # stays small enough to restore quickly on a flaky connection.
+                "hasImage": row.get("question_image_mime") is not None,
                 "type": question_type,
                 "points": row["question_point_snapshot"]
                 if row.get("question_point_snapshot") is not None

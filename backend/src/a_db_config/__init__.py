@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    LargeBinary,
     SmallInteger,
     Numeric,
     String,
@@ -23,9 +24,15 @@ from sqlalchemy import (
     JSON,
     Index
 )
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+
+# MEDIUMBLOB on MySQL (16 MB); plain BLOB elsewhere so tests can run on SQLite.
+ImageBlob = LargeBinary().with_variant(MEDIUMBLOB(), "mysql")
+# Kept as the old name for anything still importing it.
+QuestionImage = ImageBlob
 
 
 class UserRole(str, enum.Enum):
@@ -169,6 +176,14 @@ class User(Base):
     role: Mapped[Optional[UserRole]] = mapped_column(Enum(UserRole))
     phone: Mapped[Optional[str]] = mapped_column(String(20))
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date)
+    # Deferred: User is loaded on nearly every request, and the bytes are only
+    # wanted by the one endpoint that serves the picture.
+    avatar_image: Mapped[Optional[bytes]] = mapped_column(
+        ImageBlob, nullable=True, deferred=True
+    )
+    # Non-null exactly when an avatar is stored, so "has an avatar" and the
+    # Content-Type to serve it with are both known without reading the blob.
+    avatar_mime: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -353,6 +368,15 @@ class Question(Base):
         String(30), ForeignKey("user.school_id", ondelete="SET NULL")
     )
     question_status: Mapped[Optional[QuestionStatus]] = mapped_column(Enum(QuestionStatus))
+    # Deferred on purpose: the bank list, the exam editor and the importer all
+    # read Question rows, and none of them want megabytes of image bytes with
+    # every row. Access question.question_image to load it for one question.
+    question_image: Mapped[Optional[bytes]] = mapped_column(
+        ImageBlob, nullable=True, deferred=True
+    )
+    # Loaded normally: it is small, and it is how a caller knows an image exists
+    # and what Content-Type to serve it as, without touching the blob.
+    question_image_mime: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_question_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("question.question_id", ondelete="SET NULL"),

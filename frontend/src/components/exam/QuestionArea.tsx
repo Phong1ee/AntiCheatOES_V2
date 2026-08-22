@@ -3,6 +3,8 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { ChevronLeft, ChevronRight, Flag } from 'lucide-react';
 import type { StudentAnswer, StudentQuestion } from '../../types/student-exam';
+import { QuestionImage } from '../common/QuestionImage';
+import { studentExamService } from '../../services/student-exam.service';
 
 interface QuestionAreaProps {
   question: StudentQuestion;
@@ -54,6 +56,13 @@ export function QuestionArea({
         <CardContent className="pt-6">
           <div className="mb-6">
             <p className="text-lg text-gray-800 leading-relaxed">{question.text}</p>
+            {question.hasImage && (
+              <QuestionImage
+                questionId={question.id}
+                load={studentExamService.fetchQuestionImage}
+                className="mt-4"
+              />
+            )}
           </div>
 
       {(question.type === 'multiple-choice' || question.type === 'true-false') && question.options && (

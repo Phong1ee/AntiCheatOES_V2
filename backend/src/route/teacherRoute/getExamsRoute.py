@@ -207,6 +207,8 @@ def _serialize_question(
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
+        # The bytes are fetched from the image endpoint, never inlined here.
+        "has_image": question.question_image_mime is not None,
         "question_difficulties": question_difficulty,
         "question_type": question_type,
         "subject_id": question.subject_id,

@@ -30,6 +30,9 @@ class ProfileController:
             "role": user["role"],
             "phone": user["phone"] or "",
             "dateOfBirth": date_of_birth.isoformat() if date_of_birth else None,
+            # A flag, not the bytes: the picture is fetched separately so this
+            # payload stays small and the browser can cache the image itself.
+            "hasAvatar": bool(user.get("avatar_mime")),
         }
 
     @staticmethod

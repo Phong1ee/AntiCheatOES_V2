@@ -6,6 +6,7 @@ interface RawQuestion {
   id: number;
   question_id?: number;
   text: string;
+  hasImage?: boolean;
   type: StudentQuestion["type"];
   points?: number;
   options?: StudentQuestion["options"];
@@ -138,6 +139,8 @@ export interface RestoreAttemptResult {
 const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
   id: question.id ?? question.question_id ?? 0,
   text: question.text,
+  // Dropping this here is why an attached image never reached the exam view.
+  hasImage: Boolean(question.hasImage),
   type: question.type,
   points: Number(question.points ?? 0),
   options: question.options ?? [],
@@ -162,6 +165,14 @@ const normalizeExam = (exam: RawExam): StudentExamListItem => ({
 });
 
 export const studentExamService = {
+  /** Fetches a question's image as an object URL; the caller must revoke it. */
+  async fetchQuestionImage(questionId: number): Promise<string> {
+    const { data } = await apiClient.get(`/api/exams/questions/${questionId}/image`, {
+      responseType: "blob",
+    });
+    return URL.createObjectURL(data as Blob);
+  },
+
   async list(): Promise<StudentExamListItem[]> {
     return (await this.listWithMeta()).exams;
   },

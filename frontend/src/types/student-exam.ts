@@ -6,6 +6,8 @@ export interface QuestionOption {
 export interface StudentQuestion {
   id: number;
   text: string;
+  /** Whether the question carries an image; the bytes come from its own endpoint. */
+  hasImage?: boolean;
   type: "multiple-choice" | "true-false" | "essay";
   points: number;
   options: QuestionOption[];

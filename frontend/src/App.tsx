@@ -9,6 +9,7 @@ import { Toaster } from "./components/ui/sonner";
 import { UserRoleProvider } from "./contexts/UserRoleContext";
 import { authService } from "./services/auth.service";
 import { authStorage } from "./services/auth.storage";
+import { clearMyAvatar } from "./hooks/useMyAvatar";
 
 type Page =
   | "login"
@@ -35,6 +36,9 @@ export default function App() {
     setCurrentPage("login");
 
     authStorage.clearToken();
+    // Drop the cached picture too, or the next person to sign in on this
+    // machine sees the previous user's face until their own request lands.
+    clearMyAvatar();
     localStorage.removeItem("user");
     localStorage.removeItem("role");
     localStorage.removeItem("loginTime");

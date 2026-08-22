@@ -10,6 +10,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { useMyAvatar } from '../../hooks/useMyAvatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +60,8 @@ function getInitials(name: string): string {
 
 export function TeacherHeader({ activeTab, onTabChange, onLogout }: TeacherHeaderProps) {
   const [teacherName, setTeacherName] = useState<string>(getStoredTeacherName);
+  // Shared with Profile Settings, so an upload there lands here immediately.
+  const { url: avatarUrl } = useMyAvatar();
 
   useEffect(() => {
     setTeacherName(getStoredTeacherName());
@@ -106,7 +109,7 @@ export function TeacherHeader({ activeTab, onTabChange, onLogout }: TeacherHeade
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-2.5 hover:bg-white/15 rounded-xl px-3 py-2 transition-colors">
                 <Avatar className="size-9 ring-2 ring-white/40 bg-white">
-                  <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(teacherName)}`} />
+                  <AvatarImage src={avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(teacherName)}`} />
                   <AvatarFallback className="bg-white text-teal-700 text-sm">
                     {getInitials(teacherName)}
                   </AvatarFallback>
@@ -120,9 +123,6 @@ export function TeacherHeader({ activeTab, onTabChange, onLogout }: TeacherHeade
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onTabChange('profile')}>
                 Profile Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onTabChange('preferences')}>
-                Preferences
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onLogout} className="text-red-600">

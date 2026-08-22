@@ -44,6 +44,8 @@ export interface UpdateQuestionRequest {
 export interface ExamQuestionDetail {
   question_id: number;
   question_text: string;
+  /** Whether the question carries an image; the bytes come from its own endpoint. */
+  has_image?: boolean;
   question_difficulties: QuestionDifficulty | null;
   question_type: QuestionType;
   subject_id: string | null;
@@ -277,6 +279,34 @@ export const questionService = {
   async getExamQuestions(examId: number): Promise<ExamQuestionDetail[]> {
     const { data } = await apiClient.get<ExamQuestionDetail[]>(`/api/teacher/${examId}/get_exam_questions/`);
     return data;
+  },
+
+  /** Fetches a question's image as an object URL.
+   *
+   *  The API is Bearer-authenticated, so a plain <img src> would be rejected;
+   *  the bytes have to come through apiClient. Callers must revoke the URL when
+   *  they are done with it, or the blob is held for the life of the document.
+   */
+  async fetchQuestionImage(questionId: number): Promise<string> {
+    const { data } = await apiClient.get(`/api/teacher/questions/${questionId}/image`, {
+      responseType: "blob",
+    });
+    return URL.createObjectURL(data as Blob);
+  },
+
+  async uploadQuestionImage(questionId: number, file: File): Promise<{ content_type: string; size: number }> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await apiClient.put<{ content_type: string; size: number }>(
+      `/api/teacher/questions/${questionId}/image`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return data;
+  },
+
+  async deleteQuestionImage(questionId: number): Promise<void> {
+    await apiClient.delete(`/api/teacher/questions/${questionId}/image`);
   },
 
   async removeFromExam(

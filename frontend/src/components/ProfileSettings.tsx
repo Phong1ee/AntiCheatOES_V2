@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { User, Mail, Phone, Calendar, Camera, Save, Lock, Eye, EyeOff } from 'lucide-react';
+import { User, Mail, Phone, Calendar, Camera, Save, Lock, Eye, EyeOff, Loader2, Trash2 } from 'lucide-react';
+import { avatarService } from '../services/avatar.service';
+import { useMyAvatar, refreshMyAvatar } from '../hooks/useMyAvatar';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -41,6 +43,13 @@ export function ProfileSettings() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // The avatar is shared with the header, so it lives in a store rather than
+  // in this component - uploading here has to update the one up there too.
+  const { url: avatarUrl } = useMyAvatar();
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
@@ -149,7 +158,36 @@ export function ProfileSettings() {
   };
 
   const handleAvatarChange = () => {
-    alert('Avatar upload feature coming soon!');
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarSelected = async (file: File | undefined) => {
+    if (!file) return;
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      await avatarService.uploadMyAvatar(file);
+      await refreshMyAvatar();
+    } catch (err: any) {
+      setAvatarError(err?.message || 'Unable to upload the picture.');
+    } finally {
+      setAvatarBusy(false);
+      // Cleared so picking the same file again still fires onChange.
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const handleAvatarRemove = async () => {
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      await avatarService.deleteMyAvatar();
+      await refreshMyAvatar();
+    } catch (err: any) {
+      setAvatarError(err?.message || 'Unable to remove the picture.');
+    } finally {
+      setAvatarBusy(false);
+    }
   };
 
   // ==== Đổi password ====
@@ -253,15 +291,25 @@ export function ProfileSettings() {
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative">
               <Avatar className="size-24">
-                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${roleLabel}`} />
+                <AvatarImage src={avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${roleLabel}`} />
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <button
                 onClick={handleAvatarChange}
-                className="absolute bottom-0 right-0 p-2 bg-gradient-to-r from-teal-500 to-blue-600 rounded-full text-white hover:from-teal-600 hover:to-blue-700 shadow-lg transition-all"
+                disabled={avatarBusy}
+                title="Upload a profile picture"
+                aria-label="Upload a profile picture"
+                className="absolute bottom-0 right-0 p-2 bg-gradient-to-r from-teal-500 to-blue-600 rounded-full text-white hover:from-teal-600 hover:to-blue-700 shadow-lg transition-all disabled:opacity-60"
               >
-                <Camera className="size-4" />
+                {avatarBusy ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
               </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => void handleAvatarSelected(e.target.files?.[0])}
+              />
             </div>
             <div className="text-center sm:text-left">
               <h2 className="text-xl text-gray-800">{profile.fullName || roleLabel}</h2>
@@ -269,6 +317,20 @@ export function ProfileSettings() {
               {profile.studentId && (
                 <p className="text-sm text-gray-500 mt-1">{idLabel}: {profile.studentId}</p>
               )}
+              <div className="mt-2 flex items-center justify-center sm:justify-start gap-3">
+                <p className="text-xs text-gray-500">PNG, JPEG, WebP or GIF, up to 1 MB.</p>
+                {avatarUrl && (
+                  <button
+                    onClick={() => void handleAvatarRemove()}
+                    disabled={avatarBusy}
+                    className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-60"
+                  >
+                    <Trash2 className="size-3" />
+                    Remove picture
+                  </button>
+                )}
+              </div>
+              {avatarError && <p className="mt-1 text-xs text-red-600">{avatarError}</p>}
             </div>
           </div>
         </CardContent>

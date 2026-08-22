@@ -9,7 +9,6 @@ import { AntiCheatMonitor } from './anti-cheat/AntiCheatMonitor';
 import { Footer } from '../dashboard/Footer';
 import { useUserRole } from '../../contexts/UserRoleContext';
 import { ProfileSettings } from '../ProfileSettings';
-import { Preferences } from '../Preferences';
 
 interface TeacherDashboardProps {
   onLogout: () => void;
@@ -144,10 +143,6 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
       ) : activeTab === 'profile' ? (
         <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
           <ProfileSettings />
-        </main>
-      ) : activeTab === 'preferences' ? (
-        <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
-          <Preferences />
         </main>
       ) : (
         <main className="h-[calc(100vh-80px)] overflow-hidden container mx-auto max-w-7xl px-4 py-8">

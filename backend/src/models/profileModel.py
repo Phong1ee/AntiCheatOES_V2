@@ -7,7 +7,7 @@ def getProfileBySchoolId(school_id: str):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     query = """
-    SELECT id, school_id, full_name, email, role, phone, date_of_birth
+    SELECT id, school_id, full_name, email, role, phone, date_of_birth, avatar_mime
     FROM user
     WHERE school_id = %s
     LIMIT 1

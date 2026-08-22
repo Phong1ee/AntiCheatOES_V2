@@ -18,7 +18,6 @@ import {
   GripVertical,
   Trash2,
   Copy,
-  Image as ImageIcon,
   Database,
   X,
   Loader2,
@@ -31,10 +30,12 @@ import {
   FileText,
   BookOpenCheck,
   Upload,
+  ImagePlus,
 } from 'lucide-react';
 import { Badge } from '../../../ui/badge';
 import { QuestionPoolModal } from '../QuestionPoolModal';
 import { toast } from 'sonner';
+import { QuestionImage } from '../../../common/QuestionImage';
 import { SectionSaveBar } from '../SectionSaveBar';
 import type { PoolDraft } from '../PoolConfigurationBuilder';
 import {
@@ -75,6 +76,8 @@ interface Question {
   subjectId?: string | null;
   canEditContent: boolean;
   canEditPoints: boolean;
+  /** Whether an image is stored for the question; the bytes load separately. */
+  hasImage: boolean;
   sourceQuestionId?: number | null;
   questionBankTargetId?: number;
   questionBankTargetTab?: 'bank' | 'mine';
@@ -123,6 +126,13 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   const [showQuestionPool, setShowQuestionPool] = useState(false);
   const [templateDownloading, setTemplateDownloading] = useState<'template' | 'guideline' | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  // Staged like every other edit in this tab: a File to upload, or null to
+  // remove. Nothing reaches the server until Save Questions runs.
+  const [pendingImages, setPendingImages] = useState<Map<string, File | null>>(new Map());
+  // Bumped after a save so previews refetch instead of showing the bytes the
+  // browser cached for this question before it changed.
+  const [imageCacheKey, setImageCacheKey] = useState(0);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const [poolConfig, setPoolConfig] = useState<PoolConfig | null>(null);
   const [isPoolMode, setIsPoolMode] = useState(false);
@@ -190,6 +200,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
         status: question.question_status,
         subjectId: question.subject_id,
         canEditContent: question.can_edit_content,
+        hasImage: Boolean(question.has_image),
         canEditPoints: question.can_edit_points,
         sourceQuestionId: question.source_question_id,
         questionBankTargetId: question.question_bank_target_id,
@@ -216,6 +227,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       setQuestions(mappedQuestions);
       setBaselines(Object.fromEntries(mappedQuestions.map((question) => [question.id, questionSnapshot(question)])));
       setPendingRemovals(new Set());
+      setPendingImages(new Map());
       setSelectedQuestion(questionToSelect ?? mappedQuestions[0]?.id ?? null);
       setSelectedIds(new Set());
     } catch (error) {
@@ -307,6 +319,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       id: `new-${Date.now()}`,
       type,
       question: '',
+      // An image can only be attached once the question exists server-side.
+      hasImage: false,
       maxScore: 1,
       difficulty: 'medium',
       options: type === 'mcq' ? ['', ''] : undefined,
@@ -590,7 +604,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     [questions, baselines, pendingRemovals],
   );
 
-  const questionsDirty = changedQuestions.length > 0 || pendingRemovals.size > 0;
+  const questionsDirty = changedQuestions.length > 0 || pendingRemovals.size > 0 || pendingImages.size > 0;
 
   /**
    * Folds freshly imported rows in without discarding work in progress: a
@@ -627,6 +641,43 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     } finally {
       setUploadingDocument(false);
       if (documentInputRef.current) documentInputRef.current.value = '';
+    }
+  };
+
+  const stagedImageForSelection = selectedQuestion ? pendingImages.get(selectedQuestion) ?? null : null;
+  const stagedImageLoader = useCallback(
+    async () => (stagedImageForSelection ? URL.createObjectURL(stagedImageForSelection) : ''),
+    [stagedImageForSelection],
+  );
+
+  const stageImage = (questionId: string, file: File | null) => {
+    if (questionId.startsWith('new-')) return;
+    setPendingImages((current) => {
+      const next = new Map(current);
+      next.set(questionId, file);
+      return next;
+    });
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
+  const unstageImage = (questionId: string) => {
+    setPendingImages((current) => {
+      const next = new Map(current);
+      next.delete(questionId);
+      return next;
+    });
+  };
+
+  /** Applies staged image changes; called as part of saving the questions. */
+  const savePendingImages = async () => {
+    for (const [questionId, file] of pendingImages) {
+      if (file) await questionService.uploadQuestionImage(Number(questionId), file);
+      else await questionService.deleteQuestionImage(Number(questionId));
+      updateQuestion(questionId, { hasImage: file !== null });
+    }
+    if (pendingImages.size > 0) {
+      setPendingImages(new Map());
+      setImageCacheKey((key) => key + 1);
     }
   };
 
@@ -819,6 +870,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
           }
         }
       }
+      await savePendingImages();
       await loadQuestions();
       setQuestionsSavedAt(Date.now());
     } catch (error) {
@@ -1498,12 +1550,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                     rows={4}
                     className="resize-none"
                   />
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={!selectedQ.canEditContent}>
-                      <ImageIcon className="size-4 mr-2" />
-                      Add Image
-                    </Button>
-                  </div>
                 </div>
 
                 {/* Question Type */}
@@ -1562,6 +1608,78 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       step="0.01"
                       disabled={!selectedQ.canEditPoints}
                   />
+                </div>
+
+                <div className="col-span-2 space-y-2">
+                  <Label>Image (optional)</Label>
+                  {selectedQ.id.startsWith('new-') ? (
+                    <p className="rounded-lg border border-dashed bg-gray-50 p-3 text-xs text-gray-500">
+                      Save this question first, then an image can be attached to it.
+                    </p>
+                  ) : (() => {
+                    const staged = pendingImages.get(selectedQ.id);
+                    const hasStagedChange = pendingImages.has(selectedQ.id);
+                    const showsImage = hasStagedChange ? staged !== null : selectedQ.hasImage;
+                    return (
+                      <div className="space-y-2">
+                        {showsImage && (
+                          <QuestionImage
+                            // Keyed so switching between the stored image and a
+                            // staged file remounts instead of showing the old one.
+                            key={`${selectedQ.id}-${staged ? staged.name + staged.size : 'stored'}-${imageCacheKey}`}
+                            questionId={Number(selectedQ.id)}
+                            load={staged ? stagedImageLoader : questionService.fetchQuestionImage}
+                          />
+                        )}
+                        {hasStagedChange && (
+                          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            {staged
+                              ? `"${staged.name}" will be uploaded when you save the questions.`
+                              : 'This image will be removed when you save the questions.'}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!selectedQ.canEditContent}
+                            onClick={() => imageInputRef.current?.click()}
+                          >
+                            <ImagePlus className="size-4" />
+                            {showsImage ? 'Replace image' : 'Add image'}
+                          </Button>
+                          {showsImage && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600"
+                              disabled={!selectedQ.canEditContent}
+                              onClick={() => stageImage(selectedQ.id, null)}
+                            >
+                              Remove image
+                            </Button>
+                          )}
+                          {hasStagedChange && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => unstageImage(selectedQ.id)}
+                            >
+                              Undo
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500">PNG, JPEG, WebP or GIF, up to 2 MB.</p>
+                        <input
+                          ref={imageInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          className="hidden"
+                          onChange={(event) => stageImage(selectedQ.id, event.target.files?.[0] ?? null)}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="col-span-2 grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">

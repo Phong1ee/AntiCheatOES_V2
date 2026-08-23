@@ -274,7 +274,7 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
               {mismatch && <p className="text-xs text-red-600">The two passwords do not match.</p>}
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col space-y-3">
+          <CardFooter className="flex flex-col space-y-3 pt-6">
             <Button
               type="submit"
               className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
@@ -328,7 +328,7 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
               )}
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col space-y-3">
+          <CardFooter className="flex flex-col space-y-3 pt-6">
             <Button
               type="submit"
               className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"
@@ -380,7 +380,7 @@ export function ForgotPassword({ onNavigate }: ForgotPasswordProps) {
             <p>The code will be sent to the email address registered with your account and is valid for 3 minutes.</p>
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col space-y-3">
+        <CardFooter className="flex flex-col space-y-3 pt-6">
           <Button
             type="submit"
             className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-600 hover:to-blue-700"

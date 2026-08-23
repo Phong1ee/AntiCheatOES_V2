@@ -64,3 +64,28 @@
   background: rgb(236 253 245 / 0.55);
   box-shadow: inset 3px 0 0 rgb(16 185 129);
 }
+
+/* Password fields: hide the browser's own reveal control.
+
+   Edge draws a native eye inside every type="password" input, and Safari and
+   Chrome add their own autofill/strong-password buttons. Every password field
+   in this app already ships a custom toggle, so the built-in one is a second
+   eye sitting beside ours - visible on Register, Login, Forgot Password,
+   Profile Settings and the admin user form alike.
+
+   Scoped to type="password" on purpose: ::-ms-clear also appears on ordinary
+   text inputs, where the browser's clear button is wanted. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+input[type="password"]::-webkit-credentials-auto-fill-button,
+input[type="password"]::-webkit-strong-password-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+  height: 0;
+  width: 0;
+  margin: 0;
+}

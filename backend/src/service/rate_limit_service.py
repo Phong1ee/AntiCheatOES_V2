@@ -1,59 +1,56 @@
-"""A small fixed-memory sliding-window rate limiter.
-
-This exists for the one case the database cannot cover: a request for an address
-that is not registered writes no row, so there is nothing to count. Without this
-an attacker could hammer the forgot-password endpoint with invented addresses.
-Registered addresses are throttled in password_reset_service against real rows,
-which survives a restart; this layer is the outer, coarser guard.
-
-Deliberately in-process. It is per worker, so N workers allow N times the quota,
-and it resets when the process does - real deployments push this into Redis or
-the reverse proxy. For this application's scale that trade is worth not adding a
-dependency and a failure mode to the login path.
-"""
+"""Redis-backed, bounded rate limits for authentication-sensitive endpoints."""
 
 from __future__ import annotations
 
-import threading
-import time
-from collections import deque
+import hashlib
+
+from redis.exceptions import RedisError
+
+from src.service.cache_service import get_cache_client
 
 
-# Bounded so a flood of distinct keys cannot grow this without limit; the
-# eviction below drops the least recently touched key when it is reached.
-MAX_TRACKED_KEYS = 10_000
-
-_lock = threading.Lock()
-_hits: dict[str, deque[float]] = {}
+class RateLimitUnavailable(RuntimeError):
+    """Raised when the shared limiter cannot enforce its security policy."""
 
 
-def _prune(timestamps: deque[float], window_seconds: float, now: float) -> None:
-    cutoff = now - window_seconds
-    while timestamps and timestamps[0] <= cutoff:
-        timestamps.popleft()
+# INCR and the first expiry must be one Redis operation. The subject is hashed
+# before becoming part of the key, so emails and IP addresses are not retained
+# in Redis key names or exposed through diagnostics.
+_INCREMENT_WITH_TTL = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return {count, redis.call('TTL', KEYS[1])}
+"""
+_PREFIX = "oes:v1:rate-limit"
 
 
-def check(key: str, limit: int, window_seconds: float) -> bool:
-    """Record a hit for `key`; return False when it is over the limit.
+def _key(scope: str, subject: str) -> str:
+    normalized_scope = scope.strip().lower()
+    normalized_subject = subject.strip().lower()
+    if not normalized_scope or not normalized_subject:
+        raise ValueError("Rate-limit scope and subject must be non-empty")
+    digest = hashlib.sha256(normalized_subject.encode("utf-8")).hexdigest()
+    return f"{_PREFIX}:{normalized_scope}:{digest}"
 
-    The hit is recorded only when it is allowed, so a caller being refused does
-    not extend its own penalty indefinitely.
+
+def check(scope: str, subject: str, limit: int, window_seconds: int) -> bool:
+    """Atomically consume one shared quota slot and return whether it is allowed.
+
+    Authentication routes deliberately fail closed on Redis errors. Redis is
+    still optional for all exam state because this service is never called by
+    exam start, autosave, submit, or anti-cheat routes.
     """
-    now = time.monotonic()
-    with _lock:
-        timestamps = _hits.get(key)
-        if timestamps is None:
-            if len(_hits) >= MAX_TRACKED_KEYS:
-                _hits.pop(next(iter(_hits)), None)
-            timestamps = _hits[key] = deque()
-        _prune(timestamps, window_seconds, now)
-        if len(timestamps) >= limit:
-            return False
-        timestamps.append(now)
-        return True
-
-
-def reset() -> None:
-    """Drop all counters. For tests."""
-    with _lock:
-        _hits.clear()
+    if limit < 1 or window_seconds < 1:
+        raise ValueError("Rate-limit limit and window_seconds must be positive")
+    try:
+        count, _ttl = get_cache_client().eval(
+            _INCREMENT_WITH_TTL,
+            1,
+            _key(scope, subject),
+            int(window_seconds),
+        )
+    except (RedisError, OSError, ValueError, TypeError) as exc:
+        raise RateLimitUnavailable("Authentication rate limiter is unavailable") from exc
+    return int(count) <= limit

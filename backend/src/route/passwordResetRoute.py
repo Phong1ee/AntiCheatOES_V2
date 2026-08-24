@@ -7,6 +7,7 @@ bearer token - the caller is by definition someone who cannot sign in.
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -38,6 +39,20 @@ REQUESTS_PER_IP = 20
 REQUESTS_PER_IP_WINDOW = 15 * 60
 VERIFY_PER_IP = 30
 VERIFY_PER_IP_WINDOW = 15 * 60
+RESET_PER_IP = 10
+RESET_PER_IP_WINDOW = 15 * 60
+
+
+def _limit(name: str, default: int) -> int:
+    return max(1, int(os.getenv(name, str(default))))
+
+
+def _check_limit(scope: str, subject: str, limit: int, window: int) -> bool:
+    """Authentication recovery fails closed if shared Redis is unavailable."""
+    try:
+        return rate_limit_service.check(scope, subject, limit, window)
+    except rate_limit_service.RateLimitUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -87,10 +102,10 @@ def forgot_password(
 
     # Being over the limit returns the same body as success, for the same reason
     # everything else here does: a distinguishable answer is an oracle.
-    within_limits = rate_limit_service.check(
-        f"forgot:ip:{ip}", REQUESTS_PER_IP, REQUESTS_PER_IP_WINDOW
-    ) and rate_limit_service.check(
-        f"forgot:email:{email}", REQUESTS_PER_EMAIL, REQUESTS_PER_EMAIL_WINDOW
+    within_limits = _check_limit(
+        "forgot:ip", ip, _limit("AUTH_FORGOT_IP_LIMIT", REQUESTS_PER_IP), _limit("AUTH_FORGOT_IP_WINDOW", REQUESTS_PER_IP_WINDOW)
+    ) and _check_limit(
+        "forgot:email", email or "empty", _limit("AUTH_FORGOT_EMAIL_LIMIT", REQUESTS_PER_EMAIL), _limit("AUTH_FORGOT_EMAIL_WINDOW", REQUESTS_PER_EMAIL_WINDOW)
     )
 
     if within_limits and email:
@@ -112,8 +127,8 @@ def verify_otp_endpoint(
     db: Session = Depends(get_db),
 ):
     """Exchange a correct code for a short-lived reset token."""
-    if not rate_limit_service.check(
-        f"verify:ip:{_client_ip(http_request)}", VERIFY_PER_IP, VERIFY_PER_IP_WINDOW
+    if not _check_limit(
+        "verify:ip", _client_ip(http_request), _limit("AUTH_VERIFY_IP_LIMIT", VERIFY_PER_IP), _limit("AUTH_VERIFY_IP_WINDOW", VERIFY_PER_IP_WINDOW)
     ):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
 
@@ -133,9 +148,14 @@ def verify_otp_endpoint(
 @router.post("/reset-password")
 def reset_password_endpoint(
     request: ResetPasswordRequest,
+    http_request: Request,
     db: Session = Depends(get_db),
 ):
     """Set the new password, then retire the token."""
+    if not _check_limit(
+        "reset:ip", _client_ip(http_request), _limit("AUTH_RESET_IP_LIMIT", RESET_PER_IP), _limit("AUTH_RESET_IP_WINDOW", RESET_PER_IP_WINDOW)
+    ):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
     try:
         reset_password(db, request.resetToken, request.newPassword)
     except PasswordResetError as error:

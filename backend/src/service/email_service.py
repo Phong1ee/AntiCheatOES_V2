@@ -4,13 +4,8 @@ Uses the standard library only - smtplib and email.message - so no dependency
 is added for one feature. Configuration is read from the environment the same
 way the rest of the backend reads it.
 
-Settings are read from the environment first - backend/.env, loaded at startup -
-and fall back to the SMTP_* block of backend/.env.example, which is committed so
-the team shares one mail configuration without each person copying it. A local
-.env therefore overrides the shared file rather than competing with it.
-
-Note that .env.example is tracked by git: whatever sits in its SMTP_PASSWORD is
-published with the repository.
+Settings are read from the runtime environment. The committed `.env.example`
+contains placeholders only and must never act as a credential source.
 
 When SMTP is not configured the sender falls back to writing the message to the
 application log instead of failing. That keeps a development checkout working
@@ -24,38 +19,6 @@ import logging
 import os
 import smtplib
 from email.message import EmailMessage
-from functools import lru_cache
-from pathlib import Path
-
-
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-
-
-@lru_cache(maxsize=1)
-def _shared_settings() -> dict[str, str]:
-    """SMTP_* values from backend/.env.example, the team's shared config.
-
-    Read directly rather than through load_dotenv so this cannot reach any
-    other setting: only SMTP_* keys are taken, so a placeholder like
-    DB_USER=your_db_user in the template can never shadow a real one.
-
-    Parsed once per process, so editing the file needs a restart - the same as
-    .env. A value in the real environment always wins over this.
-    """
-    settings: dict[str, str] = {}
-    path = BACKEND_ROOT / ".env.example"
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line.startswith("SMTP_") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            settings[key.strip()] = value.strip()
-    except OSError:
-        pass
-    return settings
-
-
 # A plain logger, not observability_service.log_event: that helper drops any
 # field outside its allowlist, and the development fallback below has to print
 # the message body for the code to be usable at all.
@@ -63,14 +26,8 @@ logger = logging.getLogger("oes.email")
 
 
 def _env(name: str, default: str = "") -> str:
-    """A setting, preferring the environment and falling back to the template.
-
-    The order matters: backend/.env (loaded into the environment at startup)
-    overrides the shared file, so anyone can point their own checkout at a
-    different mailbox without touching what the team shares.
-    """
-    value = os.getenv(name) or _shared_settings().get(name) or default
-    return value.strip()
+    """Return an SMTP setting from the runtime environment only."""
+    return (os.getenv(name) or default).strip()
 
 
 def _is_production() -> bool:

@@ -65,5 +65,5 @@ jobs:
         run: |
           test "$(uv run alembic heads | grep -c '(head)')" -eq 1
           uv run alembic history
-      # - name: Run unit and regression suite
-      #   run: uv run pytest --ignore=tests/test_rabbitmq_live_e2e.py
+      - name: Run unit and regression suite
+        run: uv run pytest

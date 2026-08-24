@@ -9,11 +9,27 @@ from sqlalchemy.orm import sessionmaker
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+if APP_ENV not in {"development", "staging", "production"}:
+    raise RuntimeError("APP_ENV must be development, staging, or production.")
+
 DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_NAME = os.getenv("DB_NAME", "")
 SQL_ECHO = os.getenv("SQL_ECHO", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+if APP_ENV in {"staging", "production"}:
+    missing = [
+        name for name, value in {
+            "DB_HOST": DB_HOST,
+            "DB_NAME": DB_NAME,
+            "DB_USER": DB_USER,
+            "DB_PASSWORD": DB_PASSWORD,
+        }.items() if not value.strip()
+    ]
+    if missing:
+        raise RuntimeError(f"{APP_ENV} requires database configuration: {', '.join(missing)}")
 
 
 def _positive_int_env(name: str, default: int) -> int:

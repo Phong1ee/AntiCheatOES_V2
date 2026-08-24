@@ -86,6 +86,10 @@ export function UserManagementPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // The admin's own change-password form. It had no reveal control of its
+  // own and relied on the browser's, which the app now hides because every
+  // other password field draws its own.
+  const [showOwnPassword, setShowOwnPassword] = useState(false);
   const [formRole, setFormRole] = useState<AdminManagedUserRole>('student');
 
   const loadUsers = async () => {
@@ -623,12 +627,23 @@ export function UserManagementPage() {
                       <h3 className="text-sm font-semibold text-gray-900">Change Password</h3>
                       <p className="text-xs text-gray-500">Use at least 8 characters. You will be signed out after a successful change.</p>
                     </div>
-                    <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Current Password"
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
-                    <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New Password"
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
-                    <input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="Confirm New Password"
-                      className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    <div className="relative">
+                      <input type={showOwnPassword ? 'text' : 'password'} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Current Password"
+                        className="w-full px-3 py-2.5 pr-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                      <button type="button" onClick={() => setShowOwnPassword((v) => !v)}
+                        aria-label={showOwnPassword ? 'Hide password' : 'Show password'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                        {showOwnPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input type={showOwnPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New Password"
+                        className="w-full px-3 py-2.5 pr-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    </div>
+                    <div className="relative">
+                      <input type={showOwnPassword ? 'text' : 'password'} value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="Confirm New Password"
+                        className="w-full px-3 py-2.5 pr-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                    </div>
                     <button type="button" onClick={() => void handleChangeOwnPassword()} disabled={isSubmitting}
                       className="w-full px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
                       Change Password

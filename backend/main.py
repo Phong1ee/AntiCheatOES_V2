@@ -8,6 +8,7 @@ from src.route.authRoute import router as auth_router
 # from backend.src.route.teacherRoute.examRoute import router as exam_router
 from src.route.profileRoute import router as profile_router
 from src.route.avatarRoute import router as avatar_router
+from src.route.passwordResetRoute import router as password_reset_router
 from src.route.studentRoute.examRoute import router as exam_router
 from src.route.teacherRoute.questionImageRoute import student_router as student_question_image_router
 from src.route.resultsRoute import router as results_router
@@ -83,6 +84,7 @@ def health_ready(response: Response):
 
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(password_reset_router, prefix="/api/auth", tags=["auth"])
 app.include_router(teacher_router, prefix="/api/teacher", tags=["teacher"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 # app.include_router(teacher_router, prefix="/api/exams", tags=["teacher"])

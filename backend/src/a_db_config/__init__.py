@@ -1212,3 +1212,51 @@ class QuestionRevision(Base):
         foreign_keys=[approved_by],
         back_populates="approved_question_revisions",
     )
+
+
+class PasswordResetOtp(Base):
+    """One password-reset attempt: the OTP, then the token it is exchanged for.
+
+    Both secrets are stored hashed and both are single-use. Keeping them on one
+    row means the whole reset - request, verification, and the reset itself -
+    has a single lifecycle to expire and invalidate, rather than two tables that
+    can drift out of step.
+    """
+
+    __tablename__ = "password_reset_otp"
+    __table_args__ = (
+        # Verification looks up the caller's newest live OTP; resend throttling
+        # counts recent rows for the same user.
+        Index("ix_password_reset_otp_user_created", "user_id", "created_at"),
+        # Reset looks the row up by the token hash alone.
+        Index("ix_password_reset_otp_token", "reset_token_hash"),
+        CheckConstraint("attempts >= 0", name="ck_password_reset_otp_attempts_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    # HMAC-SHA256 of the code, keyed with the app secret - never the code itself.
+    # A plain digest of six digits is brute-forced from a database dump in
+    # milliseconds; without the key an HMAC is not.
+    otp_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    # Set the moment the OTP is used, wrong too often, or superseded by a
+    # resend. A row with this set is dead: it is what makes the code single-use.
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # SHA-256 of the reset token. The token is 256 bits of randomness, so a
+    # plain digest is enough here - there is nothing to brute-force.
+    reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Set once the password actually changed, which retires the token.
+    reset_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship()

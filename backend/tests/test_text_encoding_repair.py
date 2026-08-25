@@ -1,4 +1,6 @@
 from src.service.text_encoding_repair import repair_cp437_mojibake, repair_json_value
+from src.a_db_config import Base
+from scripts.repair_vietnamese_encoding import TEXT_COLUMNS
 
 
 def test_repairs_confirmed_cp437_vietnamese_mojibake():
@@ -19,3 +21,7 @@ def test_repairs_json_snapshot_without_changing_structure():
     payload = {"options": [{"text": damaged}], "ids": [1, 2]}
 
     assert repair_json_value(payload) == {"options": [{"text": original}], "ids": [1, 2]}
+
+
+def test_repair_scope_refers_to_registered_tables():
+    assert set(TEXT_COLUMNS).issubset(Base.metadata.tables)

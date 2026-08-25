@@ -12,6 +12,8 @@ from collections import Counter
 from sqlalchemy import select, update
 
 from database import Base, engine
+# Importing the model package registers every mapped table on the shared Base.
+import src.a_db_config
 from src.service.text_encoding_repair import repair_cp437_mojibake, repair_json_value
 
 

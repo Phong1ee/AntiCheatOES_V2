@@ -51,6 +51,8 @@ def _get_connection_pool() -> pooling.MySQLConnectionPool:
                     host=os.getenv("DB_HOST", "localhost"),
                     port=_positive_int_env("DB_PORT", 3306),
                     database=os.getenv("DB_NAME", "online_exam_db"),
+                    charset="utf8mb4",
+                    collation="utf8mb4_0900_ai_ci",
                     connection_timeout=_positive_int_env("DB_CONNECT_TIMEOUT", 5),
                 )
     return _connection_pool

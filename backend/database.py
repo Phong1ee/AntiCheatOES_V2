@@ -52,6 +52,7 @@ URL_DATABASE = URL.create(
     host=DB_HOST,
     port=_positive_int_env("DB_PORT", 3306),
     database=DB_NAME,
+    query={"charset": "utf8mb4"},
 )
 
 

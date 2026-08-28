@@ -22,6 +22,23 @@ def get_results(current_user: dict = Depends(verify_token)):
         raise HTTPException(status_code=400, detail=detail)
 
 
+@router.get("/{attempt_id}/violations")
+def get_violation_events(attempt_id: int, current_user: dict = Depends(verify_token)):
+    try:
+        return ResultsController.get_violation_events(
+            current_user["school_id"],
+            current_user["role"],
+            attempt_id,
+        )
+    except Exception as e:
+        detail = str(e)
+        if detail == "Only students can view results":
+            raise HTTPException(status_code=403, detail=detail)
+        if detail in {"User not found", "Result not found"}:
+            raise HTTPException(status_code=404, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+
+
 @router.get("/{attempt_id}")
 def get_result_detail(attempt_id: int, current_user: dict = Depends(verify_token)):
     try:

@@ -16,6 +16,9 @@ import { clearMyAvatar } from "./hooks/useMyAvatar";
 const CameraModelComparison = import.meta.env.DEV
   ? lazy(() => import("./components/dev/CameraModelComparison").then((module) => ({ default: module.CameraModelComparison })))
   : null;
+const MicrophoneModelComparison = import.meta.env.DEV
+  ? lazy(() => import("./components/dev/MicrophoneModelComparison").then((module) => ({ default: module.MicrophoneModelComparison })))
+  : null;
 
 type Page =
   | "login"
@@ -34,6 +37,9 @@ export default function App() {
   // This route is deliberately outside authenticated product navigation.
   if (CAMERA_MODEL_COMPARISON_ENABLED && CameraModelComparison && window.location.pathname === "/dev/camera-model-comparison") {
     return <Suspense fallback={<div>Loading camera evaluation...</div>}><CameraModelComparison /></Suspense>;
+  }
+  if (MicrophoneModelComparison && window.location.pathname === "/dev/microphone-model-comparison") {
+    return <Suspense fallback={<div>Loading microphone evaluation...</div>}><MicrophoneModelComparison /></Suspense>;
   }
   const [currentPage, setCurrentPage] = useState<Page>("login");
   const [isAuthenticated, setIsAuthenticated] = useState(false);

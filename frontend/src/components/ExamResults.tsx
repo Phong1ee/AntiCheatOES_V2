@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpDown,
+  AlertTriangle,
   Calendar,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Award,
   Eye,
@@ -22,7 +25,7 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { ExamResultsStats } from "./exam-results/ExamResultsStats";
 import { studentResultService } from "../services/student-result.service";
-import type { StudentExamResult, StudentExamResultGroup } from "../types/student-result";
+import type { StudentExamResult, StudentExamResultGroup, StudentViolationEvent } from "../types/student-result";
 import { normalizeSearchText } from "../utils/search";
 
 interface ExamResultsProps {
@@ -35,6 +38,29 @@ type ResultStatus = "passed" | "failed" | "pending" | "hidden";
 type StatusFilter = "all" | ResultStatus;
 
 const strategyLabel = { highest: "Highest attempt", average: "Average attempts", last_attempt: "Last attempt" };
+
+const violationLabel: Record<string, string> = {
+  TAB_HIDDEN: "Exam tab was hidden",
+  WINDOW_BLUR: "Exam window lost focus",
+  FULLSCREEN_EXIT: "Exited fullscreen",
+  COPY_ATTEMPT: "Copy attempt detected",
+  PASTE_ATTEMPT: "Paste attempt detected",
+  CUT_ATTEMPT: "Cut attempt detected",
+  PRINT_ATTEMPT: "Print attempt detected",
+  BLOCKED_SHORTCUT: "Blocked shortcut detected",
+  PAGE_REFRESH: "Page refresh detected",
+  CAMERA_PERMISSION_DENIED: "Camera permission was denied",
+  CAMERA_TRACK_MUTED: "Camera was turned off",
+  CAMERA_TRACK_ENDED: "Camera connection ended",
+  MIC_PERMISSION_DENIED: "Microphone permission was denied",
+  MIC_TRACK_MUTED: "Microphone was turned off",
+  MIC_TRACK_ENDED: "Microphone connection ended",
+  NO_FACE_DETECTED: "No face was detected",
+  MULTIPLE_FACES_DETECTED: "Multiple faces were detected",
+  GAZE_AWAY_SUSTAINED: "Looking away from the screen",
+  HEAD_AWAY_SUSTAINED: "Head turned away from the screen",
+  MULTIPLE_VOICES_DETECTED: "Multiple voices were detected",
+};
 
 const sortOptions: { value: SortOption; label: string }[] = [
   { value: "date-desc", label: "Date (Newest)" },
@@ -119,8 +145,29 @@ const formatDate = (date?: string | null) => {
     : "Date unavailable";
 };
 
+const formatViolationTime = (date?: string | null) => {
+  const value = date && new Date(date);
+  return value && !Number.isNaN(value.getTime())
+    ? value.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : "Time unavailable";
+};
+
 const sortAttempts = (attempts: StudentExamResult[]) =>
   [...attempts].sort((a, b) => (b.attemptNumber ?? -1) - (a.attemptNumber ?? -1) || attemptTime(b) - attemptTime(a));
+
+const isFinalAttempt = (group: StudentExamResultGroup, attempt: StudentExamResult) => {
+  if (group.resultStrategy === "average" || group.finalScore === null || attempt.gradingPending) return false;
+
+  const eligible = group.attempts.filter((item) => !item.gradingPending && item.attemptScore !== null);
+  if (group.resultStrategy === "last_attempt") {
+    return eligible[0]?.attemptId === attempt.attemptId;
+  }
+
+  return eligible.reduce<StudentExamResult | null>((best, item) => {
+    if (!best || (item.attemptScore ?? -1) > (best.attemptScore ?? -1)) return item;
+    return best;
+  }, null)?.attemptId === attempt.attemptId;
+};
 
 export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) {
   const [results, setResults] = useState<StudentExamResult[]>([]);
@@ -134,6 +181,10 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
+  const [openViolationAttemptId, setOpenViolationAttemptId] = useState<number | null>(null);
+  const [violationEvents, setViolationEvents] = useState<Record<number, StudentViolationEvent[] | undefined>>({});
+  const [loadingViolationAttemptId, setLoadingViolationAttemptId] = useState<number | null>(null);
+  const [violationError, setViolationError] = useState<Record<number, string | undefined>>({});
 
   const load = async () => {
     try {
@@ -154,6 +205,30 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
   useEffect(() => {
     setSelectedExamId(initialExamId === null || initialExamId === undefined ? null : String(initialExamId));
   }, [initialExamId]);
+
+  const toggleViolationEvents = async (attemptId: number) => {
+    if (openViolationAttemptId === attemptId) {
+      setOpenViolationAttemptId(null);
+      return;
+    }
+
+    setOpenViolationAttemptId(attemptId);
+    if (violationEvents[attemptId] !== undefined) return;
+
+    try {
+      setLoadingViolationAttemptId(attemptId);
+      setViolationError((current) => ({ ...current, [attemptId]: undefined }));
+      const events = await studentResultService.getViolationEvents(attemptId);
+      setViolationEvents((current) => ({ ...current, [attemptId]: events }));
+    } catch (reason) {
+      setViolationError((current) => ({
+        ...current,
+        [attemptId]: reason instanceof Error ? reason.message : "Unable to load violation log.",
+      }));
+    } finally {
+      setLoadingViolationAttemptId((current) => current === attemptId ? null : current);
+    }
+  };
 
   const groups = useMemo<StudentExamResultGroup[]>(() => {
     const grouped = new Map<number, StudentExamResult[]>();
@@ -331,54 +406,107 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-3 rounded-2xl border border-teal-100 bg-white/70 p-4 shadow-sm">
-              <span className="flex size-11 flex-shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700">
-                <FileText className="size-5" />
-              </span>
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">{selectedGroup.examTitle}</h2>
-                <p className="text-sm text-slate-600">{selectedGroup.subjectName}</p>
-              </div>
-            </div>
-            {sortedAttempts.map((attempt) => (
-              <Card key={attempt.attemptId}>
-                <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
-                  <div className="flex-1">
-                    <p className="font-medium text-slate-800">
-                      Attempt {attempt.attemptNumber ?? "-"}
-                      {attempt.terminated ? " - Terminated" : ""}
-                    </p>
-                    <p className="mt-1 flex flex-wrap gap-3 text-sm text-slate-600">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="size-4" />
-                        {formatDate(attempt.submittedAt ?? attempt.startedAt)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="size-4" />
-                        {attempt.timeTaken}
-                      </span>
-                      {attempt.gradingPending ? <span className="text-amber-700">Grading in progress</span> : null}
-                      {attempt.terminationReason ? (
-                        <span className="text-orange-700">{attempt.terminationReason}</span>
-                      ) : null}
-                    </p>
+            <Card className="overflow-hidden border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 shadow-sm">
+              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-11 flex-shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700">
+                    <FileText className="size-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">{selectedGroup.examTitle}</h2>
+                    <p className="text-sm text-slate-600">{selectedGroup.subjectName}</p>
                   </div>
-                  {attempt.scoreVisible && attempt.attemptScore !== null ? (
-                    <span className="font-medium text-teal-700">
-                      {attempt.attemptScore.toFixed(2)} / {attempt.gradingScale}
-                    </span>
-                  ) : (
-                    <span className="text-sm text-slate-500">Score unavailable</span>
-                  )}
-                  {attempt.allowViewDetails ? (
-                    <Button size="sm" onClick={() => onViewDetails(attempt.attemptId, attempt.examId)}>
-                      <Eye className="mr-1 size-4" />
-                      View Result
-                    </Button>
-                  ) : null}
-                </CardContent>
-              </Card>
-            ))}
+                </div>
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-white px-3 py-1.5 text-sm font-medium text-teal-800">
+                    <Award className="size-4" />
+                    {selectedGroup.latestAttempt.scoreVisible && selectedGroup.finalScore !== null
+                      ? `Final result: ${selectedGroup.finalScore.toFixed(2)} / ${selectedGroup.latestAttempt.gradingScale}`
+                      : "Final result unavailable"}
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
+                    {strategyLabel[selectedGroup.resultStrategy]}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+            {sortedAttempts.map((attempt) => {
+              const finalAttempt = isFinalAttempt(selectedGroup, attempt);
+              const violationLogIsOpen = openViolationAttemptId === attempt.attemptId;
+              const events = violationEvents[attempt.attemptId];
+              return (
+                <Card key={attempt.attemptId} className={finalAttempt ? "border-teal-200 ring-1 ring-teal-100" : undefined}>
+                  <CardContent className="p-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-slate-800">Attempt {attempt.attemptNumber ?? "-"}</p>
+                          {finalAttempt ? <Badge className="border-teal-200 bg-teal-100 text-teal-800">Final Result</Badge> : null}
+                          {attempt.terminated ? <Badge className="border-red-200 bg-red-100 text-red-700">Terminated</Badge> : null}
+                        </div>
+                        <p className="mt-1 flex flex-wrap gap-3 text-sm text-slate-600">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="size-4" />
+                            {formatDate(attempt.submittedAt ?? attempt.startedAt)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="size-4" />
+                            {attempt.timeTaken}
+                          </span>
+                          {attempt.gradingPending ? <span className="text-amber-700">Grading in progress</span> : null}
+                        </p>
+                      </div>
+                      {attempt.scoreVisible && attempt.attemptScore !== null ? (
+                        <span className="font-medium text-teal-700">
+                          {attempt.attemptScore.toFixed(2)} / {attempt.gradingScale}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-slate-500">Score unavailable</span>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {attempt.terminated ? (
+                          <Button size="sm" variant="outline" onClick={() => void toggleViolationEvents(attempt.attemptId)}>
+                            {violationLogIsOpen ? <ChevronUp className="mr-1 size-4" /> : <ChevronDown className="mr-1 size-4" />}
+                            Violation Log
+                          </Button>
+                        ) : null}
+                        {attempt.allowViewDetails ? (
+                          <Button
+                            size="sm"
+                            className="bg-teal-600 text-white hover:bg-teal-700"
+                            onClick={() => onViewDetails(attempt.attemptId, attempt.examId)}
+                          >
+                            <Eye className="mr-1 size-4" />
+                            View Result
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {attempt.terminated && violationLogIsOpen ? (
+                      <div className="mt-4 border-t border-red-100 pt-4">
+                        <p className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                          <AlertTriangle className="size-4 text-red-600" />
+                          Violation log
+                        </p>
+                        {loadingViolationAttemptId === attempt.attemptId ? <p className="mt-2 text-sm text-slate-500">Loading violation log...</p> : null}
+                        {violationError[attempt.attemptId] ? <p className="mt-2 text-sm text-red-600">{violationError[attempt.attemptId]}</p> : null}
+                        {events?.length === 0 ? <p className="mt-2 text-sm text-slate-500">No recorded violations were found for this attempt.</p> : null}
+                        {events?.length ? (
+                          <ol className="mt-3 space-y-2">
+                            {events.map((event, index) => (
+                              <li key={`${event.eventType}-${event.occurredAt ?? index}`} className="flex flex-col gap-1 rounded-lg bg-red-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                                <span className="font-medium text-red-800">{violationLabel[event.eventType] ?? event.eventType.replaceAll("_", " ")}</span>
+                                <time className="text-xs text-red-700">{formatViolationTime(event.occurredAt)}</time>
+                              </li>
+                            ))}
+                          </ol>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-4">

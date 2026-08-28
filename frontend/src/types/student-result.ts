@@ -1,6 +1,11 @@
 export type StudentResultStatus = "published" | "pending" | "hidden";
 export type StudentQuestionGradingStatus = "graded" | "pending" | "blank";
 
+export interface StudentViolationEvent {
+  eventType: string;
+  occurredAt: string | null;
+}
+
 export interface StudentResultQuestion {
   id: number;
   type: "mcq" | "essay";

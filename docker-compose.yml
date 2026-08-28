@@ -94,6 +94,10 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
+    # Lets a backend started directly on the development machine use Redis
+    # without exposing it to the local network or the public internet.
+    ports:
+      - "127.0.0.1:${OES_REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:

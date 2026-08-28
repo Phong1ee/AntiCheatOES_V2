@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle, Clock, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
+import { CheckCircle, GraduationCap, Loader2, Shield, Shuffle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { teacherExamSettingsService } from '../../../../services/teacher-exam-settings.service';
@@ -48,9 +48,6 @@ const snapshotOf = (settings: TeacherExamSettingsPayload, resultVisibility: Resu
 
 /** Returns a message when the payload is not safe to send, otherwise null. */
 const validateSettings = (settings: TeacherExamSettingsPayload): string | null => {
-  if (!Number.isInteger(settings.grace_period) || settings.grace_period < 0) {
-    return 'Grace period must be a non-negative integer.';
-  }
   if (
     settings.anti_cheat_enabled
     && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
@@ -137,11 +134,6 @@ export function SettingsTab(
 
   const setBoolean = (field: keyof TeacherExamSettingsPayload, value: boolean) => {
     setSettings((current) => ({ ...current, [field]: value }));
-  };
-
-  const setNonNegativeNumber = (field: keyof TeacherExamSettingsPayload, rawValue: string) => {
-    const value = Number(rawValue);
-    setSettings((current) => ({ ...current, [field]: Number.isFinite(value) ? value : 0 }));
   };
 
   const updateViolationLimit = (rawValue: string) => {
@@ -257,14 +249,6 @@ export function SettingsTab(
               onCheckedChange={(value) => setBoolean('sequential_navigation', value)}
             />
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border-0 shadow-md">
-        <CardHeader><CardTitle className="flex items-center gap-2"><Clock className="size-5 text-teal-600" /> Time Settings</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between"><Label htmlFor="auto-submit">Auto-submit on Time Expiry</Label><Switch id="auto-submit" checked={settings.auto_submit_on_expire} onCheckedChange={(value) => setBoolean('auto_submit_on_expire', value)} /></div>
-          <div className="space-y-2"><Label htmlFor="grace-period">Grace Period (minutes)</Label><Input id="grace-period" type="number" min="0" step="1" value={settings.grace_period} onChange={(event) => setNonNegativeNumber('grace_period', event.target.value)} className="max-w-xs" /></div>
         </CardContent>
       </Card>
 

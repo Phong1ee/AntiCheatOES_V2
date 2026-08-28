@@ -1,6 +1,20 @@
 import OverlapWorker from './overlap-detector.worker?worker';
-import { OVERLAP_DETECTOR_CONFIG } from './overlap-detector.config';
+import { OVERLAP_DETECTOR_CONFIG, type OverlapDetectorConfig } from './overlap-detector.config';
 import { PerformanceController } from '../performance-controller';
+
+export type { OverlapDetectorConfig } from './overlap-detector.config';
+
+export interface OverlapDiagnostics {
+  peakOverlapProbability: number;
+  p95OverlapProbability: number;
+  overlapFrameRatio: number;
+  durationMs: number;
+  recentContinuousOverlapMs: number;
+  distinctSpeakerCount: number;
+  qualifyingSpeakerTurns: number;
+  speakerSwitches: number;
+  inferenceMs: number;
+}
 
 export interface OverlapIncident {
   durationMs: number;
@@ -35,12 +49,14 @@ export class OverlapDetector {
   constructor(
     private readonly onIncident: (incident: OverlapIncident) => void,
     private readonly onRuntimeError: (error: Error) => void = () => {},
+    private readonly config: OverlapDetectorConfig = OVERLAP_DETECTOR_CONFIG,
+    private readonly onDiagnostics?: (diagnostics: OverlapDiagnostics) => void,
   ) {}
 
   async start(): Promise<void> {
     this.worker.onmessage = (event) => this.handleWorkerMessage(event.data);
     this.worker.onerror = () => this.onRuntimeError(new Error('The overlap detection worker stopped unexpectedly.'));
-    this.worker.postMessage({ type: 'init', modelUrl: OVERLAP_DETECTOR_CONFIG.modelUrl, overlapThreshold: OVERLAP_DETECTOR_CONFIG.overlapProbabilityThreshold });
+    this.worker.postMessage({ type: 'init', modelUrl: this.config.modelUrl, config: this.config });
     await new Promise<void>((resolve, reject) => {
       this.cancelInitialization = reject;
       this.initializationTimer = window.setTimeout(() => reject(new Error('Timed out loading the overlap detection model.')), 15_000);
@@ -61,7 +77,7 @@ export class OverlapDetector {
 
   observeVadFrame(probability: number, frame: Float32Array): void {
     this.append(frame);
-    if (probability >= 0.42) this.lastSpeechAt = performance.now();
+    if (probability >= this.config.speechActivityProbabilityThreshold) this.lastSpeechAt = performance.now();
   }
 
   analyzeNow(): void { this.analyzeLatest(); }
@@ -75,7 +91,7 @@ export class OverlapDetector {
   }
 
   private analyzeLatest(): void {
-    if (this.stopped || this.sampleCount === 0 || performance.now() - this.lastSpeechAt > OVERLAP_DETECTOR_CONFIG.recentSpeechGraceMs) return;
+    if (this.stopped || this.sampleCount === 0 || performance.now() - this.lastSpeechAt > this.config.recentSpeechGraceMs) return;
     if (this.inFlight) {
       this.skippedInferences += 1;
       return;
@@ -92,7 +108,7 @@ export class OverlapDetector {
 
   private scheduleInference(): void {
     if (this.stopped) return;
-    this.timer = window.setTimeout(() => { this.analyzeLatest(); this.scheduleInference(); }, Math.max(OVERLAP_DETECTOR_CONFIG.inferenceIntervalMs, this.performance.nextDelayMs()));
+    this.timer = window.setTimeout(() => { this.analyzeLatest(); this.scheduleInference(); }, Math.max(this.config.inferenceIntervalMs, this.performance.nextDelayMs()));
   }
 
   private handleWorkerMessage(message: {
@@ -128,9 +144,11 @@ export class OverlapDetector {
     const speakerSwitches = message.speakerSwitches ?? 0;
     const detectionMode = message.detectionMode ?? null;
     const inferenceMs = Math.round(message.inferenceMs ?? 0);
-    this.logDiagnostics({ peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, durationMs, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, inferenceMs });
+    const diagnostics = { peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, durationMs, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, inferenceMs };
+    this.logDiagnostics(diagnostics);
+    this.onDiagnostics?.(diagnostics);
     if (!detectionMode) return;
-    this.onIncident({ durationMs, overlapProbability: peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, detectionMode, inferenceMs, model: OVERLAP_DETECTOR_CONFIG.modelName });
+    this.onIncident({ durationMs, overlapProbability: peakOverlapProbability, p95OverlapProbability, overlapFrameRatio, recentContinuousOverlapMs, distinctSpeakerCount, qualifyingSpeakerTurns, speakerSwitches, detectionMode, inferenceMs, model: this.config.modelName });
   }
 
   resetForAttemptStart(): void {
@@ -158,7 +176,7 @@ export class OverlapDetector {
     console.debug('[AntiCheat overlap]', {
       ...details,
       averageInferenceMs: Math.round(this.performance.averageInferenceMs),
-      adaptiveIntervalMs: Math.round(Math.max(OVERLAP_DETECTOR_CONFIG.inferenceIntervalMs, this.performance.nextDelayMs())),
+      adaptiveIntervalMs: Math.round(Math.max(this.config.inferenceIntervalMs, this.performance.nextDelayMs())),
       skippedInferences: this.skippedInferences,
     });
   }

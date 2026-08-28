@@ -34,3 +34,21 @@ class ResultsController:
             "success": True,
             "result": result,
         }
+
+    @staticmethod
+    def get_violation_events(school_id: str, role: str, attempt_id: int):
+        if role != "student":
+            raise Exception("Only students can view results")
+
+        user = userModel.getUserBySchoolId(school_id)
+        if not user:
+            raise Exception("User not found")
+
+        violations = resultModel.get_student_violation_events(user["school_id"], attempt_id)
+        if violations is None:
+            raise Exception("Result not found")
+
+        return {
+            "success": True,
+            "violations": violations,
+        }

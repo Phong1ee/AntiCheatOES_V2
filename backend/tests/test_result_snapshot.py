@@ -63,6 +63,29 @@ class _ResultConnection:
         pass
 
 
+class _ViolationCursor:
+    def __init__(self, *, owns_attempt: bool = True):
+        self.owns_attempt = owns_attempt
+        self.last_query = ""
+        self.last_params = ()
+
+    def execute(self, query, params):
+        self.last_query = query
+        self.last_params = params
+
+    def fetchone(self):
+        return {"attempt_id": 10} if self.owns_attempt else None
+
+    def fetchall(self):
+        return [
+            {"event_type": "WINDOW_BLUR", "event_timestamp": None},
+            {"event_type": "MULTIPLE_VOICES_DETECTED", "event_timestamp": None},
+        ]
+
+    def close(self):
+        pass
+
+
 class ResultSnapshotTests(unittest.TestCase):
     @staticmethod
     def _result_row(visibility: str | None, pending_essays: int = 0) -> dict:
@@ -208,6 +231,22 @@ class ResultSnapshotTests(unittest.TestCase):
             self.assertTrue(resultModel.get_student_results("S1")[0]["gradingPending"])
         with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(blank)):
             self.assertFalse(resultModel.get_student_results("S1")[0]["gradingPending"])
+
+    def test_terminated_attempt_violation_events_are_owned_and_exclude_system_events(self):
+        cursor = _ViolationCursor()
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(cursor)):
+            events = resultModel.get_student_violation_events("S1", 10)
+
+        self.assertEqual([event["eventType"] for event in events], ["WINDOW_BLUR", "MULTIPLE_VOICES_DETECTED"])
+        self.assertIn("is_violation = 1", cursor.last_query)
+        self.assertEqual(cursor.last_params, (10,))
+
+    def test_student_cannot_read_another_students_terminated_attempt_events(self):
+        cursor = _ViolationCursor(owns_attempt=False)
+        with patch.object(resultModel, "get_db_connection", return_value=_ResultConnection(cursor)):
+            self.assertIsNone(resultModel.get_student_violation_events("S2", 10))
+
+        self.assertEqual(cursor.last_params, (10, "S2"))
 
 
 if __name__ == "__main__":

@@ -223,6 +223,46 @@ def get_student_results(user_id: int):
         cnx.close()
 
 
+def get_student_violation_events(user_id: str, attempt_id: int):
+    """Return only the authenticated student's counted violations for a terminated attempt."""
+    cnx = get_db_connection()
+    cursor = cnx.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT a.attempt_id
+            FROM attempt a
+            WHERE a.attempt_id = %s
+              AND a.student_id = %s
+              AND a.status = 'terminated'
+              AND a.submitted_at IS NOT NULL
+            """,
+            (attempt_id, user_id),
+        )
+        if not cursor.fetchone():
+            return None
+
+        cursor.execute(
+            """
+            SELECT event_type, event_timestamp
+            FROM exam_event
+            WHERE attempt_id = %s AND is_violation = 1
+            ORDER BY event_timestamp ASC, event_id ASC
+            """,
+            (attempt_id,),
+        )
+        return [
+            {
+                "eventType": row["event_type"],
+                "occurredAt": _iso(row["event_timestamp"]),
+            }
+            for row in cursor.fetchall()
+        ]
+    finally:
+        cursor.close()
+        cnx.close()
+
+
 def get_student_result_detail(user_id: int, attempt_id: int):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)

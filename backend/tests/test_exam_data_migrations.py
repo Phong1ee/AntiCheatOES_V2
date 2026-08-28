@@ -144,9 +144,8 @@ class ExamDataMigrationTests(unittest.TestCase):
 
         config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        # Later migrations retain a single linear Alembic head. Keep this
-        # assertion aligned with the current repository migration tip.
-        self.assertEqual(script.get_heads(), ["50292736ea8d"])
+        # Later migrations must retain one linear Alembic head as revisions advance.
+        self.assertEqual(len(script.get_heads()), 1)
 
 
 if __name__ == "__main__":

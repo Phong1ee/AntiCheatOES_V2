@@ -3,15 +3,15 @@ import * as ort from 'onnxruntime-web';
 import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
 import ortWasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { analyzeSpeakerEvidence } from './speaker-evidence';
-import { OVERLAP_DETECTOR_CONFIG } from './overlap-detector.config';
+import { OVERLAP_DETECTOR_CONFIG, type OverlapDetectorConfig } from './overlap-detector.config';
 
 let session: ort.InferenceSession | null = null;
-let threshold = 0.55;
+let config: OverlapDetectorConfig = { ...OVERLAP_DETECTOR_CONFIG };
 
 self.onmessage = async (event: MessageEvent) => {
   try {
     if (event.data.type === 'init') {
-      threshold = event.data.overlapThreshold ?? threshold;
+      config = { ...OVERLAP_DETECTOR_CONFIG, ...(event.data.config ?? {}) };
       ort.env.wasm.wasmPaths = { mjs: ortWasmModuleUrl, wasm: ortWasmBinaryUrl };
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.proxy = false;
@@ -28,7 +28,7 @@ self.onmessage = async (event: MessageEvent) => {
     self.postMessage({
       type: 'result',
       generation: event.data.generation,
-      ...analyzeSpeakerEvidence(output, { ...OVERLAP_DETECTOR_CONFIG, overlapProbabilityThreshold: threshold }),
+      ...analyzeSpeakerEvidence(output, config),
       inferenceMs: performance.now() - startedAt,
     });
   } catch (error) {

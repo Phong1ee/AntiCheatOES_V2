@@ -26,3 +26,7 @@ dependencies = [
     "pika>=1.3.2",
     "boto3>=1.35.0",
 ]
+
+[tool.pytest.ini_options]
+# Tests import the application directly from the repository's src directory.
+pythonpath = ["."]

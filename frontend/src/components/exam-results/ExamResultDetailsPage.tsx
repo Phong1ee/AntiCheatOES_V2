@@ -42,22 +42,22 @@ function StatTile({ icon: Icon, label, value, accent }: { icon: LucideIcon; labe
 
 const RESULT_THEME = {
   pending: {
-    card: "border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100",
+    card: "border-amber-200 border-l-4 border-l-amber-500 bg-gradient-to-br from-amber-50 via-white to-white",
     score: "text-amber-700",
     accent: { border: "border-amber-200", iconBg: "bg-amber-100", iconText: "text-amber-700" },
   },
   passed: {
-    card: "border-green-200 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-100",
+    card: "border-green-200 border-l-4 border-l-green-500 bg-gradient-to-br from-green-50 via-white to-white",
     score: "text-green-700",
     accent: { border: "border-green-200", iconBg: "bg-green-100", iconText: "text-green-700" },
   },
   failed: {
-    card: "border-red-200 bg-gradient-to-br from-red-50 via-rose-50 to-orange-100",
+    card: "border-red-200 border-l-4 border-l-red-500 bg-gradient-to-br from-red-50 via-white to-white",
     score: "text-red-700",
     accent: { border: "border-red-200", iconBg: "bg-red-100", iconText: "text-red-700" },
   },
   neutral: {
-    card: "border-slate-200 bg-gradient-to-br from-slate-50 via-gray-50 to-slate-100",
+    card: "border-slate-200 border-l-4 border-l-slate-400 bg-gradient-to-br from-slate-50 via-white to-white",
     score: "text-slate-700",
     accent: { border: "border-slate-200", iconBg: "bg-slate-100", iconText: "text-slate-700" },
   },
@@ -181,19 +181,19 @@ export function ExamResultDetailsPage({ attemptId, onBack }: ExamResultDetailsPa
         {exam.allowViewDetails && exam.questions?.length ? <Card><CardContent className="pt-6"><h2 className="text-lg text-gray-800 mb-4">Questions Review</h2><div className="space-y-4">
           {exam.questions.map((question, index) => {
             const correctAnswers = question.correctAnswers ?? (question.correctAnswer ? [question.correctAnswer] : []);
-            const isIncorrectMcq = question.type === "mcq" && question.gradingStatus === "graded" && !question.isCorrect;
+            const answeredWrongMcq = question.type === "mcq" && question.gradingStatus === "graded" && !question.isCorrect && isAnswered(question);
             const essayClass = question.gradingStatus === "pending"
               ? "bg-amber-50 border-amber-200"
               : question.gradingStatus === "blank"
                 ? "bg-slate-50 border-slate-200"
                 : "bg-sky-50 border-sky-200";
-            return <div key={question.id} className={`p-4 rounded-lg border ${question.type === "essay" ? essayClass : question.isCorrect ? "bg-green-50 border-green-200" : isIncorrectMcq ? "bg-red-50 border-red-200" : "bg-white border-gray-200"}`}>
+            return <div key={question.id} className={`p-4 rounded-lg border ${question.type === "essay" ? essayClass : question.isCorrect ? "bg-green-50 border-green-200" : answeredWrongMcq ? "bg-red-50 border-red-200" : "bg-white border-gray-200"}`}>
               <div className="flex justify-between gap-2"><p className="text-gray-800"><span className="font-medium">Q{index + 1}.</span> {question.question}</p><Badge variant="outline">{question.type === "essay" ? "Essay" : "MCQ"}</Badge></div>
               {question.type === "mcq" && <div className="mt-3 space-y-2">{question.options?.map((option) => {
                 const isCorrect = correctAnswers.includes(option);
                 const isStudentChoice = option === question.studentAnswer;
-                const optionClass = isCorrect ? "bg-green-100 border-green-300 text-green-900" : isStudentChoice ? "bg-red-100 border-red-300 text-red-900" : isIncorrectMcq ? "bg-red-50 border-red-100" : "bg-white border-gray-200";
-                return <div key={option} className={`p-2 border rounded text-sm flex justify-between ${optionClass}`}><span>{option}</span><span className="flex gap-3">{isStudentChoice && <span className="flex items-center gap-1 text-blue-700"><XCircle className="size-3" />Your Choice</span>}{isCorrect && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-3" />Correct</span>}</span></div>;
+                const optionClass = isCorrect ? "bg-green-100 border-green-300 text-green-900" : isStudentChoice ? "bg-red-100 border-red-300 text-red-900" : "bg-white border-gray-200";
+                return <div key={option} className={`p-2 border rounded text-sm flex justify-between ${optionClass}`}><span>{option}</span><span className="flex gap-3">{isStudentChoice && <span className="flex items-center gap-1 text-red-700"><XCircle className="size-3" />Your Choice</span>}{isCorrect && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-3" />Correct</span>}</span></div>;
               })}</div>}
               {question.type === "mcq" && !isAnswered(question) && <p className="mt-3 text-sm text-gray-600">No answer submitted</p>}
               {question.type === "essay" && <div className="mt-3"><p className="text-xs text-gray-600 mb-1">Your Answer</p><div className="p-3 border rounded text-sm whitespace-pre-wrap bg-white/70">{isAnswered(question) ? question.studentAnswer : "No answer submitted"}</div>{question.gradingStatus === "pending" && <p className="mt-2 text-sm text-amber-800">Awaiting grading</p>}</div>}

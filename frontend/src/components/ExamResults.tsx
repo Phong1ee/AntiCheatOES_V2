@@ -15,6 +15,7 @@ import {
   Hourglass,
   RefreshCw,
   Search,
+  Trophy,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -441,7 +442,12 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
                       <div className="flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-medium text-slate-800">Attempt {attempt.attemptNumber ?? "-"}</p>
-                          {finalAttempt ? <Badge className="border-teal-200 bg-teal-100 text-teal-800">Final Result</Badge> : null}
+                          {finalAttempt ? (
+                            <Badge className="border-0 bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-500 hover:to-blue-600">
+                              <Trophy className="size-3 mr-1" />
+                              Final Result
+                            </Badge>
+                          ) : null}
                           {attempt.terminated ? <Badge className="border-red-200 bg-red-100 text-red-700">Terminated</Badge> : null}
                         </div>
                         <p className="mt-1 flex flex-wrap gap-3 text-sm text-slate-600">

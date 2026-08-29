@@ -287,6 +287,8 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
   }, [filteredGroups, sortBy]);
 
   const selectedGroup = groups.find((group) => String(group.examId) === selectedExamId);
+  const selectedGroupStatus = selectedGroup ? groupStatus(selectedGroup) : null;
+  const selectedGroupTheme = selectedGroupStatus ? GROUP_THEME[selectedGroupStatus] : null;
 
   const sortedAttempts = useMemo(() => {
     if (!selectedGroup) return [];
@@ -407,30 +409,57 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
                 </SelectContent>
               </Select>
             </div>
-            <Card className="overflow-hidden border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 shadow-sm">
-              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-11 flex-shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700">
-                    <FileText className="size-5" />
-                  </span>
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">{selectedGroup.examTitle}</h2>
-                    <p className="text-sm text-slate-600">{selectedGroup.subjectName}</p>
+            {selectedGroupTheme ? (
+              <Card className={`overflow-hidden shadow-sm ${selectedGroupTheme.card}`}>
+                <CardContent className="flex flex-col gap-5 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`flex size-12 flex-shrink-0 items-center justify-center rounded-xl ${selectedGroupTheme.iconBg} ${selectedGroupTheme.iconText}`}>
+                        <FileText className="size-6" />
+                      </span>
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900">{selectedGroup.examTitle}</h2>
+                        <p className="text-sm text-slate-600">{selectedGroup.subjectName}</p>
+                      </div>
+                    </div>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium ${selectedGroupTheme.badge}`}>
+                      <selectedGroupTheme.badgeIcon className="size-4" />
+                      {selectedGroupTheme.badgeLabel}
+                    </span>
                   </div>
-                </div>
-                <div className="flex flex-wrap gap-2 sm:justify-end">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-white px-3 py-1.5 text-sm font-medium text-teal-800">
-                    <Award className="size-4" />
-                    {selectedGroup.latestAttempt.scoreVisible && selectedGroup.finalScore !== null
-                      ? `Final result: ${selectedGroup.finalScore.toFixed(2)} / ${selectedGroup.latestAttempt.gradingScale}`
-                      : "Final result unavailable"}
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
-                    {strategyLabel[selectedGroup.resultStrategy]}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className={`rounded-lg border p-3 ${selectedGroupTheme.scoreBox}`}>
+                      <p className="flex items-center gap-1 text-xs font-medium text-slate-500">
+                        <Award className="size-3.5" /> Final Result
+                      </p>
+                      <p className={`mt-1 text-lg font-bold ${selectedGroupTheme.scoreText}`}>
+                        {selectedGroup.latestAttempt.scoreVisible && selectedGroup.finalScore !== null
+                          ? `${selectedGroup.finalScore.toFixed(2)} / ${selectedGroup.latestAttempt.gradingScale}`
+                          : "Unavailable"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white/70 p-3">
+                      <p className="text-xs font-medium text-slate-500">Passing Score</p>
+                      <p className="mt-1 text-lg font-bold text-slate-800">
+                        {selectedGroup.passingScore !== null ? selectedGroup.passingScore.toFixed(2) : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white/70 p-3">
+                      <p className="text-xs font-medium text-slate-500">Attempts Used</p>
+                      <p className="mt-1 text-lg font-bold text-slate-800">
+                        {selectedGroup.attempts.length}
+                        {selectedGroup.maxAttempts ? ` / ${selectedGroup.maxAttempts}` : ""}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white/70 p-3">
+                      <p className="text-xs font-medium text-slate-500">Grading Method</p>
+                      <p className="mt-1 text-lg font-bold text-slate-800">{strategyLabel[selectedGroup.resultStrategy]}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
             {sortedAttempts.map((attempt) => {
               const finalAttempt = isFinalAttempt(selectedGroup, attempt);
               const violationLogIsOpen = openViolationAttemptId === attempt.attemptId;

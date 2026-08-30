@@ -7,7 +7,7 @@ network hostnames/connection variables; never commit actual values.
 | --- | --- | --- | --- |
 | `APP_ENV` | Yes | Yes | `production` |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Yes | Yes | Railway MySQL private connection values |
-| `SECRET_KEY` | Yes | Yes | One long random secret shared by all application services |
+| `SECRET_KEY` | Yes | Yes | Set once as a Railway Shared Variable with value `${{secret(32)}}`, then reference `${{shared.SECRET_KEY}}` in every service. Never paste a literal value per-service; a mismatch crashes that service at boot. |
 | `FRONTEND_ORIGIN` | Yes | Yes | Exact Vercel URL, e.g. `https://app.example.com` |
 | `UVICORN_WORKERS` | Yes | No | `2` initially |
 | `DB_POOL_SIZE`, `DB_POOL_ACQUIRE_TIMEOUT` | Yes | Yes | API `16`/`5`; worker pool setting below |

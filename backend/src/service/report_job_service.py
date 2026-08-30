@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.styles import Font
 from sqlalchemy.orm import Session
 
-from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, Exam, StudentExam, User
+from src.a_db_config import BackgroundJob, BackgroundJobStatus, BackgroundJobType, Exam
 from src.service.background_job_service import complete_job, get_or_create_job, mark_job_running
 from src.service.outbox_publisher import enqueue_outbox_event
 from src.service.object_storage import ObjectNotFoundError, storage_for
@@ -68,21 +69,63 @@ def _report_directory() -> Path:
     return directory
 
 
+_STRATEGY_LABELS = {
+    "highest": "Highest score across attempts",
+    "average": "Average across attempts",
+    "last_attempt": "Latest submitted attempt",
+}
+
+
 def _exam_results_workbook(db: Session, exam: Exam) -> bytes:
-    """Build a bounded export from persisted final scores without committing caller work."""
+    """Build the exam summary plus one row per student for their final-result attempt."""
+    # Local import avoids a module cycle: resultsRoute imports this module at load time.
+    from src.route.teacherRoute.resultsRoute import _build_student_rows, _exam_stats
+
+    stats = _exam_stats(db, exam)
+    students = _build_student_rows(db, exam)
+    scale = stats["gradingScale"]
+
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Student Results"
-    sheet.append(["Student ID", "Name", "Final Score (/100)"])
-    roster = (
-        db.query(StudentExam, User)
-        .join(User, User.school_id == StudentExam.student_id)
-        .filter(StudentExam.exam_id == exam.exam_id)
-        .order_by(User.full_name, User.school_id)
-        .all()
-    )
-    for student_exam, student in roster:
-        sheet.append([student.school_id, student.full_name, float(student_exam.final_score or 0)])
+    sheet.title = "Exam Results"
+
+    bold = Font(bold=True)
+    summary_rows = [
+        ("Exam", exam.title),
+        ("Grading Method", _STRATEGY_LABELS.get(stats["resultStrategy"], stats["resultStrategy"])),
+        ("Average Score", f"{stats['avgScore']:.2f} / {scale:.0f}"),
+        ("Highest Score", f"{stats['highestScore']:.2f} / {scale:.0f}"),
+        ("Lowest Score", f"{stats['lowestScore']:.2f} / {scale:.0f}"),
+        ("Students Submitted", f"{stats['submittedCount']} / {stats['totalStudents']}"),
+    ]
+    for label, value in summary_rows:
+        sheet.append([label, value])
+        sheet.cell(row=sheet.max_row, column=1).font = bold
+    sheet.append([])
+
+    header = ["Student ID", "Name", "Final Score (/100)", "Correct Answers", "Total Questions", "Time Spent", "Status", "Submitted At"]
+    sheet.append(header)
+    header_row = sheet.max_row
+    for column in range(1, len(header) + 1):
+        sheet.cell(row=header_row, column=column).font = bold
+
+    for row in students:
+        sheet.append([
+            row["studentId"],
+            row["name"],
+            row["score"],
+            row["correctAnswers"],
+            row["totalQuestions"],
+            row["timeSpent"],
+            row["status"],
+            row["submittedAt"] or "",
+        ])
+
+    sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
+    for column_cells in sheet.columns:
+        values = [str(cell.value) for cell in column_cells if cell.value is not None]
+        width = max((len(value) for value in values), default=10)
+        sheet.column_dimensions[column_cells[0].column_letter].width = min(width + 2, 40)
 
     buffer = io.BytesIO()
     workbook.save(buffer)

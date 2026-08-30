@@ -5,6 +5,17 @@ import { Card, CardContent } from '../../ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import { Progress } from '../../ui/progress';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '../../ui/alert-dialog';
+import {
   X,
   User,
   Trophy,
@@ -24,6 +35,7 @@ import {
   Bot,
   ChevronRight,
   FileText,
+  Trash2,
 } from 'lucide-react';
 import { teacherResultsService, downloadCsv } from '../../../services/teacher-results.service';
 import { teacherAntiCheatService } from '../../../services/teacher-anti-cheat.service';
@@ -37,6 +49,8 @@ interface StudentDetailModalProps {
   onClose: () => void;
   /** Opens the anti-cheat monitor on this student's attempt. */
   onViewAntiCheat?: (studentId: string, attemptId: number) => void;
+  /** Fired after the attempt is permanently deleted, so the caller can close and refresh. */
+  onDeleted?: () => void;
 }
 
 /** Mirrors the derivation used by the anti-cheat monitor so both agree. */
@@ -63,12 +77,14 @@ const antiCheatTone = {
   },
 } as const;
 
-export function StudentDetailModal({ examId, attemptId, onClose, onViewAntiCheat }: StudentDetailModalProps) {
+export function StudentDetailModal({ examId, attemptId, onClose, onViewAntiCheat, onDeleted }: StudentDetailModalProps) {
   const [activeTab, setActiveTab] = useState('answers');
   const [attempt, setAttempt] = useState<StudentAttemptDetail | null>(null);
   const [antiCheat, setAntiCheat] = useState<MonitorDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +149,19 @@ export function StudentDetailModal({ examId, attemptId, onClose, onViewAntiCheat
       q.maxPoints,
     ]);
     downloadCsv(`${attempt.studentId ?? attempt.attemptId}_result.csv`, headers, rows);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await teacherAntiCheatService.deleteAttempt(attemptId);
+      onDeleted?.();
+    } catch {
+      setDeleteError('Unable to delete this attempt. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const stats = [
@@ -550,15 +579,46 @@ export function StudentDetailModal({ examId, attemptId, onClose, onViewAntiCheat
             <ArrowLeft className="size-4 mr-2" />
             Back to Results
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={exportResult}
-            className="hover:bg-green-50 hover:border-green-300 border-green-200"
-          >
-            <Download className="size-4 mr-2 text-green-600" />
-            Export Result
-          </Button>
+          <div className="flex items-center gap-2">
+            {antiCheat && antiCheat.attempt.attemptStatus !== 'in_progress' && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50">
+                    <Trash2 className="size-4 mr-2" />
+                    Delete Attempt
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this attempt?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes the attempt's answers and violation history for {attempt.studentName}. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-red-600 text-white hover:bg-red-700"
+                      disabled={deleting}
+                      onClick={(event) => { event.preventDefault(); void handleConfirmDelete(); }}
+                    >
+                      {deleting ? 'Deleting...' : 'Delete Attempt'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportResult}
+              className="hover:bg-green-50 hover:border-green-300 border-green-200"
+            >
+              <Download className="size-4 mr-2 text-green-600" />
+              Export Result
+            </Button>
+          </div>
         </div>
       </div>
     </div>

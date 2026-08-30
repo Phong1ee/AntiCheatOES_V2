@@ -278,6 +278,11 @@ export function ExamResultsPage({
           examId={examId}
           attemptId={selectedAttemptId}
           onClose={() => setSelectedAttemptId(null)}
+          onDeleted={() => {
+            setSelectedAttemptId(null);
+            loadOverview();
+            setRefreshKey((key) => key + 1);
+          }}
           onViewAntiCheat={overview?.subjectId ? (studentId, attemptId) => {
             onViewAntiCheat?.({
               subjectId: overview.subjectId as string,

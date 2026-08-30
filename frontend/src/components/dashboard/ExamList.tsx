@@ -339,7 +339,7 @@ export function ExamList({
                   </Badge>
                 </div>
                 {exam.antiCheatEnabled && (
-                  <Badge variant="outline" className="mt-2 gap-1 border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-50">
+                  <Badge variant="outline" className="mt-2 gap-1 border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-100">
                     <ShieldCheck className="size-3.5" />
                     Anti-Cheat Enabled
                   </Badge>

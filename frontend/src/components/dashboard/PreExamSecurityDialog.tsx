@@ -140,7 +140,7 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
         </ul>
         <p className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-          All violations share one limit of <strong className="mx-1">{violationLimit}</strong>. Reaching it ends this attempt with 0 points.
+          <span>All violations share one limit of <strong className="mx-1">{violationLimit}</strong>. Reaching it ends this attempt with 0 points.</span>
         </p>
         {stream && <div className="grid grid-cols-1 gap-4 rounded-xl border border-teal-200 bg-teal-50/40 p-3 sm:grid-cols-[13.5rem_1fr]"><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="w-[216px] max-w-full rounded-lg bg-slate-900 object-contain" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}
         {error && <p className="flex gap-2 text-sm text-red-600"><AlertCircle className="size-4 shrink-0" />{error}</p>}

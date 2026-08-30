@@ -21,7 +21,19 @@ import {
   BookOpen,
   FileText,
   Filter,
+  Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '../../ui/alert-dialog';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -42,6 +54,14 @@ import {
 } from '../../ui/table';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+function formatEventTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
 
 type AttemptStatus = 'in-progress' | 'submitted' | 'terminated';
 type AntiCheatStatus = 'clean' | 'warning' | 'flagged' | 'terminated';
@@ -97,7 +117,7 @@ function mapAiFlag(eventType: string, detectedAt: string): AiFlag | null {
     MULTIPLE_VOICES_DETECTED: 'speech',
   };
   const type = flags[eventType];
-  return type ? { type, label: eventType.replaceAll('_', ' ').toLowerCase(), detectedAt } : null;
+  return type ? { type, label: eventType.replaceAll('_', ' ').toLowerCase(), detectedAt: formatEventTimestamp(detectedAt) } : null;
 }
 
 function mapAttempt(attempt: MonitorAttempt): Attempt {
@@ -131,7 +151,7 @@ function mapDetail(detail: MonitorDetail): Attempt {
     violationBreakdown: detail.breakdown.map((item) => ({ label: item.eventType, count: item.count })),
     timeline: detail.timeline.map((event, index) => ({
       id: `${event.eventTimestamp}-${index}`,
-      time: String(event.eventTimestamp),
+      time: formatEventTimestamp(String(event.eventTimestamp)),
       type: event.isViolation ? 'violation' : ['camera', 'microphone'].includes(eventCategory(event.eventType, event.source)) ? 'ai-flag' : 'system',
       title: eventLabel(event.eventType),
       detail: `${eventCategory(event.eventType, event.source)} · ${formatEventDetails(event.details, event.metadata)}`,
@@ -219,14 +239,31 @@ function EmptyState({ icon: Icon, title, description }: { icon: typeof Shield; t
   );
 }
 
-function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
+function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
   attempt: Attempt;
   onClose: () => void;
   /** Opens this attempt's graded result; absent while the attempt is still running. */
   onViewExamResult?: () => void;
+  /** Permanently deletes this attempt; absent while the attempt is still running. */
+  onDelete?: (attemptId: number) => Promise<void>;
 }) {
   const ac = acConfig[attempt.antiCheatStatus];
   const AcIcon = ac.icon;
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleConfirmDelete = async () => {
+    if (!onDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete(Number(attempt.id));
+    } catch {
+      setDeleteError('Unable to delete this attempt. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const eventTypeLabel: Record<EventType, string> = {
     violation: 'Direct Violation',
@@ -245,6 +282,13 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
     'ai-flag': 'bg-violet-100 text-violet-700',
     system: 'bg-gray-100 text-gray-500',
   };
+
+  // 1-based sequence number among violation-type events only, aligned by timeline index.
+  let violationSeq = 0;
+  const violationSequenceByIndex = attempt.timeline.map((event) => {
+    if (event.type === 'violation') violationSeq += 1;
+    return violationSeq;
+  });
 
   return (
     <div
@@ -357,7 +401,7 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
                           </span>
                           {event.type === 'violation' && (
                             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-600">
-                              #{attempt.violationBreakdown.length > 0 ? idx : ''}
+                              #{violationSequenceByIndex[idx]}
                             </span>
                           )}
                         </div>
@@ -457,10 +501,35 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
 
         {/* ── Sticky Footer ── */}
         <div className="flex items-center justify-between px-8 py-4 border-t border-gray-100 bg-white flex-shrink-0">
-          <Button variant="outline" size="sm" className="text-gray-500">
-            <FileText className="size-4 mr-1.5" />
-            Add Review Note
-          </Button>
+          {onDelete && attempt.attemptStatus !== 'in-progress' ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50">
+                  <Trash2 className="size-4 mr-1.5" />
+                  Delete Attempt
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this attempt?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes the attempt's answers and violation history for {attempt.studentName}. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-red-600 text-white hover:bg-red-700"
+                    disabled={deleting}
+                    onClick={(event) => { event.preventDefault(); void handleConfirmDelete(); }}
+                  >
+                    {deleting ? 'Deleting...' : 'Delete Attempt'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : <div />}
           <div className="flex items-center gap-3">
             {onViewExamResult && (
               <Button
@@ -473,7 +542,7 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult }: {
                 View Exam Result
               </Button>
             )}
-            <Button size="sm" onClick={onClose} className="bg-gray-800 hover:bg-gray-900 text-white">
+            <Button size="sm" onClick={onClose} className="bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-600 hover:to-blue-700">
               Close
             </Button>
           </div>
@@ -579,6 +648,12 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
       pollingInFlight.current = false;
       setIsRefreshing(false);
     }
+  };
+
+  const handleDeleteAttempt = async (attemptId: number) => {
+    await teacherAntiCheatService.deleteAttempt(attemptId);
+    setDrawerAttempt(null);
+    await refreshSelectedData();
   };
 
   // Skipped when arriving via a deep link, which loads the subject list itself
@@ -1075,6 +1150,7 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
         <AttemptDrawer
           attempt={drawerAttempt}
           onClose={() => setDrawerAttempt(null)}
+          onDelete={handleDeleteAttempt}
           // A running attempt has no graded result to show yet.
           onViewExamResult={onViewExamResult && selectedExamId && drawerAttempt.attemptStatus !== 'in-progress'
             ? () => {

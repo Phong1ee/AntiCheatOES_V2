@@ -118,19 +118,39 @@ export function PreExamSecurityDialog({ open, examTitle, violationLimit, onOpenC
   const microphoneReady = Boolean(stream?.getAudioTracks().some((track) => track.readyState === "live"));
 
   return <Dialog open={open} onOpenChange={(next) => !next && close()}>
-    <DialogContent className="max-w-xl">
-      <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="size-5 text-teal-600" />Rules & Security</DialogTitle><DialogDescription>{examTitle}</DialogDescription></DialogHeader>
-      <ul className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm leading-5 text-slate-700">
-        <li>Stay in fullscreen and do not switch tabs, windows, or minimize the browser.</li>
-        <li>Copy, paste, cut, print, and blocked shortcuts are recorded.</li>
-        <li>Camera and microphone must remain active. Refreshing is recorded when resumed.</li>
-        <li>Sit in a well-lit, quiet place so camera and microphone monitoring can work reliably.</li>
-        <li>Use the same browser profile throughout this attempt. Switching browsers or browser profiles during an active exam is not allowed.</li>
-        <li>All violations share one limit of <strong>{violationLimit}</strong>. Reaching it ends this attempt with 0 points.</li>
-      </ul>
-      {stream && <div className="grid grid-cols-1 gap-4 rounded-xl border p-3 sm:grid-cols-[13.5rem_1fr]"><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="w-[216px] max-w-full rounded-lg bg-slate-900 object-contain" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}
-      {error && <p className="flex gap-2 text-sm text-red-600"><AlertCircle className="size-4 shrink-0" />{error}</p>}
-      <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={close} disabled={working}>Cancel</Button>{!stream ? <Button className="flex-1" onClick={() => void requestMedia()} disabled={working}>{working ? "Checking..." : "Take Test"}</Button> : <Button className="flex-1" onClick={() => void continueToExam()} disabled={working}><Maximize className="mr-2 size-4" />{working ? "Starting..." : "Enter Fullscreen & Start"}</Button>}</div>
+    <DialogContent className="oes-dialog-rounded max-w-xl gap-0 p-0">
+      <div className="rounded-t-2xl border-b border-teal-100 bg-gradient-to-br from-teal-50 via-white to-blue-50 px-6 pt-6 pb-5 pr-10">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+              <ShieldCheck className="size-4.5" />
+            </span>
+            Rules & Security
+          </DialogTitle>
+          <DialogDescription>{examTitle}</DialogDescription>
+        </DialogHeader>
+      </div>
+      <div className="space-y-4 px-6 pt-5 pb-6">
+        <ul className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-5 text-slate-700">
+          <li className="flex gap-2"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-teal-500" />Stay in fullscreen and do not switch tabs, windows, or minimize the browser.</li>
+          <li className="flex gap-2"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-teal-500" />Copy, paste, cut, print, and blocked shortcuts are recorded.</li>
+          <li className="flex gap-2"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-teal-500" />Camera and microphone must remain active. Refreshing is recorded when resumed.</li>
+          <li className="flex gap-2"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-teal-500" />Sit in a well-lit, quiet place so camera and microphone monitoring can work reliably.</li>
+          <li className="flex gap-2"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-teal-500" />Use the same browser profile throughout this attempt. Switching browsers or browser profiles during an active exam is not allowed.</li>
+        </ul>
+        <p className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          All violations share one limit of <strong className="mx-1">{violationLimit}</strong>. Reaching it ends this attempt with 0 points.
+        </p>
+        {stream && <div className="grid grid-cols-1 gap-4 rounded-xl border border-teal-200 bg-teal-50/40 p-3 sm:grid-cols-[13.5rem_1fr]"><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="w-[216px] max-w-full rounded-lg bg-slate-900 object-contain" /><div className="space-y-2 text-sm"><p className="flex items-center gap-2 text-emerald-700"><Camera className="size-4" />Camera ready</p><p className="flex items-center gap-2 text-emerald-700"><Mic className="size-4" />Microphone ready</p><p className="text-xs text-slate-500">Live monitoring only. No media is recorded or uploaded.</p></div></div>}
+        {error && <p className="flex gap-2 text-sm text-red-600"><AlertCircle className="size-4 shrink-0" />{error}</p>}
+        <div className="flex gap-3">
+          <Button variant="outline" className="flex-1 rounded-xl" onClick={close} disabled={working}>Cancel</Button>
+          {!stream
+            ? <Button className="flex-1 rounded-xl bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-600 hover:to-blue-700" onClick={() => void requestMedia()} disabled={working}>{working ? "Checking..." : "Take Test"}</Button>
+            : <Button className="flex-1 rounded-xl bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-600 hover:to-blue-700" onClick={() => void continueToExam()} disabled={working}><Maximize className="mr-2 size-4" />{working ? "Starting..." : "Enter Fullscreen & Start"}</Button>}
+        </div>
+      </div>
     </DialogContent>
   </Dialog>;
 }

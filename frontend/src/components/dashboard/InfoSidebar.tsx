@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
-import { Camera, Mic, Award, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { Award, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import type { StudentExamResult } from '../../types/student-result';
 import type { StudentExamListItem } from '../../services/student-exam.service';
@@ -46,7 +46,6 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
   const passedCount = passableResults.filter((result) => result.score! >= result.passingScore!).length;
   const serverNow = serverTime ? new Date(serverTime) : new Date();
   const activeAndUpcomingExams = selectActiveAndUpcomingExams(exams, serverNow);
-  const needsAntiCheatPreflight = activeAndUpcomingExams.some((exam) => exam.antiCheatEnabled);
 
   return (
     <div className="space-y-6">
@@ -96,28 +95,6 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
       <NextExamWidget exams={activeAndUpcomingExams} serverTime={serverTime} onCountdownElapsed={onRetry} onRequestExamAccess={onRequestExamAccess} />
 
       <ExamCodesWidget exams={activeAndUpcomingExams.filter((exam) => exam.status === 'open')} />
-
-      {needsAntiCheatPreflight && <Card className="shadow-lg rounded-2xl border-0 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
-        <CardHeader>
-          <CardTitle className="text-lg text-gray-800">Pre-Exam Checklist</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-3 p-3 bg-white rounded-lg">
-            <Camera className="size-5 text-orange-600" />
-            <div className="flex-1">
-              <p className="text-sm text-gray-800">Check your camera</p>
-              <p className="text-xs text-gray-500">Ensure it's working properly</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 p-3 bg-white rounded-lg">
-            <Mic className="size-5 text-orange-600" />
-            <div className="flex-1">
-              <p className="text-sm text-gray-800">Test your microphone</p>
-              <p className="text-xs text-gray-500">Required for proctoring</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>}
 
       <Card className="shadow-lg rounded-2xl border-0">
         <CardHeader>

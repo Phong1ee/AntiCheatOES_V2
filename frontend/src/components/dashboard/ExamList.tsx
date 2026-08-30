@@ -8,7 +8,7 @@ import {
 } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Calendar, Clock, BookOpen, Filter, ArrowUpDown, RefreshCw } from "lucide-react";
+import { Calendar, Clock, BookOpen, Filter, ArrowUpDown, RefreshCw, ShieldCheck } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -338,6 +338,12 @@ export function ExamList({
                     {statusConfig[exam.status].label}
                   </Badge>
                 </div>
+                {exam.antiCheatEnabled && (
+                  <Badge variant="outline" className="mt-2 gap-1 border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-50">
+                    <ShieldCheck className="size-3.5" />
+                    Anti-Cheat Enabled
+                  </Badge>
+                )}
               </CardHeader>
 
               <CardContent>

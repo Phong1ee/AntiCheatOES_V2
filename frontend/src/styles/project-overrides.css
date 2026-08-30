@@ -18,6 +18,12 @@
   border-radius: 0;
 }
 
+/* Opt-in rounded shape for dialogs that want a softer, card-like look. */
+.oes-dialog-content.oes-dialog-rounded {
+  border-radius: 1.25rem;
+  overflow: hidden;
+}
+
 .oes-sheet-overlay {
   position: fixed;
   inset: 0;

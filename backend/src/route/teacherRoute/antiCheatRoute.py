@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from src.a_db_config import ExamSetting
+from src.a_db_config import Attempt, AttemptQuestion, EssayAnswer, Exam, ExamEvent, ExamSetting, MCQAnswer
 from src.a_db_config.config import get_db_connection
 from src.middleware.authMiddleware import verify_token
+from src.service.audit_service import record_audit
 from src.service.result_strategy_service import (
     representative_attempt,
     submitted_attempts_by_student,
+    sync_student_final_score,
 )
 
 router = APIRouter(prefix="/anti-cheat")
@@ -164,3 +167,48 @@ def detail(attempt_id:int,user=Depends(teacher)):
     WHERE a.attempt_id=%s AND e.manage_by=%s""",(attempt_id,attempt_id,user["school_id"]))
     if not base: raise HTTPException(404,"Attempt not found or not authorized")
     return {"attempt":base[0],"breakdown":rows("SELECT event_type eventType,COUNT(*) count FROM exam_event WHERE attempt_id=%s AND is_violation=1 GROUP BY event_type",(attempt_id,)),"timeline":rows("SELECT event_type eventType,event_timestamp eventTimestamp,source,details,metadata,is_violation isViolation FROM exam_event WHERE attempt_id=%s ORDER BY event_timestamp,event_id",(attempt_id,))}
+
+@router.delete("/attempts/{attempt_id}", status_code=status.HTTP_200_OK)
+def delete_attempt(attempt_id: int, user=Depends(teacher), db: Session = Depends(get_db)):
+    """Permanently remove one owned attempt and its answers/events, then resync the student's final score."""
+    try:
+        attempt = (
+            db.query(Attempt)
+            .join(Exam, Exam.exam_id == Attempt.exam_id)
+            .filter(Attempt.attempt_id == attempt_id, Exam.manage_by == user["school_id"])
+            .first()
+        )
+        if not attempt:
+            raise HTTPException(404, "Attempt not found or not authorized")
+        if attempt.status.value == "in_progress":
+            raise HTTPException(409, "Cannot delete an attempt while it is in progress")
+
+        exam_id, student_id = attempt.exam_id, attempt.student_id
+        db.query(MCQAnswer).filter(MCQAnswer.attempt_id == attempt_id).delete(synchronize_session=False)
+        db.query(EssayAnswer).filter(EssayAnswer.attempt_id == attempt_id).delete(synchronize_session=False)
+        db.query(ExamEvent).filter(ExamEvent.attempt_id == attempt_id).delete(synchronize_session=False)
+        db.query(AttemptQuestion).filter(AttemptQuestion.attempt_id == attempt_id).delete(synchronize_session=False)
+        db.query(Attempt).filter(Attempt.attempt_id == attempt_id).delete(synchronize_session=False)
+
+        exam = db.get(Exam, exam_id)
+        if exam is not None and student_id is not None:
+            sync_student_final_score(db, exam, student_id)
+
+        record_audit(
+            db,
+            actor_school_id=user["school_id"],
+            actor_role=user.get("role"),
+            action="ATTEMPT_DELETED",
+            entity_type="attempt",
+            entity_id=attempt_id,
+            metadata={"exam_id": exam_id, "student_id": student_id},
+        )
+        db.commit()
+        return {"success": True, "message": "Attempt deleted"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Attempt could not be deleted because dependent data remains") from exc
+

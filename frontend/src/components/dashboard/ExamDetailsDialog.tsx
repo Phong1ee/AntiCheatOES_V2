@@ -45,7 +45,7 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[66vw] max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 pr-8">
             <div className="flex-1">
               <DialogTitle className="text-2xl mb-2">{exam.title}</DialogTitle>
             </div>

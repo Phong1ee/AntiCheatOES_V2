@@ -508,7 +508,7 @@ export function ExamResults({ onViewDetails, initialExamId }: ExamResultsProps) 
                         {attempt.allowViewDetails ? (
                           <Button
                             size="sm"
-                            className="bg-teal-600 text-white hover:bg-teal-700"
+                            className="bg-gradient-to-r from-teal-500 to-blue-600 text-white shadow-sm hover:from-teal-600 hover:to-blue-700"
                             onClick={() => onViewDetails(attempt.attemptId, attempt.examId)}
                           >
                             <Eye className="mr-1 size-4" />

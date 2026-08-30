@@ -98,5 +98,6 @@ export function downloadCsv(filename: string, headers: string[], rows: (string |
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const csv = [headers, ...rows].map((row) => row.map(escapeCell).join(",")).join("\n");
-  triggerDownload(new Blob([csv], { type: "text/csv" }), filename);
+  // Excel assumes a non-UTF-8 codepage without a BOM, which garbles Vietnamese diacritics.
+  triggerDownload(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }), filename);
 }

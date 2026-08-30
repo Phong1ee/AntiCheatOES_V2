@@ -10,7 +10,8 @@ from typing import Any
 from openpyxl import load_workbook
 
 
-REQUIRED_HEADERS = ("school_id", "full_name", "email", "role", "phone", "date_of_birth", "initial_password")
+REQUIRED_HEADERS = ("full_name", "email", "role", "phone", "date_of_birth", "initial_password")
+OPTIONAL_HEADERS = ("school_id",)
 BLOCKED_HEADERS = {"id", "password_hash", "is_locked", "locked_at", "locked_by", "deleted_at", "deleted_by", "created_at", "updated_at"}
 MAX_USER_ROWS = 1000
 
@@ -71,14 +72,15 @@ def parse_user_import_xlsx(content: bytes) -> list[ParsedUserImportRow]:
     missing = [header for header in REQUIRED_HEADERS if header not in normalized_headers]
     if missing:
         raise UserImportParseError(f"The Users sheet is missing required header(s): {', '.join(missing)}")
-    indexes = {header: normalized_headers.index(header) for header in REQUIRED_HEADERS}
+    all_expected = set(REQUIRED_HEADERS) | set(OPTIONAL_HEADERS)
+    indexes = {header: normalized_headers.index(header) for header in all_expected if header in normalized_headers}
     parsed: list[ParsedUserImportRow] = []
     for row_number, row in enumerate(rows, start=2):
         if all(_blank(value) for value in row):
             continue
         if len(parsed) >= MAX_USER_ROWS:
             raise UserImportParseError(f"The workbook may contain at most {MAX_USER_ROWS} user rows")
-        values = {header: row[indexes[header]] if indexes[header] < len(row) else None for header in REQUIRED_HEADERS}
+        values = {header: row[indexes[header]] if header in indexes and indexes[header] < len(row) else None for header in all_expected}
         errors: list[str] = []
         try:
             values["date_of_birth"] = _date(values["date_of_birth"])

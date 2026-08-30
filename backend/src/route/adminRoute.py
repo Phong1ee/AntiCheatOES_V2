@@ -1989,7 +1989,23 @@ def list_users(
 
 
 def build_user_import_preview(rows: list[ParsedUserImportRow], db: Session) -> dict:
-    """Validate parsed rows against current users without mutating the session."""
+    """Validate parsed rows; auto-generate school_id from role if missing."""
+    # Auto-generate school_id from role if empty; check for duplicates
+    def _generate_school_id(role: str, prefix_counts: dict[str, int]) -> str:
+        prefix = str(role or "").strip().lower()[0].upper() if role else "U"
+        prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+        return f"{prefix}{prefix_counts[prefix]:05d}"
+    
+    prefix_counts: dict[str, int] = {}
+    for row in rows:
+        school = str(row.values.get("school_id") or "").strip()
+        if not school:
+            role = str(row.values.get("role") or "").strip()
+            row.values["school_id"] = _generate_school_id(role, prefix_counts)
+        else:
+            prefix = school[0].upper()
+            prefix_counts[prefix] = max(prefix_counts.get(prefix, 0), int(school[1:] or "0"))
+
     school_rows: dict[str, list[ParsedUserImportRow]] = {}
     email_rows: dict[str, list[ParsedUserImportRow]] = {}
     for row in rows:

@@ -6,7 +6,7 @@ import type { AdminUserImportPreviewResponse, AdminUserImportResult } from "../.
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
-const TEMPLATE_HEADERS = ["school_id", "full_name", "email", "role", "phone", "date_of_birth", "initial_password"];
+const TEMPLATE_HEADERS = ["full_name", "email", "role", "phone", "date_of_birth", "initial_password"];
 
 interface AdminUserImportModalProps {
   open: boolean;

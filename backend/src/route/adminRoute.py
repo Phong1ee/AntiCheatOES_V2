@@ -2019,44 +2019,26 @@ def list_users(
 
 def build_user_import_preview(rows: list[ParsedUserImportRow], db: Session) -> dict:
     """Validate parsed rows; auto-generate school_id from role if missing."""
-    # Auto-generate school_id from role if empty; check for duplicates
-    from sqlalchemy import func
-    
-    def _generate_school_id(role: str, prefix_counts: dict[str, int]) -> str:
-        prefix = str(role or "").strip().lower()[0].upper() if role else "U"
-        prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
-        return f"{prefix}{prefix_counts[prefix]:05d}"
-    
-    # Initialize prefix_counts from existing database school_ids
-    prefix_counts: dict[str, int] = {}
-    all_prefixes = ['S', 'T', 'A', 'U']
-    for prefix in all_prefixes:
-        # Find the highest number for each prefix in the database
-        result = db.query(func.max(User.school_id)).filter(
-            User.school_id.like(f"{prefix}%")
-        ).scalar()
-        if result:
-            try:
-                # Extract the numeric part and use it as the starting count
-                numeric_part = int(result[1:] or "0")
-                prefix_counts[prefix] = numeric_part
-            except (ValueError, IndexError):
-                prefix_counts[prefix] = 0
-        else:
-            prefix_counts[prefix] = 0
-    
+    # Matches the canonical convention in userModel.generate_school_id:
+    # prefix (S/T/A) + count-of-existing-role-users, zero-padded to 6 digits.
+    role_prefixes = {"student": "S", "teacher": "T", "admin": "A"}
+
+    def _generate_school_id(role: str, role_counts: dict[str, int]) -> str:
+        role_key = str(role or "").strip().lower()
+        prefix = role_prefixes.get(role_key, "U")
+        role_counts[role_key] = role_counts.get(role_key, 0) + 1
+        return f"{prefix}{role_counts[role_key]:06d}"
+
+    # Seed the running counter from the current per-role user count so batch
+    # rows keep incrementing without colliding with already-persisted IDs.
+    role_counts: dict[str, int] = {
+        role: db.query(User).filter(User.role == UserRole(role)).count() for role in role_prefixes
+    }
     for row in rows:
         school = str(row.values.get("school_id") or "").strip()
         if not school:
             role = str(row.values.get("role") or "").strip()
-            row.values["school_id"] = _generate_school_id(role, prefix_counts)
-        else:
-            prefix = school[0].upper()
-            try:
-                numeric_part = int(school[1:] or "0")
-                prefix_counts[prefix] = max(prefix_counts.get(prefix, 0), numeric_part)
-            except (ValueError, IndexError):
-                pass
+            row.values["school_id"] = _generate_school_id(role, role_counts)
 
     school_rows: dict[str, list[ParsedUserImportRow]] = {}
     email_rows: dict[str, list[ParsedUserImportRow]] = {}

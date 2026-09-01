@@ -84,8 +84,8 @@ class AdminUserImportPreviewTests(unittest.TestCase):
             ["Admin", "admin@example.test", "admin", None, None, "password789"],
         ])), self.db)
         self.assertEqual(result, {"success": True, "imported_count": 3, "role_counts": {"student": 1, "teacher": 1, "admin": 1}})
-        # Auto-generated school_id follows pattern: S00001, T00001, A00001
-        student = self.db.query(User).filter_by(school_id="S00001").one()
+        # Auto-generated school_id matches userModel.generate_school_id: prefix + 6-digit count
+        student = self.db.query(User).filter_by(school_id="S000001").one()
         self.assertNotEqual(student.password_hash, "password123")
         self.assertEqual(student.date_of_birth, date(2005, 4, 18))
 

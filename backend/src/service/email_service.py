@@ -1,4 +1,4 @@
-"""Outgoing email over Brevo/Resend HTTPS or SMTP.
+"""Outgoing email over Gmail/Brevo/Resend HTTPS or SMTP.
 
 Uses only the standard library, so no dependency is added for one feature.
 Configuration is read from the environment the same way the rest of the
@@ -19,9 +19,11 @@ import json
 import logging
 import os
 import smtplib
+import base64
 from contextlib import closing
 from email.message import EmailMessage
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 # A plain logger, not observability_service.log_event: that helper drops any
 # field outside its allowlist, and the development fallback below has to print
@@ -50,6 +52,17 @@ def resend_is_configured() -> bool:
 def brevo_is_configured() -> bool:
     """Return whether Brevo can send with the verified Gmail sender."""
     return bool(_env("BREVO_API_KEY") and _env("BREVO_SENDER_EMAIL"))
+
+
+def gmail_is_configured() -> bool:
+    """Return whether Gmail API OAuth credentials are complete at runtime."""
+    names = (
+        "GOOGLE_GMAIL_CLIENT_ID",
+        "GOOGLE_GMAIL_CLIENT_SECRET",
+        "GOOGLE_GMAIL_REFRESH_TOKEN",
+        "GOOGLE_GMAIL_SENDER",
+    )
+    return all(_env(name) for name in names)
 
 
 class EmailNotConfigured(RuntimeError):
@@ -135,6 +148,62 @@ def _send_via_brevo(to_address: str, subject: str, body: str) -> None:
         raise EmailDeliveryError("Could not reach Brevo") from error
 
 
+def _gmail_access_token() -> str:
+    """Exchange the stored refresh token for a short-lived Gmail API token."""
+    payload = urlencode(
+        {
+            "client_id": _env("GOOGLE_GMAIL_CLIENT_ID"),
+            "client_secret": _env("GOOGLE_GMAIL_CLIENT_SECRET"),
+            "refresh_token": _env("GOOGLE_GMAIL_REFRESH_TOKEN"),
+            "grant_type": "refresh_token",
+        }
+    ).encode("utf-8")
+    request = Request(
+        "https://oauth2.googleapis.com/token",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with closing(urlopen(request, timeout=float(_env("GOOGLE_GMAIL_TIMEOUT", "10") or "10"))) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise _provider_error("Google OAuth", error) from error
+    except (URLError, UnicodeError, ValueError) as error:
+        raise EmailDeliveryError("Could not obtain a Gmail API access token") from error
+
+    token = result.get("access_token") if isinstance(result, dict) else None
+    if not isinstance(token, str) or not token:
+        raise EmailDeliveryError("Google OAuth did not return an access token")
+    return token
+
+
+def _send_via_gmail(to_address: str, subject: str, body: str) -> None:
+    """Send through Gmail API over HTTPS, avoiding provider SMTP restrictions."""
+    message = EmailMessage()
+    message["From"] = _env("GOOGLE_GMAIL_SENDER")
+    message["To"] = to_address
+    message["Subject"] = subject
+    message.set_content(body)
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+    request = Request(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        data=json.dumps({"raw": raw_message}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_gmail_access_token()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with closing(urlopen(request, timeout=float(_env("GOOGLE_GMAIL_TIMEOUT", "10") or "10"))) as response:
+            response.read()
+    except HTTPError as error:
+        raise _provider_error("Gmail API", error) from error
+    except URLError as error:
+        raise EmailDeliveryError("Could not reach Gmail API") from error
+
+
 def send_email(to_address: str, subject: str, body: str) -> None:
     """Deliver one plain-text message.
 
@@ -142,6 +211,10 @@ def send_email(to_address: str, subject: str, body: str) -> None:
     path should send through a background task: an unreachable mail server must
     not hold the HTTP response open.
     """
+    if gmail_is_configured():
+        _send_via_gmail(to_address, subject, body)
+        return
+
     if brevo_is_configured():
         _send_via_brevo(to_address, subject, body)
         return

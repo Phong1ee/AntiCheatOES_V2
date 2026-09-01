@@ -55,6 +55,34 @@ def test_brevo_requires_key_and_sender(monkeypatch):
     assert not email_service.brevo_is_configured()
 
 
+def test_gmail_api_is_preferred_when_oauth_settings_exist(monkeypatch):
+    monkeypatch.setenv("GOOGLE_GMAIL_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_GMAIL_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("GOOGLE_GMAIL_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("GOOGLE_GMAIL_SENDER", "anticheatoes.noreply@gmail.com")
+    monkeypatch.setenv("BREVO_API_KEY", "xkeysib-test-key")
+    monkeypatch.setenv("BREVO_SENDER_EMAIL", "sender@example.com")
+
+    response = MagicMock()
+    response.read.side_effect = [b'{"access_token":"access-token"}', b'{"id":"message-id"}']
+    with patch("src.service.email_service.urlopen", return_value=response) as send:
+        email_service.send_email("student@example.com", "Reset", "Your code")
+
+    token_request, gmail_request = [call.args[0] for call in send.call_args_list]
+    assert token_request.full_url == "https://oauth2.googleapis.com/token"
+    assert gmail_request.full_url == "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    assert gmail_request.get_header("Authorization") == "Bearer access-token"
+
+
+def test_gmail_api_requires_all_oauth_settings(monkeypatch):
+    monkeypatch.setenv("GOOGLE_GMAIL_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_GMAIL_CLIENT_SECRET", "client-secret")
+    monkeypatch.delenv("GOOGLE_GMAIL_REFRESH_TOKEN", raising=False)
+    monkeypatch.setenv("GOOGLE_GMAIL_SENDER", "anticheatoes.noreply@gmail.com")
+
+    assert not email_service.gmail_is_configured()
+
+
 def test_provider_error_keeps_only_the_short_provider_message():
     error = HTTPError(
         "https://api.brevo.com/v3/smtp/email",

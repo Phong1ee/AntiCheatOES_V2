@@ -365,21 +365,21 @@ export function UserManagementPage() {
             </Select>
 
             {/* Joined Date Range */}
-            <div className="flex gap-2">
+            <div className="flex items-center gap-1">
+              <Calendar className="size-4 text-gray-400" />
               <input
                 type="date"
                 value={joinedFromDate}
                 onChange={(e) => setJoinedFromDate(e.target.value)}
-                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white"
-                placeholder="From date"
+                className="px-2 py-2 border border-gray-200 rounded-md text-xs bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
                 title="From date"
               />
+              <span className="text-gray-300">—</span>
               <input
                 type="date"
                 value={joinedToDate}
                 onChange={(e) => setJoinedToDate(e.target.value)}
-                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white"
-                placeholder="To date"
+                className="px-2 py-2 border border-gray-200 rounded-md text-xs bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
                 title="To date"
               />
             </div>

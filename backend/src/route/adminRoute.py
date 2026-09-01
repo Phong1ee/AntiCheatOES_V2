@@ -2020,12 +2020,31 @@ def list_users(
 def build_user_import_preview(rows: list[ParsedUserImportRow], db: Session) -> dict:
     """Validate parsed rows; auto-generate school_id from role if missing."""
     # Auto-generate school_id from role if empty; check for duplicates
+    from sqlalchemy import func
+    
     def _generate_school_id(role: str, prefix_counts: dict[str, int]) -> str:
         prefix = str(role or "").strip().lower()[0].upper() if role else "U"
         prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
         return f"{prefix}{prefix_counts[prefix]:05d}"
     
+    # Initialize prefix_counts from existing database school_ids
     prefix_counts: dict[str, int] = {}
+    all_prefixes = ['S', 'T', 'A', 'U']
+    for prefix in all_prefixes:
+        # Find the highest number for each prefix in the database
+        result = db.query(func.max(User.school_id)).filter(
+            User.school_id.like(f"{prefix}%")
+        ).scalar()
+        if result:
+            try:
+                # Extract the numeric part and use it as the starting count
+                numeric_part = int(result[1:] or "0")
+                prefix_counts[prefix] = numeric_part
+            except (ValueError, IndexError):
+                prefix_counts[prefix] = 0
+        else:
+            prefix_counts[prefix] = 0
+    
     for row in rows:
         school = str(row.values.get("school_id") or "").strip()
         if not school:
@@ -2033,7 +2052,11 @@ def build_user_import_preview(rows: list[ParsedUserImportRow], db: Session) -> d
             row.values["school_id"] = _generate_school_id(role, prefix_counts)
         else:
             prefix = school[0].upper()
-            prefix_counts[prefix] = max(prefix_counts.get(prefix, 0), int(school[1:] or "0"))
+            try:
+                numeric_part = int(school[1:] or "0")
+                prefix_counts[prefix] = max(prefix_counts.get(prefix, 0), numeric_part)
+            except (ValueError, IndexError):
+                pass
 
     school_rows: dict[str, list[ParsedUserImportRow]] = {}
     email_rows: dict[str, list[ParsedUserImportRow]] = {}

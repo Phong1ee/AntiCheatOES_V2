@@ -119,7 +119,7 @@ export function UserManagementPage() {
   useEffect(() => {
     const timeout = window.setTimeout(() => { void loadUsers(); }, 300);
     return () => window.clearTimeout(timeout);
-  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate];
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate]);
 
   const handleAddUser = async () => {
     setIsSubmitting(true);

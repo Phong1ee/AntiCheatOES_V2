@@ -139,6 +139,22 @@ function toSubjectMeta(subject: AdminQuestionSubject, index: number): SubjectMet
   };
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return value;
+  }
+}
+
 function toBankQuestion(question: QuestionBankItem | QuestionDetail): BankQuestion {
   const options = 'options' in question ? question.options : undefined;
   const creator = 'creator' in question ? question.creator?.full_name : undefined;
@@ -156,7 +172,7 @@ function toBankQuestion(question: QuestionBankItem | QuestionDetail): BankQuesti
     answers: options?.map((option) => ({ text: option.options_text, isCorrect: option.is_correct })),
     correctAnswer: options?.find((option) => option.is_correct)?.options_text,
     createdBy: creator ?? question.created_by_name ?? question.created_by ?? 'Unknown',
-    createdAt: question.created_at ?? '',
+    createdAt: formatDateTime(question.created_at),
     usageCount: question.usage_count ?? 0,
   };
 }

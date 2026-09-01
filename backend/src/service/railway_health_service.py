@@ -7,7 +7,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-_ENDPOINT = "https://backboard.railway.app/graphql/v2"
+_ENDPOINT = "https://backboard.railway.com/graphql/v2"
 _TOKEN_QUERY = "query { projectToken { projectId environmentId } }"
 _LOG = logging.getLogger(__name__)
 _SERVICES_QUERY = """

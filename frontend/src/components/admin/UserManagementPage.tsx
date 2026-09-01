@@ -309,9 +309,24 @@ export function UserManagementPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
       <main className="container mx-auto px-4 py-8 max-w-7xl">
         {/* Page Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl text-gray-900 mb-2">User Management</h1>
-          <p className="text-gray-600">Manage system users, roles, and permissions</p>
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl text-gray-900 mb-2">User Management</h1>
+            <p className="text-gray-600">Manage system users, roles, and permissions</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowImportDialog(true)}>
+              <FileSpreadsheet className="size-4 mr-2" />
+              Import Users
+            </Button>
+            <Button
+              onClick={() => setShowAddDialog(true)}
+              className="bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700"
+            >
+              <UserPlus className="size-4 mr-2" />
+              Add User
+            </Button>
+          </div>
         </div>
 
         {/* Statistics */}
@@ -386,20 +401,6 @@ export function UserManagementPage() {
                 title="To date"
               />
             </div>
-
-            <Button variant="outline" onClick={() => setShowImportDialog(true)}>
-              <FileSpreadsheet className="size-4 mr-2" />
-              Import Users
-            </Button>
-
-            {/* Add User Button */}
-            <Button
-              onClick={() => setShowAddDialog(true)}
-              className="bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700"
-            >
-              <UserPlus className="size-4 mr-2" />
-              Add User
-            </Button>
           </div>
         </Card>
 

@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -27,11 +27,26 @@ def _query(token: str, query: str, variables: dict | None = None) -> dict:
     request = Request(
         _ENDPOINT,
         data=body,
-        headers={"Content-Type": "application/json", "Project-Access-Token": token},
+        headers={
+            "Content-Type": "application/json",
+            "Project-Access-Token": token,
+            "User-Agent": "AntiCheatOES-SystemHealth/1.0",
+        },
         method="POST",
     )
-    with urlopen(request, timeout=5) as response:  # nosec B310 - fixed HTTPS endpoint
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=5) as response:  # nosec B310 - fixed HTTPS endpoint
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        # Read only Railway's public error message. Never emit the raw response,
+        # which may contain request metadata that does not belong in application logs.
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+            messages = [str(item.get("message", "")) for item in error_payload.get("errors", []) if isinstance(item, dict)]
+        except (UnicodeDecodeError, ValueError, OSError):
+            messages = []
+        detail = "; ".join(message for message in messages if message) or "no safe error message returned"
+        raise RuntimeError(f"Railway API HTTP {exc.code}: {detail}") from exc
     if payload.get("errors"):
         # Railway GraphQL errors contain no credentials. Retain only messages so
         # an operator can diagnose a schema/scope issue from the platform log.

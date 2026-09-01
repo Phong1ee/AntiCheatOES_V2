@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -20,6 +21,34 @@ query RailwayServices($projectId: String!, $environmentId: String!) {
   }
 }
 """
+_METRICS_QUERY = """
+query RailwayMetrics(
+  $environmentId: String!,
+  $startDate: DateTime!,
+  $sampleRateSeconds: Int,
+  $averagingWindowSeconds: Int,
+  $measurements: [MetricMeasurement!]!
+) {
+  metrics(
+    environmentId: $environmentId,
+    startDate: $startDate,
+    sampleRateSeconds: $sampleRateSeconds,
+    averagingWindowSeconds: $averagingWindowSeconds,
+    measurements: $measurements
+  ) {
+    measurement
+    values { ts value }
+  }
+}
+"""
+_METRIC_MEASUREMENTS = (
+    "CPU_USAGE",
+    "CPU_LIMIT",
+    "MEMORY_USAGE_GB",
+    "MEMORY_LIMIT_GB",
+    "NETWORK_RX_GB",
+    "NETWORK_TX_GB",
+)
 
 
 def _query(token: str, query: str, variables: dict | None = None) -> dict:
@@ -55,11 +84,69 @@ def _query(token: str, query: str, variables: dict | None = None) -> dict:
     return payload.get("data") or {}
 
 
+def _latest_metric_value(values: list[dict]) -> float | None:
+    valid = []
+    for item in values:
+        try:
+            valid.append((float(item["ts"]), float(item["value"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return max(valid, default=(0.0, None))[1]
+
+
+def _network_delta_mb(values: list[dict]) -> float | None:
+    valid = []
+    for item in values:
+        try:
+            valid.append((float(item["ts"]), float(item["value"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not valid:
+        return None
+    valid.sort()
+    # Railway reports network counters in GB. A delta over the selected window
+    # represents traffic during that period without exposing raw service metrics.
+    total_gb = max(valid[-1][1] - valid[0][1], 0.0)
+    return round(total_gb * 1024, 2)
+
+
+def _railway_metrics(token: str, environment_id: str) -> dict:
+    start_date = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    response = _query(token, _METRICS_QUERY, {
+        "environmentId": environment_id,
+        "startDate": start_date,
+        "sampleRateSeconds": 60,
+        "averagingWindowSeconds": 60,
+        "measurements": list(_METRIC_MEASUREMENTS),
+    })
+    series = response.get("metrics") or []
+    by_measurement = {
+        str(item.get("measurement")): item.get("values") or []
+        for item in series if isinstance(item, dict)
+    }
+    cpu_usage = _latest_metric_value(by_measurement.get("CPU_USAGE", []))
+    cpu_limit = _latest_metric_value(by_measurement.get("CPU_LIMIT", []))
+    memory_usage = _latest_metric_value(by_measurement.get("MEMORY_USAGE_GB", []))
+    memory_limit = _latest_metric_value(by_measurement.get("MEMORY_LIMIT_GB", []))
+    cpu_percent = round(cpu_usage / cpu_limit * 100, 1) if cpu_usage is not None and cpu_limit and cpu_limit > 0 else None
+    memory_percent = round(memory_usage / memory_limit * 100, 1) if memory_usage is not None and memory_limit and memory_limit > 0 else None
+    return {
+        "status": "healthy" if any(value is not None for value in (cpu_percent, memory_percent, memory_usage)) else "unavailable",
+        "cpu_percent": cpu_percent,
+        "memory_used_gb": round(memory_usage, 3) if memory_usage is not None else None,
+        "memory_limit_gb": round(memory_limit, 3) if memory_limit is not None else None,
+        "memory_percent": memory_percent,
+        "network_rx_mb": _network_delta_mb(by_measurement.get("NETWORK_RX_GB", [])),
+        "network_tx_mb": _network_delta_mb(by_measurement.get("NETWORK_TX_GB", [])),
+        "window_minutes": 5,
+    }
+
+
 def railway_health() -> dict:
     """Return only deploy facts safe for the Admin dashboard; fail closed on errors."""
     token = os.getenv("RAILWAY_TOKEN", "").strip()
     if not token:
-        return {"status": "disabled", "services": []}
+        return {"status": "disabled", "services": [], "metrics": {"status": "disabled"}}
     try:
         scope = _query(token, _TOKEN_QUERY).get("projectToken") or {}
         project_id = scope.get("projectId")
@@ -79,8 +166,13 @@ def railway_health() -> dict:
                 "deployed_at": deployment.get("createdAt"),
                 "commit": (deployment.get("meta") or {}).get("commitHash"),
             })
-        return {"status": "healthy", "services": services}
+        try:
+            metrics = _railway_metrics(token, environment_id)
+        except (URLError, OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+            _LOG.warning("Railway resource metrics unavailable: %s", exc)
+            metrics = {"status": "unavailable"}
+        return {"status": "healthy", "services": services, "metrics": metrics}
     except (URLError, OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         # Never log the token, GraphQL variables, service IDs, or response body.
         _LOG.warning("Railway deployment telemetry unavailable: %s", exc)
-        return {"status": "unavailable", "services": []}
+        return {"status": "unavailable", "services": [], "metrics": {"status": "unavailable"}}

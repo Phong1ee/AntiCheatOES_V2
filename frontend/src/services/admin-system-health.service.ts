@@ -17,6 +17,16 @@ export interface SystemHealth {
   railway: {
     status: "healthy" | "unavailable" | "disabled";
     services: Array<{ name: string; status: HealthStatus; deployment_status: string; deployed_at: string | null; commit: string | null }>;
+    metrics: {
+      status: "healthy" | "unavailable" | "disabled";
+      cpu_percent?: number | null;
+      memory_used_gb?: number | null;
+      memory_limit_gb?: number | null;
+      memory_percent?: number | null;
+      network_rx_mb?: number | null;
+      network_tx_mb?: number | null;
+      window_minutes?: number;
+    };
   };
 }
 

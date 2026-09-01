@@ -19,6 +19,10 @@ function statusLabel(status: HealthStatus): string {
   return status === "healthy" ? "operational" : status;
 }
 
+function formatNumber(value: number | null | undefined, suffix = ""): string {
+  return value === null || value === undefined ? "Unavailable" : `${value}${suffix}`;
+}
+
 export function SystemHealthPage() {
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +54,7 @@ export function SystemHealthPage() {
     { label: "Students in Progress", value: health.statistics.students_in_progress, icon: Activity },
     { label: "API Calls / min", value: displayMetric(health.statistics.api_requests_per_minute), icon: Server },
   ] : [];
+  const railwayMetrics = health?.railway.metrics;
 
   return <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
     <main className="container mx-auto max-w-7xl px-4 py-8">
@@ -87,10 +92,14 @@ export function SystemHealthPage() {
             <p className="mt-2 text-xs text-gray-500">Staging services visible to the configured project token.</p>
           </Card>
           <Card className="border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-center justify-between"><Network className="size-5 text-orange-600" /><Badge className="bg-gray-100 text-gray-700 border-gray-300">pending</Badge></div>
+            <div className="mb-3 flex items-center justify-between"><Network className="size-5 text-orange-600" /><Badge className={railwayMetrics?.status === "healthy" ? statusClass.healthy : statusClass.unavailable}>{railwayMetrics?.status ?? "unavailable"}</Badge></div>
             <div className="text-sm text-gray-600">CPU, RAM & Network</div>
-            <div className="mt-1 text-lg text-gray-900">Waiting for Railway metrics</div>
-            <p className="mt-2 text-xs text-gray-500">Values appear only after the Railway metrics query is verified.</p>
+            <div className="mt-1 grid grid-cols-3 gap-2 text-sm text-gray-900">
+              <div><div className="text-xs text-gray-500">CPU</div><div>{formatNumber(railwayMetrics?.cpu_percent, "%")}</div></div>
+              <div><div className="text-xs text-gray-500">RAM</div><div>{formatNumber(railwayMetrics?.memory_used_gb, " GB")}</div></div>
+              <div><div className="text-xs text-gray-500">Network</div><div>{formatNumber(railwayMetrics?.network_rx_mb, " MB in")}</div></div>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">{railwayMetrics?.window_minutes ? `Staging total, last ${railwayMetrics.window_minutes} minutes. Network out: ${formatNumber(railwayMetrics.network_tx_mb, " MB")}.` : "Railway metrics are unavailable."}</p>
           </Card>
         </div>
 

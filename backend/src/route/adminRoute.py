@@ -1976,6 +1976,8 @@ def list_users(
     search: Annotated[str | None, Query(max_length=100)] = None,
     role: AdminUserRole | None = None,
     locked: bool | None = None,
+    joined_from: Annotated[str | None, Query()] = None,
+    joined_to: Annotated[str | None, Query()] = None,
     include_deleted: bool = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -1995,6 +1997,21 @@ def list_users(
         query = query.filter(User.role == UserRole(role))
     if locked is not None:
         query = query.filter(User.is_locked.is_(locked))
+    if joined_from:
+        from datetime import datetime
+        try:
+            from_date = datetime.fromisoformat(joined_from).date()
+            query = query.filter(User.created_at >= from_date)
+        except (ValueError, TypeError):
+            pass
+    if joined_to:
+        from datetime import datetime, timedelta
+        try:
+            to_date = datetime.fromisoformat(joined_to).date()
+            # Include the entire to_date day by adding 1 day
+            query = query.filter(User.created_at < to_date + timedelta(days=1))
+        except (ValueError, TypeError):
+            pass
     total = query.count()
     users = query.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size).all()
     return {"items": [_serialize_admin_user(user) for user in users], "total": total, "page": page, "page_size": page_size}

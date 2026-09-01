@@ -14,6 +14,8 @@ export interface AdminUserListParams {
   search?: string;
   role?: AdminManagedUserRole;
   locked?: boolean;
+  joined_from?: string;
+  joined_to?: string;
   page?: number;
   page_size?: number;
 }

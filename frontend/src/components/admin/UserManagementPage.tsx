@@ -66,6 +66,8 @@ export function UserManagementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<AdminManagedUserRole | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'locked'>('all');
+  const [joinedFromDate, setJoinedFromDate] = useState('');
+  const [joinedToDate, setJoinedToDate] = useState('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -100,6 +102,8 @@ export function UserManagementPage() {
         search: searchQuery.trim() || undefined,
         role: roleFilter === 'all' ? undefined : roleFilter,
         locked: statusFilter === 'all' ? undefined : statusFilter === 'locked',
+        joined_from: joinedFromDate || undefined,
+        joined_to: joinedToDate || undefined,
       });
       setUsers(response.items);
       setTotalUsers(response.total);
@@ -115,7 +119,7 @@ export function UserManagementPage() {
   useEffect(() => {
     const timeout = window.setTimeout(() => { void loadUsers(); }, 300);
     return () => window.clearTimeout(timeout);
-  }, [searchQuery, roleFilter, statusFilter]);
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate];
 
   const handleAddUser = async () => {
     setIsSubmitting(true);
@@ -359,6 +363,26 @@ export function UserManagementPage() {
                 <SelectItem value="locked">Locked</SelectItem>
               </SelectContent>
             </Select>
+
+            {/* Joined Date Range */}
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={joinedFromDate}
+                onChange={(e) => setJoinedFromDate(e.target.value)}
+                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white"
+                placeholder="From date"
+                title="From date"
+              />
+              <input
+                type="date"
+                value={joinedToDate}
+                onChange={(e) => setJoinedToDate(e.target.value)}
+                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white"
+                placeholder="To date"
+                title="To date"
+              />
+            </div>
 
             <Button variant="outline" onClick={() => setShowImportDialog(true)}>
               <FileSpreadsheet className="size-4 mr-2" />

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from src.service import email_service
 
@@ -51,3 +53,17 @@ def test_brevo_requires_key_and_sender(monkeypatch):
     monkeypatch.delenv("BREVO_SENDER_EMAIL", raising=False)
 
     assert not email_service.brevo_is_configured()
+
+
+def test_provider_error_keeps_only_the_short_provider_message():
+    error = HTTPError(
+        "https://api.brevo.com/v3/smtp/email",
+        403,
+        "Forbidden",
+        hdrs=None,
+        fp=BytesIO(b'{"message":"Your account is not activated"}'),
+    )
+
+    assert str(email_service._provider_error("Brevo", error)) == (
+        "Brevo rejected the message (HTTP 403): Your account is not activated"
+    )

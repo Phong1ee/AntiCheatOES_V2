@@ -60,6 +60,21 @@ class EmailDeliveryError(RuntimeError):
     """Raised when an HTTPS email provider refuses or cannot accept a message."""
 
 
+def _provider_error(provider: str, error: HTTPError) -> EmailDeliveryError:
+    """Keep a provider's short diagnostic without exposing request credentials."""
+    message = ""
+    try:
+        payload = json.loads(error.read().decode("utf-8", errors="replace"))
+        candidate = payload.get("message") if isinstance(payload, dict) else None
+        if isinstance(candidate, str):
+            message = candidate.replace("\n", " ").strip()[:300]
+    except (OSError, UnicodeError, ValueError):
+        pass
+
+    detail = f": {message}" if message else ""
+    return EmailDeliveryError(f"{provider} rejected the message (HTTP {error.code}){detail}")
+
+
 def _send_via_resend(to_address: str, subject: str, body: str) -> None:
     """Send through Resend's HTTPS API, avoiding blocked outbound SMTP ports."""
     payload = json.dumps(
@@ -84,7 +99,7 @@ def _send_via_resend(to_address: str, subject: str, body: str) -> None:
         with closing(urlopen(request, timeout=float(_env("RESEND_TIMEOUT", "10") or "10"))) as response:
             response.read()
     except HTTPError as error:
-        raise EmailDeliveryError(f"Resend rejected the message (HTTP {error.code})") from error
+        raise _provider_error("Resend", error) from error
     except URLError as error:
         raise EmailDeliveryError("Could not reach Resend") from error
 
@@ -115,7 +130,7 @@ def _send_via_brevo(to_address: str, subject: str, body: str) -> None:
         with closing(urlopen(request, timeout=float(_env("BREVO_TIMEOUT", "10") or "10"))) as response:
             response.read()
     except HTTPError as error:
-        raise EmailDeliveryError(f"Brevo rejected the message (HTTP {error.code})") from error
+        raise _provider_error("Brevo", error) from error
     except URLError as error:
         raise EmailDeliveryError("Could not reach Brevo") from error
 

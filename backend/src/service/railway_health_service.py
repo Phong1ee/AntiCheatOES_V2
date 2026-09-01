@@ -42,7 +42,7 @@ def _query(token: str, query: str, variables: dict | None = None) -> dict:
 
 def railway_health() -> dict:
     """Return only deploy facts safe for the Admin dashboard; fail closed on errors."""
-    token = os.getenv("RAILWAY_PROJECT_TOKEN", "").strip()
+    token = os.getenv("RAILWAY_TOKEN", "").strip()
     if not token:
         return {"status": "disabled", "services": []}
     try:

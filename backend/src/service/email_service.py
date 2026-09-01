@@ -1,8 +1,8 @@
-"""Outgoing email over SMTP.
+"""Outgoing email over Resend HTTPS or SMTP.
 
-Uses the standard library only - smtplib and email.message - so no dependency
-is added for one feature. Configuration is read from the environment the same
-way the rest of the backend reads it.
+Uses only the standard library, so no dependency is added for one feature.
+Configuration is read from the environment the same way the rest of the
+backend reads it.
 
 Settings are read from the runtime environment. The committed `.env.example`
 contains placeholders only and must never act as a credential source.
@@ -15,10 +15,14 @@ silently not sending a password-reset code would be worse than an error.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import smtplib
+from contextlib import closing
 from email.message import EmailMessage
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 # A plain logger, not observability_service.log_event: that helper drops any
 # field outside its allowlist, and the development fallback below has to print
 # the message body for the code to be usable at all.
@@ -38,8 +42,46 @@ def smtp_is_configured() -> bool:
     return bool(_env("SMTP_HOST"))
 
 
+def resend_is_configured() -> bool:
+    """Return whether the preferred Railway-safe HTTPS mail provider is configured."""
+    return bool(_env("RESEND_API_KEY") and _env("RESEND_FROM"))
+
+
 class EmailNotConfigured(RuntimeError):
-    """Raised when production is asked to send mail without an SMTP server."""
+    """Raised when production is asked to send mail without a provider."""
+
+
+class EmailDeliveryError(RuntimeError):
+    """Raised when an HTTPS email provider refuses or cannot accept a message."""
+
+
+def _send_via_resend(to_address: str, subject: str, body: str) -> None:
+    """Send through Resend's HTTPS API, avoiding blocked outbound SMTP ports."""
+    payload = json.dumps(
+        {
+            "from": _env("RESEND_FROM"),
+            "to": [to_address],
+            "subject": subject,
+            "text": body,
+        }
+    ).encode("utf-8")
+    request = Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {_env('RESEND_API_KEY')}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        # Read the response before closing it so HTTP failures are not silently lost.
+        with closing(urlopen(request, timeout=float(_env("RESEND_TIMEOUT", "10") or "10"))) as response:
+            response.read()
+    except HTTPError as error:
+        raise EmailDeliveryError(f"Resend rejected the message (HTTP {error.code})") from error
+    except URLError as error:
+        raise EmailDeliveryError("Could not reach Resend") from error
 
 
 def send_email(to_address: str, subject: str, body: str) -> None:
@@ -49,10 +91,14 @@ def send_email(to_address: str, subject: str, body: str) -> None:
     path should send through a background task: an unreachable mail server must
     not hold the HTTP response open.
     """
+    if resend_is_configured():
+        _send_via_resend(to_address, subject, body)
+        return
+
     if not smtp_is_configured():
         if _is_production():
             raise EmailNotConfigured(
-                "SMTP_HOST is not set; refusing to drop an email in production"
+                "No email provider is configured; refusing to drop an email in production"
             )
         # Development fallback. The body carries the code, which is exactly why
         # this branch is unreachable in production.

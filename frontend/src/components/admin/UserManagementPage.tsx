@@ -365,21 +365,24 @@ export function UserManagementPage() {
             </Select>
 
             {/* Joined Date Range */}
-            <div className="flex items-center gap-1">
-              <Calendar className="size-4 text-gray-400" />
-              <input
-                type="date"
-                value={joinedFromDate}
-                onChange={(e) => setJoinedFromDate(e.target.value)}
-                className="px-2 py-2 border border-gray-200 rounded-md text-xs bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                title="From date"
-              />
-              <span className="text-gray-300">—</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Joined:</span>
+              <div className="flex items-center gap-1">
+                <Calendar className="size-4 text-teal-600" />
+                <input
+                  type="date"
+                  value={joinedFromDate}
+                  onChange={(e) => setJoinedFromDate(e.target.value)}
+                  className="px-2 py-2 border border-gray-300 rounded-md text-xs bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  title="From date"
+                />
+              </div>
+              <span className="text-gray-400">to</span>
               <input
                 type="date"
                 value={joinedToDate}
                 onChange={(e) => setJoinedToDate(e.target.value)}
-                className="px-2 py-2 border border-gray-200 rounded-md text-xs bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className="px-2 py-2 border border-gray-300 rounded-md text-xs bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 title="To date"
               />
             </div>

@@ -48,6 +48,19 @@ def user_workbook() -> bytes:
     return output.getvalue()
 
 
+def generated_id_user_workbook() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Users"
+    sheet.append(["full_name", "email", "role", "phone", "date_of_birth", "initial_password"])
+    sheet.append(["Student", "student-auto@request.test", "student", "", date(2005, 1, 1), "password123"])
+    sheet.append(["Teacher", "teacher-auto@request.test", "teacher", "", date(1985, 1, 1), "password123"])
+    sheet.append(["Admin", "admin-auto@request.test", "admin", "", date(1980, 1, 1), "password123"])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 class AdminBulkDataRequestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -111,6 +124,14 @@ class AdminBulkDataRequestTests(unittest.TestCase):
         self.assertEqual(saved.status, BulkDataRequestStatus.imported)
         self.assertEqual(saved.processed_by, "A1")
         self.assertEqual(self.db.query(User).filter(User.school_id == "S1").count(), 1)
+
+    def test_user_import_generates_role_specific_school_ids_when_column_is_absent(self):
+        item = self.request(BulkDataRequestType.user_import, generated_id_user_workbook(), "users.xlsx")
+        preview = preview_bulk_data_request(self.db, item.request_id, self.admin())["preview"]
+        self.assertEqual([row["school_id"] for row in preview["rows"]], ["S000002", "T000002", "A000002"])
+        with patch.object(adminRoute, "should_background_import", return_value=False):
+            process_bulk_data_request(self.db, item.request_id, self.admin())
+        self.assertEqual(self.db.query(User).filter(User.school_id.in_(["S000002", "T000002", "A000002"])).count(), 3)
 
     def test_question_import_preserves_teacher_creator_and_direct_admin_behavior(self):
         item = self.request(BulkDataRequestType.question_bank, question_document(), "questions.docx", "DB")

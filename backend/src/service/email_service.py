@@ -1,4 +1,4 @@
-"""Outgoing email over Resend HTTPS or SMTP.
+"""Outgoing email over Brevo/Resend HTTPS or SMTP.
 
 Uses only the standard library, so no dependency is added for one feature.
 Configuration is read from the environment the same way the rest of the
@@ -47,6 +47,11 @@ def resend_is_configured() -> bool:
     return bool(_env("RESEND_API_KEY") and _env("RESEND_FROM"))
 
 
+def brevo_is_configured() -> bool:
+    """Return whether Brevo can send with the verified Gmail sender."""
+    return bool(_env("BREVO_API_KEY") and _env("BREVO_SENDER_EMAIL"))
+
+
 class EmailNotConfigured(RuntimeError):
     """Raised when production is asked to send mail without a provider."""
 
@@ -84,6 +89,37 @@ def _send_via_resend(to_address: str, subject: str, body: str) -> None:
         raise EmailDeliveryError("Could not reach Resend") from error
 
 
+def _send_via_brevo(to_address: str, subject: str, body: str) -> None:
+    """Send through Brevo's HTTPS API using its verified sender address."""
+    payload = json.dumps(
+        {
+            "sender": {
+                "email": _env("BREVO_SENDER_EMAIL"),
+                "name": _env("BREVO_SENDER_NAME", "AntiCheat OES"),
+            },
+            "to": [{"email": to_address}],
+            "subject": subject,
+            "textContent": body,
+        }
+    ).encode("utf-8")
+    request = Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "api-key": _env("BREVO_API_KEY"),
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with closing(urlopen(request, timeout=float(_env("BREVO_TIMEOUT", "10") or "10"))) as response:
+            response.read()
+    except HTTPError as error:
+        raise EmailDeliveryError(f"Brevo rejected the message (HTTP {error.code})") from error
+    except URLError as error:
+        raise EmailDeliveryError("Could not reach Brevo") from error
+
+
 def send_email(to_address: str, subject: str, body: str) -> None:
     """Deliver one plain-text message.
 
@@ -91,6 +127,10 @@ def send_email(to_address: str, subject: str, body: str) -> None:
     path should send through a background task: an unreachable mail server must
     not hold the HTTP response open.
     """
+    if brevo_is_configured():
+        _send_via_brevo(to_address, subject, body)
+        return
+
     if resend_is_configured():
         _send_via_resend(to_address, subject, body)
         return

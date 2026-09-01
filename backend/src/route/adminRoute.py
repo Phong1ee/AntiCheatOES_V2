@@ -53,6 +53,7 @@ from src.service.audit_catalog import audit_action_info, hidden_audit_actions, v
 from src.service.event_contract import sanitize_metadata
 from src.service.cache_invalidation_contract import admin_enrollment_updated, admin_permission_updated, deliver_invalidation
 from src.service.cache_service import admin_teacher_permissions_key, cache_aside
+from src.service.health_service import system_health
 from src.service.outbox_publisher import enqueue_outbox_event
 from src.service.report_job_service import REPORT_TYPE_EXAM_RESULTS, report_artifact_bytes, report_job_summary, request_exam_results_report
 from src.service.import_job_service import (
@@ -73,6 +74,17 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 router = APIRouter()
+
+
+@router.get("/system-health")
+def get_system_health(
+    current_user: dict = Depends(verify_token),
+    role_check: dict = Depends(ADMIN_ONLY),
+    db: Session = Depends(get_db),
+):
+    """Expose an Admin-only, secret-free summary of real application health."""
+    _admin(db, current_user["school_id"])
+    return system_health(db)
 
 QuestionTypeLiteral = Literal["MCQ", "essay", "true-false"]
 QuestionDifficultyLiteral = Literal["easy", "medium", "hard"]

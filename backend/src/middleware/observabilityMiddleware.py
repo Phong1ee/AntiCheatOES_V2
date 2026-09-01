@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.service.audit_service import begin_audit_request_context, reset_audit_request_context
 from src.service.observability_service import begin_context, elapsed_ms, log_event
+from src.service.cache_service import record_http_metric
 
 
 def _request_id(value: str | None) -> str:
@@ -35,7 +36,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
             return response
         finally:
-            log_event("http.request", status=status_code, latency_ms=elapsed_ms(started_at))
+            latency_ms = elapsed_ms(started_at)
+            log_event("http.request", status=status_code, latency_ms=latency_ms)
+            record_http_metric(latency_ms)
             from src.service.observability_service import _context
             _context.reset(token)
             reset_audit_request_context(audit_token)

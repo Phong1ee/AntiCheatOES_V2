@@ -101,6 +101,52 @@ def delete_prefix(prefix: str) -> None:
         return
 
 
+def record_worker_heartbeat(worker_name: str) -> None:
+    """Mark a worker alive without allowing Redis outages to stop work."""
+    try:
+        get_cache_client().set(cache_key("worker", "heartbeat", worker_name), "1", ex=90)
+    except RedisError:
+        return
+
+
+def worker_is_alive(worker_name: str) -> bool | None:
+    """Return None when Redis cannot answer, distinct from an offline worker."""
+    try:
+        return bool(get_cache_client().get(cache_key("worker", "heartbeat", worker_name)))
+    except RedisError:
+        return None
+
+
+def record_http_metric(latency_ms: int) -> None:
+    """Keep only a one-minute aggregate instead of storing request details."""
+    from datetime import datetime, timezone
+
+    bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+    try:
+        client = get_cache_client()
+        count_key = cache_key("metrics", "http", bucket, "count")
+        latency_key = cache_key("metrics", "http", bucket, "latency")
+        client.incr(count_key)
+        client.incrby(latency_key, max(0, int(latency_ms)))
+        client.expire(count_key, 120)
+        client.expire(latency_key, 120)
+    except RedisError:
+        return
+
+
+def current_http_metric() -> dict[str, int] | None:
+    from datetime import datetime, timezone
+
+    bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+    try:
+        client = get_cache_client()
+        count = int(client.get(cache_key("metrics", "http", bucket, "count")) or 0)
+        latency_total = int(client.get(cache_key("metrics", "http", bucket, "latency")) or 0)
+        return {"requests_per_minute": count, "average_latency_ms": round(latency_total / count) if count else 0}
+    except RedisError:
+        return None
+
+
 def student_exam_list_key(school_id: str) -> str:
     return cache_key("student", "exams", school_id)
 

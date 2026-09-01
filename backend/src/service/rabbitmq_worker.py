@@ -1,6 +1,7 @@
 """Idempotent manual-ack worker base for future workload-specific consumers."""
 
 import json
+import threading
 from typing import Callable
 
 import pika
@@ -10,6 +11,7 @@ from database import SessionLocal
 from src.a_db_config import ProcessedEvent
 from src.service.rabbitmq_service import _connection, declare_topology
 from src.service.observability_service import begin_context, log_event
+from src.service.cache_service import record_worker_heartbeat
 
 
 def consume(
@@ -21,6 +23,16 @@ def consume(
     on_retry_exhausted: Callable[[dict, Exception, object], None] | None = None,
 ) -> None:
     """ACK only after handler returns; poison messages enter the queue DLQ."""
+    worker_name = queue.removesuffix(".queue")
+    stopped = threading.Event()
+
+    def heartbeat_loop() -> None:
+        while not stopped.is_set():
+            record_worker_heartbeat(worker_name)
+            stopped.wait(30)
+
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, name=f"{worker_name}-heartbeat", daemon=True)
+    heartbeat_thread.start()
     connection = _connection()
     channel = connection.channel()
     declare_topology(channel)
@@ -112,4 +124,5 @@ def consume(
     try:
         channel.start_consuming()
     finally:
+        stopped.set()
         connection.close()

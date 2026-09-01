@@ -10,12 +10,10 @@ _ENDPOINT = "https://backboard.railway.app/graphql/v2"
 _TOKEN_QUERY = "query { projectToken { projectId environmentId } }"
 _SERVICES_QUERY = """
 query RailwayServices($projectId: String!, $environmentId: String!) {
-  project(id: $projectId) {
-    services { edges { node {
-      name
-      serviceInstances { edges { node {
-        latestDeployment { status createdAt meta deploymentStopped }
-      } } }
+  environment(id: $environmentId, projectId: $projectId) {
+    serviceInstances { edges { node {
+      serviceName
+      latestDeployment { status createdAt meta deploymentStopped }
     } } }
   }
 }
@@ -48,15 +46,14 @@ def railway_health() -> dict:
         environment_id = scope.get("environmentId")
         if not isinstance(project_id, str) or not isinstance(environment_id, str):
             raise RuntimeError("Railway token scope is unavailable")
-        project = _query(token, _SERVICES_QUERY, {"projectId": project_id, "environmentId": environment_id}).get("project") or {}
+        environment = _query(token, _SERVICES_QUERY, {"projectId": project_id, "environmentId": environment_id}).get("environment") or {}
         services = []
-        for edge in ((project.get("services") or {}).get("edges") or []):
-            service = edge.get("node") or {}
-            instance_edges = ((service.get("serviceInstances") or {}).get("edges") or [])
-            deployment = ((instance_edges[0].get("node") or {}).get("latestDeployment") or {}) if instance_edges else {}
+        for edge in ((environment.get("serviceInstances") or {}).get("edges") or []):
+            instance = edge.get("node") or {}
+            deployment = instance.get("latestDeployment") or {}
             status = str(deployment.get("status") or "UNAVAILABLE").lower()
             services.append({
-                "name": str(service.get("name") or "service"),
+                "name": str(instance.get("serviceName") or "service"),
                 "status": "healthy" if status == "success" else ("degraded" if status in {"building", "deploying", "waiting"} else "unavailable"),
                 "deployment_status": status,
                 "deployed_at": deployment.get("createdAt"),

@@ -87,7 +87,10 @@ def system_health(db: Session) -> dict:
         {"severity": "warning" if item["status"] == "degraded" else "error", "message": f"{item['name']} is {item['status']}"}
         for item in services if item["status"] in {"degraded", "unavailable", "offline"}
     ]
-    failed_jobs = db.query(BackgroundJob).filter(BackgroundJob.status == BackgroundJobStatus.failed).order_by(BackgroundJob.created_at.desc()).limit(5).all()
+    failed_jobs = db.query(BackgroundJob).filter(
+        BackgroundJob.status == BackgroundJobStatus.failed,
+        BackgroundJob.created_at >= now - timedelta(hours=24),
+    ).order_by(BackgroundJob.created_at.desc()).limit(5).all()
     alerts.extend({"severity": "error", "message": f"Background job {job.job_id} failed"} for job in failed_jobs)
     overall = "unavailable" if dependency["mysql"] != "ready" else ("degraded" if alerts else "healthy")
     return {

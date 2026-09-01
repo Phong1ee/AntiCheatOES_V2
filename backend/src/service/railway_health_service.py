@@ -1,6 +1,7 @@
 """Read-only Railway deployment health with a Project token."""
 
 import json
+import logging
 import os
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -8,6 +9,7 @@ from urllib.request import Request, urlopen
 
 _ENDPOINT = "https://backboard.railway.app/graphql/v2"
 _TOKEN_QUERY = "query { projectToken { projectId environmentId } }"
+_LOG = logging.getLogger(__name__)
 _SERVICES_QUERY = """
 query RailwayServices($projectId: String!, $environmentId: String!) {
   environment(id: $environmentId, projectId: $projectId) {
@@ -31,7 +33,10 @@ def _query(token: str, query: str, variables: dict | None = None) -> dict:
     with urlopen(request, timeout=5) as response:  # nosec B310 - fixed HTTPS endpoint
         payload = json.loads(response.read().decode("utf-8"))
     if payload.get("errors"):
-        raise RuntimeError("Railway rejected the health query")
+        # Railway GraphQL errors contain no credentials. Retain only messages so
+        # an operator can diagnose a schema/scope issue from the platform log.
+        messages = [str(item.get("message", "unknown error")) for item in payload["errors"] if isinstance(item, dict)]
+        raise RuntimeError("Railway rejected the health query: " + "; ".join(messages[:3]))
     return payload.get("data") or {}
 
 
@@ -60,5 +65,7 @@ def railway_health() -> dict:
                 "commit": (deployment.get("meta") or {}).get("commitHash"),
             })
         return {"status": "healthy", "services": services}
-    except (URLError, OSError, ValueError, RuntimeError, KeyError, TypeError):
+    except (URLError, OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+        # Never log the token, GraphQL variables, service IDs, or response body.
+        _LOG.warning("Railway deployment telemetry unavailable: %s", exc)
         return {"status": "unavailable", "services": []}

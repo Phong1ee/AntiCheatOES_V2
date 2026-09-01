@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, AlertCircle, CheckCircle2, Database, FileText, Server, Users } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Database, FileText, Gauge, Network, Server, Users, Wifi } from "lucide-react";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { adminSystemHealthService, type HealthStatus, type SystemHealth } from "../../services/admin-system-health.service";
@@ -13,6 +13,10 @@ const statusClass: Record<HealthStatus, string> = {
 
 function displayMetric(value: number | null): string {
   return value === null ? "Unavailable" : String(value);
+}
+
+function statusLabel(status: HealthStatus): string {
+  return status === "healthy" ? "operational" : status;
 }
 
 export function SystemHealthPage() {
@@ -52,9 +56,9 @@ export function SystemHealthPage() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl text-gray-900">System Health Monitoring</h1>
-          <p className="mt-1 text-gray-600">Application dependencies and live examination activity. Refreshes every 30 seconds.</p>
+          <p className="mt-1 text-gray-600">Live application, worker, and deployment health. Refreshes every 30 seconds.</p>
         </div>
-        {health && <Badge className={statusClass[health.status]}>{health.status}</Badge>}
+        {health && <Badge className={statusClass[health.status]}>{statusLabel(health.status)}</Badge>}
       </div>
 
       {error && <Card className="mb-6 border-red-200 bg-red-50 p-4 text-red-800">{error}</Card>}
@@ -62,18 +66,39 @@ export function SystemHealthPage() {
 
       {health && <>
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {statistics.map(({ label, value, icon: Icon }) => <Card key={label} className="border border-gray-200 bg-white p-4 shadow-sm">
+          {statistics.map(({ label, value, icon: Icon }) => <Card key={label} className="border border-gray-200 bg-white p-5 shadow-sm">
             <Icon className="mb-2 size-5 text-teal-600" />
-            <div className="text-2xl text-gray-900">{value}</div>
+            <div className="text-3xl text-gray-900">{value}</div>
             <div className="text-sm text-gray-600">{label}</div>
           </Card>)}
+        </div>
+
+        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Card className="border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between"><Gauge className="size-5 text-violet-600" /><Badge className={statusClass[health.status]}>{statusLabel(health.status)}</Badge></div>
+            <div className="text-sm text-gray-600">API Response</div>
+            <div className="mt-1 text-3xl text-gray-900">{health.statistics.api_average_latency_ms === null ? "Unavailable" : `${health.statistics.api_average_latency_ms} ms`}</div>
+            <p className="mt-2 text-xs text-gray-500">Rolling average from actual API requests.</p>
+          </Card>
+          <Card className="border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between"><Wifi className="size-5 text-sky-600" /><Badge className={health.railway.status === "healthy" ? statusClass.healthy : statusClass.unavailable}>{health.railway.status}</Badge></div>
+            <div className="text-sm text-gray-600">Railway Deployment Telemetry</div>
+            <div className="mt-1 text-3xl text-gray-900">{health.railway.services.length || "Unavailable"}</div>
+            <p className="mt-2 text-xs text-gray-500">Staging services visible to the configured project token.</p>
+          </Card>
+          <Card className="border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between"><Network className="size-5 text-orange-600" /><Badge className="bg-gray-100 text-gray-700 border-gray-300">pending</Badge></div>
+            <div className="text-sm text-gray-600">CPU, RAM & Network</div>
+            <div className="mt-1 text-lg text-gray-900">Waiting for Railway metrics</div>
+            <p className="mt-2 text-xs text-gray-500">Values appear only after the Railway metrics query is verified.</p>
+          </Card>
         </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card className="border border-gray-200 bg-white p-6 shadow-md">
             <h2 className="mb-4 flex items-center gap-2 text-xl text-gray-900"><Server className="size-5 text-teal-600" />Services</h2>
             <div className="space-y-3">{health.services.map((service) => <div key={service.name} className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <span className="text-sm text-gray-900">{service.name}</span><Badge className={statusClass[service.status]}>{service.status}</Badge>
+              <span className="text-sm text-gray-900">{service.name}</span><Badge className={statusClass[service.status]}>{statusLabel(service.status)}</Badge>
             </div>)}</div>
           </Card>
           <Card className="border border-gray-200 bg-white p-6 shadow-md">

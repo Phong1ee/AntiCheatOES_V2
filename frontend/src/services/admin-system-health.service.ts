@@ -14,6 +14,10 @@ export interface SystemHealth {
   };
   services: Array<{ name: string; status: HealthStatus }>;
   alerts: Array<{ severity: "warning" | "error"; message: string }>;
+  railway: {
+    status: "healthy" | "unavailable" | "disabled";
+    services: Array<{ name: string; status: HealthStatus; deployment_status: string; deployed_at: string | null; commit: string | null }>;
+  };
 }
 
 export const adminSystemHealthService = {

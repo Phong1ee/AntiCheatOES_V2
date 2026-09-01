@@ -69,12 +69,18 @@ export function SystemHealthPage() {
           </Card>)}
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card className="border border-gray-200 bg-white p-6 shadow-md">
             <h2 className="mb-4 flex items-center gap-2 text-xl text-gray-900"><Server className="size-5 text-teal-600" />Services</h2>
             <div className="space-y-3">{health.services.map((service) => <div key={service.name} className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3">
               <span className="text-sm text-gray-900">{service.name}</span><Badge className={statusClass[service.status]}>{service.status}</Badge>
             </div>)}</div>
+          </Card>
+          <Card className="border border-gray-200 bg-white p-6 shadow-md">
+            <h2 className="mb-4 flex items-center gap-2 text-xl text-gray-900"><AlertCircle className="size-5 text-orange-600" />Railway Deployments</h2>
+            {health.railway.status === "disabled" && <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">Railway deployment telemetry is disabled.</div>}
+            {health.railway.status === "unavailable" && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Railway deployment telemetry is currently unavailable.</div>}
+            {health.railway.services.map((service) => <div key={service.name} className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm"><div className="flex items-center justify-between"><span className="text-gray-900">{service.name}</span><Badge className={statusClass[service.status]}>{service.deployment_status}</Badge></div>{service.commit && <div className="mt-1 text-xs text-gray-500">Commit {service.commit.slice(0, 7)}</div>}</div>)}
           </Card>
           <Card className="border border-gray-200 bg-white p-6 shadow-md">
             <h2 className="mb-4 flex items-center gap-2 text-xl text-gray-900"><AlertCircle className="size-5 text-orange-600" />Current Alerts</h2>

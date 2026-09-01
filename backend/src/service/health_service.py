@@ -9,6 +9,7 @@ from database import engine
 from src.a_db_config import Attempt, AttemptStatus, BackgroundJob, BackgroundJobStatus, Exam, ExamStatus, User
 from src.service.cache_service import get_cache_client
 from src.service.cache_service import current_http_metric, worker_is_alive
+from src.service.railway_health_service import railway_health
 from src.service.rabbitmq_service import _connection
 
 
@@ -69,6 +70,7 @@ def system_health(db: Session) -> dict:
         Attempt.last_heartbeat_at >= now - timedelta(minutes=5),
     ).count()
     metrics = current_http_metric()
+    railway = railway_health()
     worker_states = []
     for name in _WORKERS:
         alive = worker_is_alive(name)
@@ -100,4 +102,5 @@ def system_health(db: Session) -> dict:
         },
         "services": services,
         "alerts": alerts,
+        "railway": railway,
     }

@@ -168,11 +168,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
         </main>
       )}
 
-      {activeTab !== 'exams' &&
-        activeTab !== 'questions' &&
-        activeTab !== 'results' &&
-        activeTab !== 'anticheat' &&
-        activeTab !== 'dashboard' && <Footer />}
+      <Footer />
     </div>
   );
 }

@@ -168,7 +168,7 @@ export function ExamListView({ onSelectExam }: ExamListViewProps) {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <Card className="shadow-md rounded-2xl border-0">
+      <Card className="sticky top-0 z-10 shadow-md rounded-2xl border-0">
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-4">
             {/* Search */}

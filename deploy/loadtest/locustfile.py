@@ -254,7 +254,7 @@ class StudentUser(BaseUser):
     def submit_once(self) -> None:
         if not self.authenticated or not self.attempt_id or not self.question_id:
             return
-        self.request(
+        with self.request(
             "POST",
             f"/api/exams/{self.exam_id}/submit",
             json={
@@ -264,7 +264,13 @@ class StudentUser(BaseUser):
             },
             headers={"X-Device-Id": self.device_id, "X-Attempt-Session": self.session_token},
             name="student submit",
-        )
+            catch_response=True,
+        ) as response:
+            if response.status_code >= 400:
+                detail = " ".join(response.text.split())[:240]
+                response.failure(f"submit rejected: HTTP {response.status_code}; {detail}")
+            else:
+                response.success()
         self.attempt_id = None
 
 

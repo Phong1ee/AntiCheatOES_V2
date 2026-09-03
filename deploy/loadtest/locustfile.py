@@ -26,10 +26,12 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 STUDENT_COUNT = _positive_int_env("LOADTEST_STUDENT_COUNT", 500)
-TEACHER_COUNT = 5
-ADMIN_COUNT = 2
+TEACHER_COUNT = _positive_int_env("LOADTEST_TEACHER_COUNT", 5)
+ADMIN_COUNT = _positive_int_env("LOADTEST_ADMIN_COUNT", 2)
 PASSWORD_ENV = "LOADTEST_PASSWORD"
 ACCOUNT_OFFSET_ENV = "LOADTEST_ACCOUNT_OFFSET"
+TEACHER_ACCOUNT_OFFSET_ENV = "LOADTEST_TEACHER_ACCOUNT_OFFSET"
+ADMIN_ACCOUNT_OFFSET_ENV = "LOADTEST_ADMIN_ACCOUNT_OFFSET"
 _allocation_lock = threading.Lock()
 _allocations: dict[str, int] = {"STUDENT": 0, "TEACHER": 0, "ADMIN": 0}
 _audit_mutation_lock = threading.Lock()
@@ -44,22 +46,24 @@ def _account(role: str, index: int) -> str:
 
 def _allocate(role: str) -> tuple[str, str]:
     limits = {"STUDENT": STUDENT_COUNT, "TEACHER": TEACHER_COUNT, "ADMIN": ADMIN_COUNT}
+    offset_names = {
+        "STUDENT": ACCOUNT_OFFSET_ENV,
+        "TEACHER": TEACHER_ACCOUNT_OFFSET_ENV,
+        "ADMIN": ADMIN_ACCOUNT_OFFSET_ENV,
+    }
     with _allocation_lock:
         _allocations[role] += 1
         index = _allocations[role]
-    # Student users must never share an account. Teacher/Admin workloads below
-    # are read-only, so their deliberately small controlled pools may wrap.
-    if role == "STUDENT":
-        offset = int(os.getenv(ACCOUNT_OFFSET_ENV, "0"))
-        if offset < 0:
-            raise RuntimeError(f"{ACCOUNT_OFFSET_ENV} must not be negative")
-        requested_index = offset + index
-        if requested_index > limits[role]:
-            raise RuntimeError(
-                f"Student account pool exhausted: requested {requested_index}, available {limits[role]}"
-            )
-        return _account(role, requested_index), os.environ[PASSWORD_ENV]
-    return _account(role, ((index - 1) % limits[role]) + 1), os.environ[PASSWORD_ENV]
+    offset_name = offset_names[role]
+    offset = int(os.getenv(offset_name, "0"))
+    if offset < 0:
+        raise RuntimeError(f"{offset_name} must not be negative")
+    requested_index = offset + index
+    if requested_index > limits[role]:
+        raise RuntimeError(
+            f"{role.title()} account pool exhausted: requested {requested_index}, available {limits[role]}"
+        )
+    return _account(role, requested_index), os.environ[PASSWORD_ENV]
 
 
 @events.test_start.add_listener
@@ -67,14 +71,18 @@ def _validate_load_configuration(environment, **_kwargs) -> None:
     if not os.getenv(PASSWORD_ENV):
         raise RuntimeError(f"{PASSWORD_ENV} is required for authenticated isolated load testing")
     requested_users = getattr(environment.parsed_options, "num_users", None)
-    offset = int(os.getenv(ACCOUNT_OFFSET_ENV, "0"))
-    if offset < 0 or offset >= STUDENT_COUNT:
-        raise RuntimeError(
-            f"{ACCOUNT_OFFSET_ENV} must be between 0 and {STUDENT_COUNT - 1}"
-        )
-    # The weighted workload is 60% Student traffic; Teacher and Admin reads
-    # deliberately reuse their small controlled pools.
-    max_users = ((STUDENT_COUNT - offset) * 10) // 6
+    offsets = {
+        "Student": (ACCOUNT_OFFSET_ENV, STUDENT_COUNT, 6),
+        "Teacher": (TEACHER_ACCOUNT_OFFSET_ENV, TEACHER_COUNT, 3),
+        "Admin": (ADMIN_ACCOUNT_OFFSET_ENV, ADMIN_COUNT, 1),
+    }
+    capacities = []
+    for role, (offset_name, count, weight) in offsets.items():
+        offset = int(os.getenv(offset_name, "0"))
+        if offset < 0 or offset >= count:
+            raise RuntimeError(f"{offset_name} must be between 0 and {count - 1}")
+        capacities.append(((count - offset) * 10) // weight)
+    max_users = min(capacities)
     if requested_users and requested_users > max_users:
         raise RuntimeError(
             f"Requested {requested_users} users exceeds the {STUDENT_COUNT}-Student "

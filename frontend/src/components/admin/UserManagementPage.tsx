@@ -129,6 +129,10 @@ export function UserManagementPage() {
     return () => window.clearTimeout(timeout);
   }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate, currentPage, pageSize]);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentPage]);
+
   const handleAddUser = async () => {
     setIsSubmitting(true);
     try {

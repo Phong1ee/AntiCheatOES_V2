@@ -5,6 +5,7 @@ the named ``LOAD_STUDENT_*`` accounts to the existing ``LOAD101`` disposable
 exam. It is safe to rerun because existing users and assignments are skipped.
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -35,7 +36,18 @@ def _student(index: int, password_hash: str) -> User:
     )
 
 
+def _parse_args() -> tuple[int, int]:
+    parser = argparse.ArgumentParser(description="Append a range of disposable load-test Students")
+    parser.add_argument("--first", type=int, default=FIRST_STUDENT_INDEX)
+    parser.add_argument("--last", type=int, default=LAST_STUDENT_INDEX)
+    args = parser.parse_args()
+    if args.first < 1 or args.last < args.first:
+        parser.error("--first must be positive and --last must not precede --first")
+    return args.first, args.last
+
+
 def main() -> None:
+    first_student_index, last_student_index = _parse_args()
     db = SessionLocal()
     try:
         subject = db.get(Subject, LOAD_SUBJECT_ID)
@@ -54,7 +66,10 @@ def main() -> None:
             )
         exam = exams[0]
 
-        requested_ids = [f"LOAD_STUDENT_{index:04d}" for index in range(FIRST_STUDENT_INDEX, LAST_STUDENT_INDEX + 1)]
+        requested_ids = [
+            f"LOAD_STUDENT_{index:04d}"
+            for index in range(first_student_index, last_student_index + 1)
+        ]
         existing_students = {
             user.school_id: user
             for user in db.query(User).filter(User.school_id.in_(requested_ids)).all()
@@ -75,7 +90,7 @@ def main() -> None:
             password_hash = generate_password_hash(password)
             db.add_all(
                 _student(index, password_hash)
-                for index in range(FIRST_STUDENT_INDEX, LAST_STUDENT_INDEX + 1)
+                for index in range(first_student_index, last_student_index + 1)
                 if f"LOAD_STUDENT_{index:04d}" in missing_id_set
             )
             db.flush()
@@ -94,7 +109,8 @@ def main() -> None:
             db.add_all(new_assignments)
         db.commit()
         print(
-            f"Disposable load seed complete: created {len(missing_ids)} Students and "
+            f"Disposable load seed complete for Students {first_student_index:04d}-{last_student_index:04d}: "
+            f"created {len(missing_ids)} Students and "
             f"added {len(new_assignments)} assignments for exam_id={exam.exam_id}."
         )
     except Exception:

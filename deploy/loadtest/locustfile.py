@@ -14,10 +14,22 @@ from locust import HttpUser, between, events, task
 from locust.exception import StopUser
 
 
-STUDENT_COUNT = 500
+def _positive_int_env(name: str, default: int) -> int:
+    value = os.getenv(name, str(default))
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if result <= 0:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return result
+
+
+STUDENT_COUNT = _positive_int_env("LOADTEST_STUDENT_COUNT", 500)
 TEACHER_COUNT = 5
 ADMIN_COUNT = 2
 PASSWORD_ENV = "LOADTEST_PASSWORD"
+ACCOUNT_OFFSET_ENV = "LOADTEST_ACCOUNT_OFFSET"
 _allocation_lock = threading.Lock()
 _allocations: dict[str, int] = {"STUDENT": 0, "TEACHER": 0, "ADMIN": 0}
 _audit_mutation_lock = threading.Lock()
@@ -37,8 +49,16 @@ def _allocate(role: str) -> tuple[str, str]:
         index = _allocations[role]
     # Student users must never share an account. Teacher/Admin workloads below
     # are read-only, so their deliberately small controlled pools may wrap.
-    if role == "STUDENT" and index > limits[role]:
-        raise RuntimeError(f"Student account pool exhausted: requested {index}, available {limits[role]}")
+    if role == "STUDENT":
+        offset = int(os.getenv(ACCOUNT_OFFSET_ENV, "0"))
+        if offset < 0:
+            raise RuntimeError(f"{ACCOUNT_OFFSET_ENV} must not be negative")
+        requested_index = offset + index
+        if requested_index > limits[role]:
+            raise RuntimeError(
+                f"Student account pool exhausted: requested {requested_index}, available {limits[role]}"
+            )
+        return _account(role, requested_index), os.environ[PASSWORD_ENV]
     return _account(role, ((index - 1) % limits[role]) + 1), os.environ[PASSWORD_ENV]
 
 
@@ -47,10 +67,18 @@ def _validate_load_configuration(environment, **_kwargs) -> None:
     if not os.getenv(PASSWORD_ENV):
         raise RuntimeError(f"{PASSWORD_ENV} is required for authenticated isolated load testing")
     requested_users = getattr(environment.parsed_options, "num_users", None)
-    if requested_users and requested_users > STUDENT_COUNT + TEACHER_COUNT + ADMIN_COUNT:
+    offset = int(os.getenv(ACCOUNT_OFFSET_ENV, "0"))
+    if offset < 0 or offset >= STUDENT_COUNT:
         raise RuntimeError(
-            f"Requested {requested_users} users exceeds the disposable account pool of "
-            f"{STUDENT_COUNT + TEACHER_COUNT + ADMIN_COUNT}"
+            f"{ACCOUNT_OFFSET_ENV} must be between 0 and {STUDENT_COUNT - 1}"
+        )
+    # The weighted workload is 60% Student traffic; Teacher and Admin reads
+    # deliberately reuse their small controlled pools.
+    max_users = ((STUDENT_COUNT - offset) * 10) // 6
+    if requested_users and requested_users > max_users:
+        raise RuntimeError(
+            f"Requested {requested_users} users exceeds the {STUDENT_COUNT}-Student "
+            f"disposable workload capacity of {max_users} users"
         )
 
 
@@ -113,12 +141,38 @@ class StudentUser(BaseUser):
         self.option_id = None
         self.revision = 0
         if self.authenticated:
-            self._start_attempt()
+            self._resolve_assigned_exam()
+
+    def on_stop(self) -> None:
+        """Close an active disposable attempt when Locust reaches its time limit."""
+        if self.authenticated and self.attempt_id and self.question_id:
+            self.submit_once()
+
+    def _resolve_assigned_exam(self) -> None:
+        """Use the account's actual assignment instead of assuming MySQL ID 1."""
+        with self.request(
+            "GET", "/api/exams/student", name="student assigned exams",
+            catch_response=True,
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"assigned-exam read rejected: HTTP {response.status_code}")
+                return
+            payload = response.json()
+            exams = payload.get("exams", payload if isinstance(payload, list) else [])
+            if not exams:
+                response.failure("load-test student has no assigned exam")
+                return
+            self.exam_id = exams[0].get("exam_id", exams[0].get("examId"))
+            if not self.exam_id:
+                response.failure("assigned-exam response did not include an exam ID")
+                return
+            response.success()
+        self._start_attempt()
 
     def _start_attempt(self) -> None:
         with self.request(
             "POST",
-            "/api/exams/1/start",
+            f"/api/exams/{self.exam_id}/start",
             json={"code": None, "deviceId": self.device_id},
             name="student start",
             catch_response=True,
@@ -135,7 +189,7 @@ class StudentUser(BaseUser):
             response.success()
         with self.request(
             "GET",
-            f"/api/exams/1?attempt_id={self.attempt_id}",
+            f"/api/exams/{self.exam_id}?attempt_id={self.attempt_id}",
             name="student questions",
             catch_response=True,
         ) as response:
@@ -162,13 +216,21 @@ class StudentUser(BaseUser):
         if not self.authenticated or not self.attempt_id or not self.question_id:
             return
         self.revision += 1
-        self.request(
+        with self.request(
             "PUT",
-            f"/api/exams/1/attempts/{self.attempt_id}/answers/{self.question_id}",
+            f"/api/exams/{self.exam_id}/attempts/{self.attempt_id}/answers/{self.question_id}",
             json={"revision": self.revision, "selectedOptionId": self.option_id},
             headers={"X-Device-Id": self.device_id, "X-Attempt-Session": self.session_token},
             name="student autosave",
-        )
+            catch_response=True,
+        ) as response:
+            if response.status_code >= 400:
+                # Preserve a bounded server diagnostic in Locust evidence without
+                # recording authentication material or full response bodies.
+                detail = " ".join(response.text.split())[:240]
+                response.failure(f"autosave rejected: HTTP {response.status_code}; {detail}")
+            else:
+                response.success()
 
     @task(1)
     def bounded_anti_cheat(self) -> None:
@@ -176,7 +238,7 @@ class StudentUser(BaseUser):
             return
         self.request(
             "POST",
-            "/api/exams/1/events",
+            f"/api/exams/{self.exam_id}/events",
             json={
                 "attemptId": self.attempt_id,
                 "clientEventId": f"load-event-{self.attempt_id}",
@@ -194,7 +256,7 @@ class StudentUser(BaseUser):
             return
         self.request(
             "POST",
-            "/api/exams/1/submit",
+            f"/api/exams/{self.exam_id}/submit",
             json={
                 "attemptId": self.attempt_id,
                 "submitRequestId": str(uuid.uuid4()),

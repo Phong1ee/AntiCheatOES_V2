@@ -34,8 +34,6 @@ import {
   X,
   Save,
   FileSpreadsheet,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminUserService } from '../../services/admin-user.service';
@@ -71,7 +69,7 @@ export function UserManagementPage() {
   const [joinedFromDate, setJoinedFromDate] = useState('');
   const [joinedToDate, setJoinedToDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 50;
+  const [pageSize, setPageSize] = useState(25);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -124,12 +122,12 @@ export function UserManagementPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate]);
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate, pageSize]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => { void loadUsers(); }, 300);
     return () => window.clearTimeout(timeout);
-  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate, currentPage]);
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate, currentPage, pageSize]);
 
   const handleAddUser = async () => {
     setIsSubmitting(true);
@@ -534,26 +532,33 @@ export function UserManagementPage() {
                 –{Math.min(currentPage * pageSize, totalUsers)} of {totalUsers} users
               </p>
               <div className="flex items-center gap-2">
+                <select
+                  value={String(pageSize)}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="h-8 rounded border border-gray-300 px-2 text-sm"
+                >
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={currentPage <= 1}
                   onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                 >
-                  <ChevronLeft className="size-4 mr-1" />
                   Previous
                 </Button>
                 <span className="text-sm text-gray-600">
-                  Page {currentPage} of {Math.max(1, Math.ceil(totalUsers / pageSize))}
+                  Page {currentPage}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={currentPage >= Math.ceil(totalUsers / pageSize)}
+                  disabled={currentPage * pageSize >= totalUsers}
                   onClick={() => setCurrentPage((page) => page + 1)}
                 >
                   Next
-                  <ChevronRight className="size-4 ml-1" />
                 </Button>
               </div>
             </div>

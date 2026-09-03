@@ -25,6 +25,12 @@ services:
     # Broker remains internal to this disposable verification topology.
     ports: !override []
 
+  redis:
+    # The verification API and workers use private Compose networking only.
+    # Avoid a host-port collision that can leave Redis running without its
+    # configured network attachment and make API readiness falsely degrade.
+    ports: !override []
+
   api-1: &test-api
     environment: &test-api-environment
       DB_HOST: mysql-test

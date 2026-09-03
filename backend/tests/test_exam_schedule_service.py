@@ -12,10 +12,22 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from src.a_db_config import Base, Exam, ExamStatus, StudentExam, Subject, User, UserRole
-from src.service.exam_schedule_service import find_schedule_conflicts, overlap_checking_enabled
+from src.service.exam_schedule_service import find_schedule_conflicts, overlap_checking_enabled, windows_overlap
 
 
 class ExamScheduleOverlapTests(unittest.TestCase):
+    def test_half_open_overlap_handles_equal_boundaries_and_containment(self):
+        morning = datetime(2026, 8, 20, 8)
+        ten_am = datetime(2026, 8, 20, 10)
+        noon = datetime(2026, 8, 20, 12)
+        nine_am = datetime(2026, 8, 20, 9)
+        eleven_am = datetime(2026, 8, 20, 11)
+
+        self.assertTrue(windows_overlap(morning, ten_am, morning, noon))
+        self.assertTrue(windows_overlap(morning, noon, nine_am, eleven_am))
+        self.assertTrue(windows_overlap(morning, noon, nine_am, noon))
+        self.assertFalse(windows_overlap(morning, ten_am, ten_am, noon))
+
     def setUp(self):
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)

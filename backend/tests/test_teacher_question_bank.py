@@ -32,6 +32,7 @@ from src.route.teacherRoute.questionBankRoute import (
     delete_question,
     get_question_edit_payload,
     get_question_detail,
+    list_chapter_learning_objectives,
     list_approved_question_bank,
     list_my_questions,
     submit_question,
@@ -221,6 +222,60 @@ class TeacherQuestionBankTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 403)
         self.db.expire_all()
         self.assertEqual(self.db.get(Question, created["question_id"]).question_text, "What is normalization?")
+
+    def test_question_bank_read_scope_tracks_current_subject_permission(self):
+        approved = self._approved()
+        pending = self._pending()
+
+        self.assertEqual(
+            [item["question_id"] for item in list_approved_question_bank(current_user=self._current(), role_check={}, db=self.db)["items"]],
+            [approved["question_id"]],
+        )
+        self.assertEqual(
+            {item["question_id"] for item in list_my_questions(current_user=self._current(), role_check={}, db=self.db)["items"]},
+            {approved["question_id"], pending["question_id"]},
+        )
+
+        self.db.query(TeacherSubject).filter_by(teacher_id="T1", subject_id="DB").update({"is_active": False})
+        self.db.commit()
+
+        self.assertEqual(list_approved_question_bank(current_user=self._current(), role_check={}, db=self.db)["items"], [])
+        self.assertEqual(list_my_questions(current_user=self._current(), role_check={}, db=self.db)["items"], [])
+        with self.assertRaises(HTTPException) as raised:
+            get_question_detail(approved["question_id"], self._current(), {}, self.db)
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_question_bank_cache_cannot_reuse_a_pre_revoke_read_scope(self):
+        self._approved()
+        cache: dict[str, dict] = {}
+
+        def cached_loader(key, _ttl, loader):
+            if key not in cache:
+                cache[key] = loader()
+            return cache[key]
+
+        with patch.object(questionBankRoute, "cache_aside", side_effect=cached_loader):
+            before = list_approved_question_bank(current_user=self._current(), role_check={}, db=self.db)
+            self.assertEqual(before["total"], 1)
+            self.db.query(TeacherSubject).filter_by(teacher_id="T1", subject_id="DB").update({"is_active": False})
+            self.db.commit()
+            after = list_approved_question_bank(current_user=self._current(), role_check={}, db=self.db)
+
+        self.assertEqual(after["items"], [])
+        self.assertEqual(len(cache), 2)
+
+    def test_question_bank_read_rejects_unassigned_subject_and_non_teacher(self):
+        self._approved()
+
+        with self.assertRaises(HTTPException) as raised:
+            list_approved_question_bank(subject_id="WEB", current_user=self._current(), role_check={}, db=self.db)
+        self.assertEqual(raised.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as raised:
+            list_chapter_learning_objectives(3, current_user=self._current(), role_check={}, db=self.db)
+        self.assertEqual(raised.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as raised:
+            list_approved_question_bank(current_user={"school_id": "A1", "role": "admin"}, role_check={}, db=self.db)
+        self.assertEqual(raised.exception.status_code, 403)
 
     def test_admin_permission_revoke_blocks_the_next_teacher_mutation(self):
         created = self._create()

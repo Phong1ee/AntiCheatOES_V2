@@ -27,6 +27,7 @@ from src.a_db_config import (
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
 from src.service.teacher_subject_service import (
     active_subject_ids as _active_subject_ids,
+    current_active_subject_ids,
     require_active_subject_assignment,
 )
 from src.service.audit_service import record_audit
@@ -511,10 +512,23 @@ def list_approved_question_bank(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.school_id)
+    # A revoked grant must remove read access immediately; list payload caching
+    # may only occur after this authoritative permission scope is established.
+    subject_ids = current_active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
-    filters = {"subject_id": subject_id, "chapter_id": chapter_id, "lo_id": lo_id, "search": search, "question_type": question_type, "difficulty": difficulty, "page": page, "page_size": page_size}
+    filters = {
+        "subject_id": subject_id,
+        "chapter_id": chapter_id,
+        "lo_id": lo_id,
+        "search": search,
+        "question_type": question_type,
+        "difficulty": difficulty,
+        "page": page,
+        "page_size": page_size,
+        # An old list cache key must never authorize a newly revoked scope.
+        "active_subject_ids": sorted(subject_ids),
+    }
 
     def load() -> dict:
         query = _apply_filters(_base_question_query(db).filter(Question.question_status == QuestionStatus.approved), subject_id, chapter_id, lo_id, search, question_type, difficulty)
@@ -535,7 +549,7 @@ def list_my_questions(
 ):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.school_id)
+    subject_ids = current_active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
     query = _base_question_query(db).filter(_mine_scope_filter(db, teacher.school_id))
@@ -561,7 +575,7 @@ def count_my_questions_by_status(
     """
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.school_id)
+    subject_ids = current_active_subject_ids(db, teacher.school_id)
     if subject_id and subject_id not in subject_ids:
         raise HTTPException(status_code=403, detail="You do not have an active permission for this subject")
     query = db.query(Question).filter(_mine_scope_filter(db, teacher.school_id), Question.subject_id.in_(subject_ids))
@@ -580,7 +594,7 @@ def count_my_questions_by_status(
 def list_subject_counts(scope: Literal["bank", "mine"] = "bank", current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     del role_check
     teacher = _teacher(db, current_user["school_id"])
-    subject_ids = _active_subject_ids(db, teacher.school_id)
+    subject_ids = current_active_subject_ids(db, teacher.school_id)
     filters = [Question.question_status == QuestionStatus.approved] if scope == "bank" else [_mine_scope_filter(db, teacher.school_id)]
     rows = db.query(Subject.subject_id, Subject.subject_name, Subject.subject_description, func.count(Question.question_id).label("question_count")).filter(Subject.subject_id.in_(subject_ids)).outerjoin(Question, (Subject.subject_id == Question.subject_id) & filters[0]).group_by(Subject.subject_id, Subject.subject_name, Subject.subject_description).order_by(Subject.subject_name).all()
     total = db.query(func.count(Question.question_id)).filter(*filters, Question.subject_id.in_(subject_ids)).scalar() or 0
@@ -599,7 +613,11 @@ def list_subject_chapters(subject_id: str, current_user: dict = Depends(verify_t
 @router.get("/chapters/{chapter_id}/learning-objectives")
 def list_chapter_learning_objectives(chapter_id: int, current_user: dict = Depends(verify_token), role_check: dict = Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     del role_check
-    _teacher(db, current_user["school_id"])
+    teacher = _teacher(db, current_user["school_id"])
+    chapter = db.query(Chapter).filter(Chapter.chapter_id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    _require_subject_permission(db, teacher, chapter.subject_id)
     return [{"lo_id": item.lo_id, "lo_name": item.lo_name} for item in db.query(LO).join(ChapterLO, LO.lo_id == ChapterLO.lo_id).filter(ChapterLO.chapter_id == chapter_id).order_by(LO.lo_name).all()]
 
 

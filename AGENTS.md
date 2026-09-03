@@ -4,6 +4,81 @@ Project Name
 
 AntiCheatOES_V2_new - Online Examination System with Anti-Cheat Mechanisms.
 
+Current Staging Deployment (2026-09-02)
+
+The repository branch used by the live staging deployment is `camera_retinaface_eval`.
+
+Public staging entry points:
+
+- Frontend: `https://anti-cheat-oes-v2-staging.vercel.app`
+- API: `https://anticheatoesv2-staging.up.railway.app`
+
+The frontend is deployed by Vercel and the API/workers are deployed on Railway.
+Keep `VITE_API_BASE_URL` on Vercel pointed to the API URL and keep Railway
+`FRONTEND_ORIGIN` equal to the exact Vercel staging URL. Do not introduce a
+second frontend origin unless CORS configuration is updated in the same task.
+
+Railway staging topology
+
+- `AntiCheatOES_V2`: FastAPI API service, currently one Railway replica.
+- Shared infrastructure: MySQL, Redis, RabbitMQ, Railway object-storage
+  bucket, and their persistent volumes.
+- Background services: `worker-import`, `worker-grading`, `worker-report`,
+  `worker-notification`, `worker-analytics`, `worker-anti-cheat`, and
+  `worker-outbox`.
+- The API service owns the public domain. Workers and data services must stay
+  private and use Railway private networking.
+- Railway staging currently has no active multi-replica load balancing: the
+  API service has one replica. The local Compose topology does support Nginx
+  load balancing across `api-1` and `api-2`; do not claim live Railway load
+  balancing in reports unless the API service is scaled to at least two
+  replicas and failover is verified.
+- If API replicas are increased, ensure all replicas use the same shared
+  MySQL, Redis, RabbitMQ, object storage, CORS origin, and application secret
+  configuration. Recalculate the MySQL connection-pool budget before scaling.
+
+System Health
+
+- `GET /api/admin/system-health` is Admin-only and returns application health,
+  real business counters, dependency readiness, worker heartbeats, and safe
+  Railway deployment information.
+- The Admin UI refreshes this endpoint every 30 seconds. It must not contain
+  hard-coded health numbers, secrets, service IDs, private URLs, logs, or
+  billing information.
+- The optional Railway project token is stored only in the API service as
+  `RAILWAY_TOKEN`. It is used server-side for read-only deployment status and
+  five-minute CPU, RAM, and network metrics. Never expose, log, commit, or
+  send this token to the frontend.
+
+Email and Password Reset
+
+- Password-reset mail uses Gmail API OAuth when all `GOOGLE_GMAIL_*` settings
+  are configured, then Brevo, Resend, and SMTP as fallbacks.
+- Keep OAuth client secrets, refresh tokens, API keys, SMTP credentials, and
+  sender configuration exclusively in Railway Variables or an ignored local
+  environment file. Do not add real values to `.env.example`, source code, or
+  documentation.
+
+User Import Contract
+
+- The `Users` XLSX template contains exactly: `full_name`, `email`, `role`,
+  `phone`, `date_of_birth`, and `initial_password`. It must not contain
+  `school_id`.
+- On preview/import, the backend generates a School ID when that column is
+  absent: `S` for students, `T` for teachers, and `A` for administrators.
+  Generated values are shown in the preview before persisting the batch.
+- Continue accepting older files that include `school_id` for backward
+  compatibility, but never add the column back to the downloadable template.
+
+Time Handling
+
+- Teacher-created exam `start_time` and `end_time` are Vietnam-local,
+  timezone-naive date-time values. Do not send offset-aware values for this
+  existing contract.
+- Use UTC only for machine timestamps, telemetry, event contracts, and
+  external provider windows. Do not mix those values with the local exam
+  schedule without explicit conversion at the display boundary.
+
 Technology Stack
 
 Use only technologies, languages, libraries, and project structure already present in this repository, except for the explicitly approved Multiuser Reliability additions defined below.

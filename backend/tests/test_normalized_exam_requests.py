@@ -60,3 +60,16 @@ def test_pool_rule_defaults_to_one_and_rejects_non_positive_max_score():
             max_score_per_question=0,
         )
 
+
+@pytest.mark.parametrize(
+    "start_time,end_time",
+    [
+        ("2030-01-01T10:00:00", "2030-01-01T10:00:00"),
+        ("2030-01-01T10:00:00", "2030-01-01T09:59:59"),
+        ("2030-01-01T09:00:00+07:00", "2030-01-01T10:00:00+07:00"),
+    ],
+    ids=["equal-times", "end-before-start", "offset-aware-times"],
+)
+def test_exam_request_rejects_invalid_or_offset_aware_schedule_values(start_time, end_time):
+    with pytest.raises(ValidationError):
+        TeacherExamRequest(**_exam_payload(start_time=start_time, end_time=end_time))

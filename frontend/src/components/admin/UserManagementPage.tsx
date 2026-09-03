@@ -34,6 +34,8 @@ import {
   X,
   Save,
   FileSpreadsheet,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminUserService } from '../../services/admin-user.service';
@@ -68,6 +70,8 @@ export function UserManagementPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'locked'>('all');
   const [joinedFromDate, setJoinedFromDate] = useState('');
   const [joinedToDate, setJoinedToDate] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 50;
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -104,6 +108,8 @@ export function UserManagementPage() {
         locked: statusFilter === 'all' ? undefined : statusFilter === 'locked',
         joined_from: joinedFromDate || undefined,
         joined_to: joinedToDate || undefined,
+        page: currentPage,
+        page_size: pageSize,
       });
       setUsers(response.items);
       setTotalUsers(response.total);
@@ -117,9 +123,13 @@ export function UserManagementPage() {
   };
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => { void loadUsers(); }, 300);
     return () => window.clearTimeout(timeout);
-  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate]);
+  }, [searchQuery, roleFilter, statusFilter, joinedFromDate, joinedToDate, currentPage]);
 
   const handleAddUser = async () => {
     setIsSubmitting(true);
@@ -516,6 +526,38 @@ export function UserManagementPage() {
               </div>
             )}
           </div>
+
+          {!isLoading && !loadError && totalUsers > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-gray-200 px-4 py-3">
+              <p className="text-sm text-gray-600">
+                Showing {(currentPage - 1) * pageSize + 1}
+                –{Math.min(currentPage * pageSize, totalUsers)} of {totalUsers} users
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                >
+                  <ChevronLeft className="size-4 mr-1" />
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {Math.max(1, Math.ceil(totalUsers / pageSize))}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= Math.ceil(totalUsers / pageSize)}
+                  onClick={() => setCurrentPage((page) => page + 1)}
+                >
+                  Next
+                  <ChevronRight className="size-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Add User Modal */}

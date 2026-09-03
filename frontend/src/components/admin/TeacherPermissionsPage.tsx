@@ -52,6 +52,8 @@ export function TeacherPermissionsPage() {
   const [saving, setSaving] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<TeacherPermissions | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = async () => {
     setLoading(true);
@@ -85,6 +87,14 @@ export function TeacherPermissionsPage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, pageSize]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentPage]);
+
   const groups = useMemo(
     () =>
       Object.values(
@@ -115,6 +125,13 @@ export function TeacherPermissionsPage() {
       ),
     [groups, teachers],
   );
+
+  const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
+  const pagedGroups = groups.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   const close = () => {
     if (saving) {
@@ -286,7 +303,7 @@ export function TeacherPermissionsPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {groups.map((group) => (
+            {pagedGroups.map((group) => (
               <Card
                 key={group.teacher.school_id}
                 className="border border-gray-200 bg-white p-5 shadow-sm"
@@ -362,6 +379,49 @@ export function TeacherPermissionsPage() {
                 <p className="text-sm text-gray-500">
                   No access permissions assigned yet
                 </p>
+              </Card>
+            )}
+
+            {groups.length > 0 && (
+              <Card className="flex flex-col items-center justify-between gap-3 border border-gray-200 bg-white p-4 shadow-sm sm:flex-row">
+                <p className="text-sm text-gray-600">
+                  Showing {(currentPage - 1) * pageSize + 1}
+                  –{Math.min(currentPage * pageSize, groups.length)} of {groups.length} teachers
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={String(pageSize)}
+                    onChange={(event) => setPageSize(Number(event.target.value))}
+                    className="h-8 rounded border border-gray-300 px-2 text-sm"
+                  >
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  >
+                    Previous
+                  </Button>
+
+                  <span className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages}
+                  </span>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
               </Card>
             )}
           </div>

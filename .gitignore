@@ -42,6 +42,9 @@ test_redis_connection.py
 
 # Không theo dõi toàn bộ báo cáo triển khai
 docs/
+output/
+tmp/
+tools/
 
 # Test/cache temporary files
 .pytest-*

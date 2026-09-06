@@ -5,7 +5,7 @@ export const CAMERA_AI_CONFIG = {
   multipleFacesDurationMs: 1_500,
   headAwayDurationMs: 3_000,
   gazeAwayDurationMs: 3_000,
-  incidentCooldownMs: 9_000,
+  incidentCooldownMs: 4_000,
   headYawDegrees: 25,
   headPitchDegrees: 20,
   gazeOffset: 0.24,

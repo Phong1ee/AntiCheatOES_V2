@@ -1,9 +1,14 @@
 # Authenticated Locust workload
 
-This is the repository's only load-test framework. It is restricted to the
-disposable Compose topology and uses `backend/scripts/seed_loadtest.py` after
+This is the repository's only load-test framework. The default procedure uses
+the disposable Compose topology and `backend/scripts/seed_loadtest.py` after
 Alembic migration. The seed creates 2 Admins, 5 Teachers, and 500 Students;
 every Student virtual user receives a distinct `example.test` account.
+
+For the guarded Railway staging procedure, use
+[`RAILWAY_STAGING.md`](RAILWAY_STAGING.md). Railway mode accepts only the
+documented staging API domain and requires an explicit acknowledgement before
+the disposable workload can write attempts or events.
 
 Use a non-production password only in the current shell (never commit it):
 

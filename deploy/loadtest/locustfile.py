@@ -1,4 +1,4 @@
-"""Authenticated Locust workload for the disposable Compose load environment.
+"""Authenticated Locust workload for isolated Compose and Railway staging runs.
 
 The companion seed creates only ``*.example.test`` accounts. This workload
 never falls back to a shared account, so a misconfigured account pool fails
@@ -29,6 +29,10 @@ STUDENT_COUNT = _positive_int_env("LOADTEST_STUDENT_COUNT", 500)
 TEACHER_COUNT = _positive_int_env("LOADTEST_TEACHER_COUNT", 5)
 ADMIN_COUNT = _positive_int_env("LOADTEST_ADMIN_COUNT", 2)
 PASSWORD_ENV = "LOADTEST_PASSWORD"
+MODE_ENV = "LOADTEST_MODE"
+STAGING_WRITE_ACK_ENV = "LOADTEST_ALLOW_STAGING_WRITES"
+TEACHER_MUTATION_ENV = "LOADTEST_ALLOW_TEACHER_MUTATION"
+RAILWAY_STAGING_HOST = "https://anticheatoesv2-staging.up.railway.app"
 ACCOUNT_OFFSET_ENV = "LOADTEST_ACCOUNT_OFFSET"
 TEACHER_ACCOUNT_OFFSET_ENV = "LOADTEST_TEACHER_ACCOUNT_OFFSET"
 ADMIN_ACCOUNT_OFFSET_ENV = "LOADTEST_ADMIN_ACCOUNT_OFFSET"
@@ -36,6 +40,10 @@ _allocation_lock = threading.Lock()
 _allocations: dict[str, int] = {"STUDENT": 0, "TEACHER": 0, "ADMIN": 0}
 _audit_mutation_lock = threading.Lock()
 _audit_mutation_started = False
+
+
+def _normalized_host(value: str | None) -> str:
+    return (value or "").strip().rstrip("/").lower()
 
 
 def _account(role: str, index: int) -> str:
@@ -88,6 +96,20 @@ def _validate_load_configuration(environment, **_kwargs) -> None:
             f"Requested {requested_users} users exceeds the {STUDENT_COUNT}-Student "
             f"disposable workload capacity of {max_users} users"
         )
+
+    mode = os.getenv(MODE_ENV, "compose").strip().lower()
+    if mode not in {"compose", "railway"}:
+        raise RuntimeError(f"{MODE_ENV} must be either 'compose' or 'railway'")
+    if mode == "railway":
+        # Prevent a staging workload from being pointed at an arbitrary host.
+        if _normalized_host(environment.host) != _normalized_host(RAILWAY_STAGING_HOST):
+            raise RuntimeError(
+                f"Railway mode only permits {RAILWAY_STAGING_HOST}; received {environment.host!r}"
+            )
+        if os.getenv(STAGING_WRITE_ACK_ENV) != "yes":
+            raise RuntimeError(
+                f"Set {STAGING_WRITE_ACK_ENV}=yes only after confirming the LOAD_* data is disposable"
+            )
 
 
 class BaseUser(HttpUser):
@@ -304,6 +326,8 @@ class TeacherUser(BaseUser):
     def audited_disposable_mutation(self) -> None:
         """Exercise one real audited mutation without conflicting with exam traffic."""
         global _audit_mutation_started
+        if os.getenv(TEACHER_MUTATION_ENV, "no").strip().lower() != "yes":
+            return
         if not self.authenticated:
             return
         with _audit_mutation_lock:

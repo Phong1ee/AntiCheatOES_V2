@@ -17,10 +17,13 @@ LOAD_EXAM_TITLE = "Disposable authenticated load exam"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh the disposable load-test exam schedule")
-    parser.add_argument("--hours", type=int, default=6)
+    parser.add_argument("--hours", type=int, default=2400)
+    parser.add_argument("--max-attempts", type=int, default=999)
     args = parser.parse_args()
-    if args.hours < 1 or args.hours > 24:
-        parser.error("--hours must be between 1 and 24")
+    if args.hours < 1 or args.hours > 2400:
+        parser.error("--hours must be between 1 and 2400")
+    if args.max_attempts < 1 or args.max_attempts > 1000:
+        parser.error("--max-attempts must be between 1 and 1000")
     return args
 
 
@@ -40,8 +43,12 @@ def main() -> None:
         exam.status = ExamStatus.published
         exam.start_time = now - timedelta(minutes=5)
         exam.end_time = now + timedelta(hours=args.hours)
+        exam.max_attempt = args.max_attempts
         db.commit()
-        print(f"Refreshed disposable exam window for {args.hours} hours.")
+        print(
+            f"Refreshed disposable exam window for {args.hours} hours "
+            f"with max_attempt={args.max_attempts}."
+        )
     except Exception:
         db.rollback()
         raise

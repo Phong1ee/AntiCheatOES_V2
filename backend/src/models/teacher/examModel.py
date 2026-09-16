@@ -247,6 +247,7 @@ def getAssignedExamById(school_id: str, exam_id: int):
         AND a.student_id = u.school_id
     WHERE se.student_id = %s
       AND e.exam_id = %s
+      AND e.status = 'published'
     GROUP BY
         e.exam_id,
         e.title,
@@ -399,7 +400,7 @@ def getExamById(exam_id: int):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     query = """
-    SELECT exam_id, examcode, max_attempt, duration_minutes, start_time, end_time,
+    SELECT exam_id, examcode, max_attempt, duration_minutes, start_time, end_time, status,
            question_selection_mode, total_points
     FROM exam
     WHERE exam_id = %s

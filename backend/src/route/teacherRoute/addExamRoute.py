@@ -36,6 +36,10 @@ from src.service.teacher_subject_service import require_active_subject_assignmen
 from src.service.exam_version_service import claim_exam_version
 from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_exam_updated
+from src.service.exam_notification_service import (
+    notify_exam_changes,
+    snapshot_exam_notification_fields,
+)
 
 router = APIRouter()
 
@@ -285,7 +289,8 @@ def update_exam_in_database(
             require_active_subject_assignment(
                 db, current_user["school_id"], request.subject_id
             )
-        previous_status = exam.status.value if hasattr(exam.status, "value") else str(exam.status)
+        previous = snapshot_exam_notification_fields(exam)
+        previous_status = previous.status
         exam.title = request.title.strip()
         incoming_examcode = _normalize_exam_code(request.examcode)
         exam.examcode = incoming_examcode
@@ -303,6 +308,7 @@ def update_exam_in_database(
         exam.status = request.status
         exam.total_points = 100
         exam.passing_score = request.passing_score
+        notify_exam_changes(db, exam, previous)
         record_audit(
             db,
             actor_school_id=current_user["school_id"],
@@ -394,9 +400,11 @@ def update_exam_status(
     del role_check
     try:
         exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
+        previous = snapshot_exam_notification_fields(exam)
         if request.status == "published":
             _validate_publishable(db, exam)
         exam.status = request.status
+        notify_exam_changes(db, exam, previous)
         record_audit(
             db,
             actor_school_id=current_user["school_id"],

@@ -17,6 +17,10 @@ class ExamController:
         exam = examModel.getExamById(exam_id)
         if not exam:
             raise Exception("Exam not found")
+        # The legacy data-access method now includes persisted status. Keep the
+        # fallback while older test doubles and integrations are updated.
+        if exam.get("status", "published") != "published":
+            raise Exception("Exam is unavailable")
 
         is_assigned = examModel.isStudentAssignedToExam(school_id, exam_id)
         if not is_assigned:

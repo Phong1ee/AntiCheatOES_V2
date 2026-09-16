@@ -10,6 +10,7 @@ from src.route.profileRoute import router as profile_router
 from src.route.avatarRoute import router as avatar_router
 from src.route.passwordResetRoute import router as password_reset_router
 from src.route.studentRoute.examRoute import router as exam_router
+from src.route.studentRoute.notificationRoute import router as student_notification_router
 from src.route.teacherRoute.questionImageRoute import student_router as student_question_image_router
 from src.route.resultsRoute import router as results_router
 from src.route.teacherRoute import router as teacher_router
@@ -90,6 +91,7 @@ app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 # app.include_router(teacher_router, prefix="/api/exams", tags=["teacher"])
 app.include_router(exam_router, prefix="/api/exams", tags=["exams"])
 app.include_router(student_question_image_router, prefix="/api/exams", tags=["exams"])
+app.include_router(student_notification_router, prefix="/api/student", tags=["student"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(avatar_router, prefix="/api/profile", tags=["profile"])
 app.include_router(results_router, prefix="/api/results", tags=["results"])

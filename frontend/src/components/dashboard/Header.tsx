@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { GraduationCap, LogOut, ChevronDown } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { useMyAvatar } from '../../hooks/useMyAvatar';
+import type { StudentNotification } from '../../types/student-notification';
+import { NotificationBell } from './NotificationBell';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +17,13 @@ interface HeaderProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   onLogout: () => void;
+  notifications: StudentNotification[];
+  unreadCount: number;
+  notificationsLoading: boolean;
+  notificationsError: string | null;
+  onRefreshNotifications: () => Promise<void>;
+  onMarkNotificationRead: (notificationId: number) => Promise<void>;
+  onMarkAllNotificationsRead: () => Promise<void>;
 }
 
 const navigation = [
@@ -66,7 +75,18 @@ function getStoredFullName(): string {
   return typeof nameFromToken === 'string' && nameFromToken.trim() ? nameFromToken.trim() : 'User';
 }
 
-export function Header({ activeTab, onTabChange, onLogout }: HeaderProps) {
+export function Header({
+  activeTab,
+  onTabChange,
+  onLogout,
+  notifications,
+  unreadCount,
+  notificationsLoading,
+  notificationsError,
+  onRefreshNotifications,
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
+}: HeaderProps) {
   const [fullName, setFullName] = useState<string>(getStoredFullName);
   // Shared with Profile Settings, so an upload there lands here immediately.
   const { url: avatarUrl } = useMyAvatar();
@@ -111,6 +131,15 @@ export function Header({ activeTab, onTabChange, onLogout }: HeaderProps) {
 
           {/* User Menu */}
           <div className="flex items-center gap-3">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              loading={notificationsLoading}
+              error={notificationsError}
+              onRefresh={onRefreshNotifications}
+              onMarkOneRead={onMarkNotificationRead}
+              onMarkAllRead={onMarkAllNotificationsRead}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">

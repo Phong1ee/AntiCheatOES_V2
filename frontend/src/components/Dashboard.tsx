@@ -10,6 +10,7 @@ import { ExamResultDetailsPage } from './exam-results/ExamResultDetailsPage';
 import { ProfileSettings } from './ProfileSettings';
 import { Preferences } from './Preferences';
 import { useStudentDashboardData } from '../hooks/useStudentDashboardData';
+import { useStudentNotifications } from '../hooks/useStudentNotifications';
 import type { StudentExamListItem } from '../services/student-exam.service';
 import type { AntiCheatRuntime } from '../anti-cheat/anti-cheat-runtime';
 
@@ -30,6 +31,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [calendarLaunchExam, setCalendarLaunchExam] = useState<StudentExamListItem | null>(null);
   const [calendarLaunchError, setCalendarLaunchError] = useState<string | null>(null);
   const dashboardData = useStudentDashboardData();
+  const notificationData = useStudentNotifications();
 
   const handleEnterExam = (examId: string, stream?: MediaStream, didRecordRefreshViolation = false, runtime?: AntiCheatRuntime) => {
     setCalendarLaunchExam(null);
@@ -88,7 +90,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }
 
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
-    <Header activeTab={activeTab} onTabChange={setActiveTab} onLogout={onLogout} />
+    <Header
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onLogout={onLogout}
+      notifications={notificationData.notifications}
+      unreadCount={notificationData.unreadCount}
+      notificationsLoading={notificationData.loading}
+      notificationsError={notificationData.error}
+      onRefreshNotifications={notificationData.refresh}
+      onMarkNotificationRead={notificationData.markOneRead}
+      onMarkAllNotificationsRead={notificationData.markAllRead}
+    />
     <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl">
       {activeTab === 'dashboard' && <>
         <ExamCalendar

@@ -50,6 +50,17 @@ class ResultVisibility(str, enum.Enum):
 class ExamStatus(str, enum.Enum):
     draft = "draft"
     published = "published"
+    cancelled = "cancelled"
+
+
+class NotificationType(str, enum.Enum):
+    NEW_EXAM_ASSIGNED = "NEW_EXAM_ASSIGNED"
+    EXAM_SCHEDULE_CHANGED = "EXAM_SCHEDULE_CHANGED"
+    EXAM_DURATION_CHANGED = "EXAM_DURATION_CHANGED"
+    EXAM_CANCELLED = "EXAM_CANCELLED"
+    EXAM_OPENED = "EXAM_OPENED"
+    EXAM_CLOSED = "EXAM_CLOSED"
+    EXAM_CODE_CHANGED = "EXAM_CODE_CHANGED"
 
 class AttemptStatus(str, enum.Enum):
     in_progress = "in_progress"
@@ -112,6 +123,12 @@ attempt_status_enum = Enum(
     AttemptStatus,
     values_callable=lambda enum_class: [item.value for item in enum_class],
     name="attemptstatus",
+)
+
+notification_type_enum = Enum(
+    NotificationType,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="notificationtype",
 )
 
 class QuestionSelectionMode(str, enum.Enum):
@@ -231,6 +248,11 @@ class User(Base):
     student_exams: Mapped[list["StudentExam"]] = relationship(
         back_populates="student",
         foreign_keys="StudentExam.student_id",
+    )
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="student",
+        foreign_keys="Notification.student_id",
+        passive_deletes=True,
     )
     subject_assignments: Mapped[list["TeacherSubject"]] = relationship(
     foreign_keys="TeacherSubject.teacher_id",
@@ -501,6 +523,15 @@ class Exam(Base):
     subject: Mapped[Optional["Subject"]] = relationship(back_populates="exams")
     exam_questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam")
     student_exams: Mapped[list["StudentExam"]] = relationship(back_populates="exam")
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="exam",
+        passive_deletes=True,
+    )
+    lifecycle_notification_events: Mapped[list["ExamNotificationLifecycle"]] = relationship(
+        back_populates="exam",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="exam")
     # Deprecated compatibility field. All authoritative scores use the fixed 100-point scale.
     total_points: Mapped[Optional[int]] = mapped_column(Integer, default=100, server_default=text("100"))
@@ -603,6 +634,80 @@ class StudentExam(Base):
         foreign_keys=[student_id],
     )
     exam: Mapped["Exam"] = relationship(back_populates="student_exams")
+
+
+class Notification(Base):
+    __tablename__ = "notification"
+    __table_args__ = (
+        Index("ix_notification_student_created", "student_id", "created_at"),
+        Index("ix_notification_student_read", "student_id", "is_read"),
+    )
+
+    notification_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[str] = mapped_column(
+        String(30),
+        ForeignKey("user.school_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    exam_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("exam.exam_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    type: Mapped[NotificationType] = mapped_column(notification_type_enum, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    student: Mapped["User"] = relationship(
+        back_populates="notifications",
+        foreign_keys=[student_id],
+    )
+    exam: Mapped[Optional["Exam"]] = relationship(back_populates="notifications")
+
+
+class ExamNotificationLifecycle(Base):
+    """One emitted lifecycle event for one persisted exam time boundary."""
+
+    __tablename__ = "exam_notification_lifecycle"
+    __table_args__ = (
+        CheckConstraint(
+            "notification_type IN ('EXAM_OPENED', 'EXAM_CLOSED')",
+            name="ck_exam_notification_lifecycle_type",
+        ),
+        UniqueConstraint(
+            "exam_id",
+            "notification_type",
+            "boundary_at",
+            name="uq_exam_notification_lifecycle_boundary",
+        ),
+    )
+
+    lifecycle_event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exam.exam_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    notification_type: Mapped[NotificationType] = mapped_column(notification_type_enum, nullable=False)
+    boundary_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    exam: Mapped["Exam"] = relationship(back_populates="lifecycle_notification_events")
 
 
 class Attempt(Base):

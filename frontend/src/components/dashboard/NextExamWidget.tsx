@@ -3,6 +3,7 @@ import { Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import type { StudentExamListItem } from "../../services/student-exam.service";
 import { getCountdownParts } from "../../utils/student-exam-dashboard";
+import { parseVietnamDateTime } from '../../utils/vietnam-time';
 
 interface NextExamWidgetProps {
   exams: StudentExamListItem[];
@@ -17,10 +18,10 @@ export function NextExamWidget({ exams, serverTime, onCountdownElapsed, onReques
   const serverOffset = useRef(0);
   const elapsedTargets = useRef(new Set<string>());
   const refreshRequested = useRef(false);
-  const [now, setNow] = useState(() => new Date(serverTime ?? Date.now()));
+  const [now, setNow] = useState(() => parseVietnamDateTime(serverTime) ?? new Date());
 
   useEffect(() => {
-    serverOffset.current = serverTime ? new Date(serverTime).getTime() - Date.now() : 0;
+    serverOffset.current = (parseVietnamDateTime(serverTime)?.getTime() ?? Date.now()) - Date.now();
     elapsedTargets.current.clear();
     refreshRequested.current = false;
     setNow(new Date(Date.now() + serverOffset.current));

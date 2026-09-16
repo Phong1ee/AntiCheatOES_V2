@@ -14,6 +14,7 @@ from src.a_db_config import (
     StudentExam,
 )
 from src.service.notification_service import create_notifications
+from src.service.time_service import vietnam_now
 
 
 def _status_value(value: object) -> str:
@@ -119,7 +120,7 @@ def process_due_exam_notifications(
     batch_size: int = 100,
 ) -> int:
     """Stage due lifecycle events in the supplied transaction without committing it."""
-    current_time = now or datetime.now()
+    current_time = now or vietnam_now()
     emitted = 0
     for exam_id in _due_exam_ids(db, current_time, batch_size):
         # The lock serializes processors on MySQL; the unique boundary record is

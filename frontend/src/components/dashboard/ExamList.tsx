@@ -21,6 +21,7 @@ import { ExamCodeDialog } from "./ExamCodeDialog";
 import { PreExamSecurityDialog } from "./PreExamSecurityDialog";
 import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
 import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
+import { formatVietnamDate, formatVietnamTime, vietnamTimestamp } from '../../utils/vietnam-time';
 
 type Exam = StudentExamListItem;
 
@@ -115,8 +116,8 @@ export function ExamList({
     .sort((first, second) => {
       if (sortBy === "subject") return first.subject.localeCompare(second.subject);
       if (sortBy === "status") return first.status.localeCompare(second.status);
-      const firstDate = first.startTime ? new Date(first.startTime).getTime() : Number.POSITIVE_INFINITY;
-      const secondDate = second.startTime ? new Date(second.startTime).getTime() : Number.POSITIVE_INFINITY;
+      const firstDate = vietnamTimestamp(first.startTime) ?? Number.POSITIVE_INFINITY;
+      const secondDate = vietnamTimestamp(second.startTime) ?? Number.POSITIVE_INFINITY;
       return firstDate - secondDate;
     });
 
@@ -352,7 +353,7 @@ export function ExamList({
                     <Calendar className="size-4 text-teal-600" />
                     <span>
                       {exam.startTime
-                        ? new Date(exam.startTime).toLocaleDateString("en-US", {
+                        ? formatVietnamDate(exam.startTime, {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
@@ -365,7 +366,7 @@ export function ExamList({
                     <Clock className="size-4 text-teal-600" />
                     <span>
                       {exam.startTime
-                        ? new Date(exam.startTime).toLocaleTimeString("en-US", {
+                        ? formatVietnamTime(exam.startTime, {
                             hour: "2-digit",
                             minute: "2-digit",
                           })

@@ -33,6 +33,7 @@ from src.models.teacher.requestModel.TeacherExamRequest import (
 )
 from src.service.exam_schedule_service import describe_conflicts, find_schedule_conflicts
 from src.service.teacher_subject_service import require_active_subject_assignment
+from src.service.time_service import vietnam_now
 from src.service.exam_version_service import claim_exam_version
 from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_exam_updated
@@ -66,7 +67,7 @@ def _validate_subject(db: Session, subject_id: str) -> None:
 
 
 def _serialize(db: Session, exam: Exam) -> dict:
-    now = datetime.now()
+    now = vietnam_now()
     schedule_status = (
         "upcoming" if exam.start_time and now < exam.start_time
         else "completed" if exam.end_time and now > exam.end_time

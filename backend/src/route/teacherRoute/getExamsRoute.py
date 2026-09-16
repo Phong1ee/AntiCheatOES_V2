@@ -30,6 +30,7 @@ from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_assignment_changed
 from src.service.cache_service import invalidate_student_exam_lists
 from src.service.exam_notification_service import notify_new_exam_assignments
+from src.service.time_service import vietnam_now
 
 router = APIRouter()
 
@@ -49,7 +50,7 @@ class AssignmentSyncRequest(BaseModel):
 
 
 def get_exam_status(exam: Exam, now_time: datetime | None = None) -> str:
-    current_time = now_time or datetime.now()
+    current_time = now_time or vietnam_now()
     if exam.start_time and current_time < exam.start_time:
         return "upcoming"
     if exam.start_time and exam.end_time and exam.start_time <= current_time <= exam.end_time:
@@ -259,7 +260,7 @@ def get_teacher_exams(
         .order_by(Exam.exam_id.desc())
         .all()
     )
-    now = datetime.now()
+    now = vietnam_now()
     return [_serialize_exam(db, exam, now) for exam in exams]
 
 
@@ -429,7 +430,7 @@ def get_exam(
 ):
     del role_check
     exam = _owned_exam(db, exam_id, current_user["school_id"])
-    return _serialize_exam(db, exam, datetime.now())
+    return _serialize_exam(db, exam, vietnam_now())
 
 
 @router.get("/{exam_id}/get_exam_questions/")
@@ -502,7 +503,7 @@ def get_exam_overview(
     del role_check
     teacher = _teacher(db, current_user["school_id"])
     assigned_subjects = active_subject_ids(db, teacher.school_id)
-    now = datetime.now()
+    now = vietnam_now()
     active_exams = (
         db.query(Exam)
         .filter(

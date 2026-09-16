@@ -7,6 +7,7 @@ import type { StudentExamListItem } from '../../services/student-exam.service';
 import { selectActiveAndUpcomingExams } from '../../utils/student-exam-dashboard';
 import { NextExamWidget } from './NextExamWidget';
 import { ExamCodesWidget } from './ExamCodesWidget';
+import { formatVietnamDate, parseVietnamDateTime, vietnamTimestamp } from '../../utils/vietnam-time';
 
 interface InfoSidebarProps {
   results: StudentExamResult[];
@@ -20,14 +21,14 @@ interface InfoSidebarProps {
 
 const formatDate = (date: string | null) => {
   if (!date) return 'Date unavailable';
-  const parsed = new Date(date);
-  return Number.isNaN(parsed.getTime()) ? 'Date unavailable' : parsed.toLocaleDateString('en-US', {
+  const formatted = formatVietnamDate(date, {
     month: 'short', day: 'numeric', year: 'numeric',
   });
+  return formatted === '-' ? 'Date unavailable' : formatted;
 };
 
 const recentResults = (results: StudentExamResult[]) => [...results]
-  .sort((first, second) => (second.date ? new Date(second.date).getTime() : 0) - (first.date ? new Date(first.date).getTime() : 0))
+  .sort((first, second) => (vietnamTimestamp(second.date) ?? 0) - (vietnamTimestamp(first.date) ?? 0))
   .slice(0, 3);
 
 export function InfoSidebar({ results, loading, loadError, onRetry, exams, serverTime, onRequestExamAccess }: InfoSidebarProps) {
@@ -44,7 +45,7 @@ export function InfoSidebar({ results, loading, loadError, onRetry, exams, serve
     : null;
   const passableResults = scoredResults.filter((result) => result.passingScore !== null);
   const passedCount = passableResults.filter((result) => result.score! >= result.passingScore!).length;
-  const serverNow = serverTime ? new Date(serverTime) : new Date();
+  const serverNow = parseVietnamDateTime(serverTime) ?? new Date();
   const activeAndUpcomingExams = selectActiveAndUpcomingExams(exams, serverNow);
 
   return (

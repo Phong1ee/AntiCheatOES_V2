@@ -13,6 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import type { StudentExamListItem } from '../../services/student-exam.service';
+import { formatVietnamDateTime } from '../../utils/vietnam-time';
 
 interface ExamDetailsDialogProps {
   exam: StudentExamListItem | null;
@@ -35,10 +36,10 @@ export function ExamDetailsDialog({ exam, open, onOpenChange, onEnterExam, onReq
   const canEnterExam = exam.status === 'open';
   const formatDateTime = (value?: string) => {
     if (!value) return 'Not scheduled';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? 'Not scheduled' : date.toLocaleString('en-US', {
+    const formatted = formatVietnamDateTime(value, {
       weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
+    return formatted === '-' ? 'Not scheduled' : formatted;
   };
 
   return (

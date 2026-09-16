@@ -72,7 +72,7 @@ def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_
 
 
 def get_database_now():
-    """Return MySQL's UTC DATETIME clock for Student attempt decisions."""
+    """Return MySQL's Vietnam-local DATETIME clock for Student exam decisions."""
     cnx = get_db_connection()
     cursor = cnx.cursor()
     try:

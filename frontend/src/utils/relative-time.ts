@@ -1,8 +1,9 @@
 const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+import { parseVietnamDateTime } from './vietnam-time';
 
 export function relativeTime(value: string): string {
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return 'Recently';
+  const timestamp = parseVietnamDateTime(value)?.getTime();
+  if (timestamp === undefined) return 'Recently';
 
   const seconds = Math.floor((timestamp - Date.now()) / 1000);
   const ranges: Array<[number, Intl.RelativeTimeFormatUnit]> = [

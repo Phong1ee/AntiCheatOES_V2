@@ -3,6 +3,7 @@ import { Key, Copy, CheckCircle2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useState } from 'react';
 import type { StudentExamListItem } from '../../services/student-exam.service';
+import { formatVietnamDateTime } from '../../utils/vietnam-time';
 
 interface ExamCodesWidgetProps {
   exams: StudentExamListItem[];
@@ -75,7 +76,7 @@ export function ExamCodesWidget({ exams }: ExamCodesWidgetProps) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-gray-900">{exam.title}</p>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  Valid until: {exam.endTime ? new Date(exam.endTime).toLocaleString() : 'Not specified'}
+                  Valid until: {exam.endTime ? formatVietnamDateTime(exam.endTime) : 'Not specified'}
                 </p>
               </div>
             </div>

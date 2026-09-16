@@ -1,9 +1,9 @@
 import type { StudentExamListItem } from "../services/student-exam.service";
+import { vietnamTimestamp } from './vietnam-time';
 
 const timestamp = (value?: string) => {
   if (!value) return null;
-  const parsed = new Date(value).getTime();
-  return Number.isNaN(parsed) ? null : parsed;
+  return vietnamTimestamp(value);
 };
 
 export function selectNearestExam(

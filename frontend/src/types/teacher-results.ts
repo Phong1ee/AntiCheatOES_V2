@@ -3,6 +3,19 @@ export type StudentResultStatus = "submitted" | "late" | "pending-grading" | "no
 export type QuestionKind = "mcq" | "true-false" | "essay";
 export type ResultStrategy = "highest" | "average" | "last_attempt";
 
+export interface ScoreDistributionBucket {
+  label: string;
+  rangeStart: number;
+  rangeEnd: number;
+  count: number;
+}
+
+export interface ResultBreakdownItem {
+  key: string;
+  label: string;
+  count: number;
+}
+
 interface ExamResultStatsApi {
   totalStudents: number;
   submittedCount: number;
@@ -16,6 +29,14 @@ interface ExamResultStatsApi {
   resultStrategy: ResultStrategy;
   gradingScale: number;
   passingScore: number;
+  /** Number of students whose final score is ready for score statistics. */
+  finalizedScoreCount: number;
+  /** Number of students contributing a representative attempt to question statistics. */
+  questionStatsStudentCount: number;
+  statisticsScoreScaleVersion: number;
+  scoreDistribution: ScoreDistributionBucket[];
+  submissionBreakdown: ResultBreakdownItem[];
+  passFailBreakdown: ResultBreakdownItem[];
 }
 
 export interface ExamResultSummary extends ExamResultStatsApi {
@@ -105,7 +126,28 @@ export interface QuestionOptionStat {
   option: string;
   label: string;
   isCorrect: boolean;
+  selectionCount: number;
   percentage: number;
+}
+
+export interface ObjectiveResponseStats {
+  correctCount: number;
+  correctRate: number;
+  incorrectCount: number;
+  incorrectRate: number;
+  unansweredCount: number;
+  unansweredRate: number;
+}
+
+export interface EssayResponseStats {
+  answeredCount: number;
+  answeredRate: number;
+  unansweredCount: number;
+  unansweredRate: number;
+  gradedCount: number;
+  pendingGradingCount: number;
+  /** Average awarded score / question maximum among already graded answers. */
+  averageScoreRate: number | null;
 }
 
 export interface QuestionStat {
@@ -117,6 +159,8 @@ export interface QuestionStat {
   totalAttempts: number;
   correctOption: string | null;
   optionStats: QuestionOptionStat[] | null;
+  responseStats: ObjectiveResponseStats | null;
+  essayStats: EssayResponseStats | null;
 }
 
 export interface EssayGradingItem {

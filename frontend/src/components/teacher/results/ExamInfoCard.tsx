@@ -58,7 +58,9 @@ export function ExamInfoCard({
   onRefreshGrades,
   onManualGrading,
 }: ExamInfoCardProps) {
-  const completionRate = ((submittedCount / totalStudents) * 100).toFixed(1);
+  const completionRate = totalStudents > 0
+    ? ((submittedCount / totalStudents) * 100).toFixed(1)
+    : '0.0';
   const essayGradingRate =
     totalEssayCount > 0
       ? (((totalEssayCount - pendingEssayCount) / totalEssayCount) * 100).toFixed(1)

@@ -8,6 +8,7 @@ import { StudentDetailModal } from './StudentDetailModal';
 import { QuestionStatistics } from './QuestionStatistics';
 import { ExamListView } from './ExamListView';
 import { ManualGradingModal } from './ManualGradingModal';
+import { ResultsCharts } from './ResultsCharts';
 import { FileSpreadsheet, ArrowLeft, PenTool, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../../ui/alert';
 import { toast } from 'sonner';
@@ -224,6 +225,19 @@ export function ExamResultsPage({
                 onRefreshGrades={handleRefreshGrades}
                 onManualGrading={overview.hasEssayQuestions ? handleManualGrading : undefined}
               />
+
+              <ResultsCharts
+                scoreDistribution={overview.scoreDistribution}
+                submissionBreakdown={overview.submissionBreakdown}
+                passFailBreakdown={overview.passFailBreakdown}
+                finalizedScoreCount={overview.finalizedScoreCount}
+              />
+
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                Score charts use {overview.finalizedScoreCount} finalized student score{overview.finalizedScoreCount === 1 ? '' : 's'}.
+                {' '}Question Statistics uses {overview.questionStatsStudentCount} student representative attempt{overview.questionStatsStudentCount === 1 ? '' : 's'} under the {overview.resultStrategy} strategy.
+                {' '}Only score-scale version {overview.statisticsScoreScaleVersion} is included.
+              </div>
 
               {/* Filters */}
               <ResultsFilter onFilterChange={handleFilterChange} />

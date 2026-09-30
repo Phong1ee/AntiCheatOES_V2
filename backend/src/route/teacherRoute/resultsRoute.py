@@ -244,6 +244,34 @@ def _has_essay_questions(db: Session, exam_id: int) -> bool:
     )
 
 
+def _score_distribution(scores: list[float]) -> list[dict]:
+    """Return ten contiguous bands; decimal scores above a boundary join its next band."""
+    buckets = [
+        ("0-10", 0, 10),
+        ("11-20", 10, 20),
+        ("21-30", 20, 30),
+        ("31-40", 30, 40),
+        ("41-50", 40, 50),
+        ("51-60", 50, 60),
+        ("61-70", 60, 70),
+        ("71-80", 70, 80),
+        ("81-90", 80, 90),
+        ("91-100", 90, 100),
+    ]
+    return [
+        {
+            "label": label,
+            "rangeStart": start,
+            "rangeEnd": end,
+            "count": sum(
+                (0 <= score <= end) if start == 0 else (start < score <= end)
+                for score in scores
+            ),
+        }
+        for label, start, end in buckets
+    ]
+
+
 def _exam_stats(db: Session, exam: Exam) -> dict:
     strategy = _sync_final_scores(db, exam)
     roster = (
@@ -286,6 +314,13 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
     # can grade essays from any attempt, since grading can itself change the computed final score.
     all_submitted_ids = [attempt.attempt_id for attempts in all_submitted_by_student.values() for attempt in attempts]
     total_essay, pending_essay = _essay_counts(db, all_submitted_ids)
+    finalized_count = len(scores)
+    passed_count = (
+        sum(score >= float(exam.passing_score) for score in scores)
+        if exam.passing_score is not None
+        else 0
+    )
+    pending_grading_count = max(submitted_count - finalized_count, 0)
 
     return {
         "totalStudents": len(roster),
@@ -300,6 +335,21 @@ def _exam_stats(db: Session, exam: Exam) -> dict:
         "resultStrategy": strategy,
         "gradingScale": float(GRADING_SCALE),
         "passingScore": _score_value(exam.passing_score),
+        # Scores and question statistics deliberately use the same finalized,
+        # version-3 result set so their charts never mix incompatible history.
+        "finalizedScoreCount": finalized_count,
+        "questionStatsStudentCount": len(submitted_by_student),
+        "statisticsScoreScaleVersion": 3,
+        "scoreDistribution": _score_distribution(scores),
+        "submissionBreakdown": [
+            {"key": "finalized", "label": "Finalized", "count": finalized_count},
+            {"key": "pending-grading", "label": "Pending grading", "count": pending_grading_count},
+            {"key": "not-submitted", "label": "Not submitted", "count": max(len(roster) - submitted_count, 0)},
+        ],
+        "passFailBreakdown": [
+            {"key": "passed", "label": "Passed", "count": passed_count},
+            {"key": "not-passed", "label": "Not passed", "count": max(finalized_count - passed_count, 0)},
+        ],
     }
 
 
@@ -370,6 +420,64 @@ def _build_student_rows(db: Session, exam: Exam) -> list:
     return rows
 
 
+def _rate(count: int, total: int) -> float:
+    return round(count / total * 100, 1) if total else 0
+
+
+def _objective_response_counts(question_links, mcq_answers: dict) -> dict:
+    correct_count = 0
+    incorrect_count = 0
+    unanswered_count = 0
+    selections = []
+    for link in question_links:
+        answer = mcq_answers.get((link.attempt_id, link.question_id))
+        selected = _snapshot_option(link, answer.selected_option_id if answer else None)
+        if selected is None:
+            unanswered_count += 1
+        elif _option_is_correct(selected):
+            correct_count += 1
+            selections.append(selected)
+        else:
+            incorrect_count += 1
+            selections.append(selected)
+    return {
+        "correctCount": correct_count,
+        "incorrectCount": incorrect_count,
+        "unansweredCount": unanswered_count,
+        "selections": selections,
+    }
+
+
+def _essay_response_counts(question_links, essay_answers: dict) -> dict:
+    answered_count = 0
+    unanswered_count = 0
+    graded_count = 0
+    pending_grading_count = 0
+    graded_ratios = []
+    for link in question_links:
+        essay = essay_answers.get((link.attempt_id, link.question_id))
+        if essay is None or not essay.answer_text or not essay.answer_text.strip():
+            unanswered_count += 1
+            continue
+        answered_count += 1
+        if essay.score is None:
+            pending_grading_count += 1
+            continue
+        graded_count += 1
+        graded_ratios.append(decimal_score(essay.score, field_name="essay score") / _max_score(link))
+    return {
+        "answeredCount": answered_count,
+        "unansweredCount": unanswered_count,
+        "gradedCount": graded_count,
+        "pendingGradingCount": pending_grading_count,
+        "averageScoreRate": (
+            round(float(sum(graded_ratios, Decimal("0")) / graded_count * 100), 1)
+            if graded_count
+            else None
+        ),
+    }
+
+
 def _build_question_stats(db: Session, exam: Exam) -> list:
     # One data point per student using the strategy's representative, finalized
     # attempt. Pool statistics therefore include only questions actually drawn.
@@ -410,36 +518,30 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
         question_text = first_link.question_text_snapshot or question.question_text
 
         if question_type == QuestionType.essay.value:
-            graded_ratios = []
-            essay_count = 0
-            for link in question_links:
-                essay = essay_answers.get((link.attempt_id, link.question_id))
-                if essay is None:
-                    continue
-                essay_count += 1
-                if essay.score is not None:
-                    graded_ratios.append(
-                        decimal_score(essay.score, field_name="essay score") / _max_score(link)
-                    )
-            correct_rate = (
-                round(float(sum(graded_ratios, Decimal("0")) / len(graded_ratios) * 100), 1)
-                if graded_ratios
-                else 0
-            )
+            total_attempts = len(question_links)
+            essay_stats = _essay_response_counts(question_links, essay_answers)
             stats.append({
                 "questionNumber": index,
                 "questionText": question_text,
                 "type": "essay",
                 "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
-                "correctRate": correct_rate,
-                "totalAttempts": essay_count,
+                # Kept for API compatibility; consumers must use essayStats
+                # because an essay has a score, not a binary correct answer.
+                "correctRate": essay_stats["averageScoreRate"] or 0,
+                "totalAttempts": total_attempts,
                 "correctOption": None,
                 "optionStats": None,
+                "responseStats": None,
+                "essayStats": {
+                    **essay_stats,
+                    "answeredRate": _rate(essay_stats["answeredCount"], total_attempts),
+                    "unansweredRate": _rate(essay_stats["unansweredCount"], total_attempts),
+                },
             })
             continue
 
         total_attempts = len(question_links)
-        correct_count = 0
+        response_stats = _objective_response_counts(question_links, mcq_answers)
         is_true_false = question_type == QuestionType.true_false.value
         first_options = first_link.options_snapshot if first_link.options_snapshot is not None else question.options
         option_meta = []
@@ -451,14 +553,8 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
                 "isCorrect": _option_is_correct(option),
                 "count": 0,
             })
-        for link in question_links:
-            answer = mcq_answers.get((link.attempt_id, link.question_id))
-            selected = _snapshot_option(link, answer.selected_option_id if answer else None)
-            if _option_is_correct(selected):
-                correct_count += 1
-            selected_label = (
-                selected.get("text") if isinstance(selected, dict) else selected.options_text
-            ) if selected is not None else None
+        for selected in response_stats["selections"]:
+            selected_label = selected.get("text") if isinstance(selected, dict) else selected.options_text
             matching = next((item for item in option_meta if item["label"] == selected_label), None)
             if matching:
                 matching["count"] += 1
@@ -467,6 +563,7 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
                 "option": info["letter"],
                 "label": info["label"],
                 "isCorrect": info["isCorrect"],
+                "selectionCount": info["count"],
                 "percentage": round(info["count"] / total_attempts * 100, 1) if total_attempts else 0,
             }
             for info in option_meta
@@ -477,10 +574,19 @@ def _build_question_stats(db: Session, exam: Exam) -> list:
             "questionText": question_text,
             "type": "true-false" if is_true_false else "mcq",
             "difficulty": question.question_difficulties.value if question.question_difficulties else "medium",
-            "correctRate": round(correct_count / total_attempts * 100, 1) if total_attempts else 0,
+            "correctRate": _rate(response_stats["correctCount"], total_attempts),
             "totalAttempts": total_attempts,
             "correctOption": correct_option,
             "optionStats": option_stats,
+            "responseStats": {
+                key: response_stats[key]
+                for key in ("correctCount", "incorrectCount", "unansweredCount")
+            } | {
+                "correctRate": _rate(response_stats["correctCount"], total_attempts),
+                "incorrectRate": _rate(response_stats["incorrectCount"], total_attempts),
+                "unansweredRate": _rate(response_stats["unansweredCount"], total_attempts),
+            },
+            "essayStats": None,
         })
     return stats
 

@@ -1,3 +1,5 @@
+import type { AntiCheatMeasures } from '../anti-cheat/measure-policy';
+
 export interface QuestionOption {
   id: number;
   text: string;
@@ -31,6 +33,7 @@ export interface StudentExamSettings {
   sequentialNavigation: boolean;
   antiCheatEnabled: boolean;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
 }
 
 export interface StudentExamAttempt {

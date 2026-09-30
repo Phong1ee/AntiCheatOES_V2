@@ -9,6 +9,7 @@ from src.models.teacher.requestModel.ExamSettingsRequest import (
     ExamSettingsRequest,
     ExamSettingsResponse,
 )
+from src.models.teacher.antiCheatPolicy import normalize_anti_cheat_measures
 from src.service.result_strategy_service import set_result_strategy, sync_final_scores
 from src.service.exam_version_service import claim_exam_version
 from src.service.teacher_subject_service import require_active_subject_assignment
@@ -39,6 +40,9 @@ def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
         grace_period=setting.grace_period,
         anti_cheat_enabled=setting.anti_cheat_enabled,
         violation_limit=setting.violation_limit,
+        anti_cheat_measures=normalize_anti_cheat_measures(
+            setting.anti_cheat_measures, setting.violation_limit,
+        ),
         auto_grade=setting.auto_grade,
         result_strategy=setting.result_strategy,
         result_visibility=exam.result_visibility.value if exam.result_visibility else None,
@@ -47,7 +51,7 @@ def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
 
 
 def _apply(setting: ExamSetting, payload: ExamSettingsRequest) -> None:
-    for field, value in payload.model_dump().items():
+    for field, value in payload.model_dump(exclude_none=True).items():
         if field not in {"expected_version", "result_visibility"}:
             setattr(setting, field, value)
 
@@ -98,7 +102,8 @@ def create_exam_settings(
     db: Session = Depends(get_db),
 ):
     del role_check
-    exam = _owned_exam(db, exam_id, current_user["school_id"])
+    _owned_exam(db, exam_id, current_user["school_id"])
+    exam = claim_exam_version(db, exam_id, current_user["school_id"], payload.expected_version)
     if db.get(ExamSetting, exam_id):
         raise HTTPException(status_code=409, detail="Exam settings already exist")
     try:

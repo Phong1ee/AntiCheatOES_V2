@@ -244,7 +244,7 @@ export function ExamList({
     }
   };
 
-  const handleSecurityReady = async (stream: MediaStream, runtime: AntiCheatRuntime) => {
+  const handleSecurityReady = async (stream?: MediaStream, runtime?: AntiCheatRuntime) => {
     if (!selectedExam) throw new Error("No exam selected");
     try {
       if (securityResume) {
@@ -481,7 +481,7 @@ export function ExamList({
       {selectedExam && <PreExamSecurityDialog
         open={securityOpen}
         examTitle={selectedExam.title}
-        violationLimit={selectedExam.violationLimit}
+        antiCheatMeasures={selectedExam.antiCheatMeasures}
         onOpenChange={(open) => open ? setSecurityOpen(true) : resetExamFlow()}
         onReady={handleSecurityReady}
       />}

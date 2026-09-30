@@ -9,9 +9,11 @@ interface UseAIAntiCheatOptions {
   mediaStream?: MediaStream;
   reporter: IncidentReporter;
   preloadedRuntime?: AntiCheatRuntime;
+  requiresCamera: boolean;
+  requiresMicrophone: boolean;
 }
 
-export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime }: UseAIAntiCheatOptions) {
+export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime, requiresCamera, requiresMicrophone }: UseAIAntiCheatOptions) {
   const [readiness, setReadiness] = useState<AiReadiness>('inactive');
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -40,10 +42,10 @@ export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime
       setError(null);
       return;
     }
-    if (!mediaStream || videoTrack?.readyState !== 'live' || audioTrack?.readyState !== 'live') {
+    if (!mediaStream || (requiresCamera && videoTrack?.readyState !== 'live') || (requiresMicrophone && audioTrack?.readyState !== 'live')) {
       stop();
       setReadiness('error');
-      setError('A live camera and microphone are required for anti-cheat analysis.');
+      setError(requiresCamera && requiresMicrophone ? 'A live camera and microphone are required for anti-cheat analysis.' : requiresCamera ? 'A live camera is required for anti-cheat analysis.' : 'A live microphone is required for anti-cheat analysis.');
       return;
     }
 
@@ -51,7 +53,7 @@ export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime
     // A runtime created during preflight has already proved every required model.
     const runtime = preloadedRuntime && retryNonce === 0
       ? preloadedRuntime
-      : new AntiCheatRuntime(mediaStream);
+      : new AntiCheatRuntime(mediaStream, undefined, undefined, { camera: requiresCamera, microphone: requiresMicrophone });
     runtimeRef.current = runtime;
     runtime.setIncidentHandler((incident) => void report(incident));
     runtime.setRuntimeErrorHandler((cause) => {
@@ -86,7 +88,7 @@ export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime
       runtime.stop();
       if (runtimeRef.current === runtime) runtimeRef.current = null;
     };
-  }, [active, mediaStream, preloadedRuntime, report, retryNonce, stop]);
+  }, [active, mediaStream, preloadedRuntime, report, requiresCamera, requiresMicrophone, retryNonce, stop]);
 
   return { readiness, error, retry, stop, fail };
 }

@@ -13,6 +13,7 @@ import { useIncidentReporter } from "../../anti-cheat/incident-reporter";
 import { useAIAntiCheat } from "../../anti-cheat/use-ai-anti-cheat";
 import { isBrowserMonitoringActive } from "../../anti-cheat/anti-cheat-lifecycle";
 import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
+import { defaultAntiCheatMeasures, isMonitoringGroupEnabled } from '../../anti-cheat/measure-policy';
 import { requestFullscreenOrThrow } from "../../utils/fullscreen";
 import type { StudentAnswer, StudentAnswers, StudentExamSettings, StudentQuestion } from "../../types/student-exam";
 
@@ -56,7 +57,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false);
   const [showViolationWarning, setShowViolationWarning] = useState(false);
   const [fullscreenLocked, setFullscreenLocked] = useState(false);
-  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, antiCheatEnabled: false, violationLimit: 5 });
+  const [settings, setSettings] = useState<StudentExamSettings>({ autoSubmitOnExpire: true, sequentialNavigation: false, antiCheatEnabled: false, violationLimit: 5, antiCheatMeasures: defaultAntiCheatMeasures() });
   const [isSavingNext, setIsSavingNext] = useState(false);
   const [markedQuestionIds, setMarkedQuestionIds] = useState<number[]>([]);
 
@@ -235,7 +236,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
           setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
         }
         fullscreenArmedRef.current = Boolean(document.fullscreenElement);
-        setFullscreenLocked(restored.antiCheatEnabled && !document.fullscreenElement);
+        setFullscreenLocked(restored.antiCheatEnabled && isMonitoringGroupEnabled(restored.settings.antiCheatMeasures, 'browser') && !document.fullscreenElement);
         const serverTime = Date.parse(restored.serverTime);
         const expiresAt = Date.parse(restored.expiresAt);
         if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt) || expiresAt <= 0) throw new Error("Invalid server timer response");
@@ -364,9 +365,12 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     }
   }, [attemptId, exitAfterTermination, mediaStream, stopAutoSave]);
 
-  const aiRuntimeActive = antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId);
+  const cameraMonitoringEnabled = isMonitoringGroupEnabled(settings.antiCheatMeasures, 'camera');
+  const microphoneMonitoringEnabled = isMonitoringGroupEnabled(settings.antiCheatMeasures, 'microphone');
+  const browserMonitoringEnabled = isMonitoringGroupEnabled(settings.antiCheatMeasures, 'browser');
+  const aiRuntimeActive = antiCheatEnabled && (cameraMonitoringEnabled || microphoneMonitoringEnabled) && attemptStatus === "in_progress" && Boolean(attemptId);
   const incidentReporter = useIncidentReporter({
-    active: aiRuntimeActive,
+    active: antiCheatEnabled && attemptStatus === "in_progress" && Boolean(attemptId),
     examId,
     attemptId,
     onEvent: handleAntiCheatEvent,
@@ -376,10 +380,12 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     mediaStream,
     reporter: incidentReporter,
     preloadedRuntime: preloadedAntiCheatRuntime,
+    requiresCamera: cameraMonitoringEnabled,
+    requiresMicrophone: microphoneMonitoringEnabled,
   });
 
   useAntiCheatMonitoring({
-    active: isBrowserMonitoringActive(antiCheatEnabled, attemptStatus, Boolean(attemptId)), examId, attemptId, mediaStream,
+    active: isBrowserMonitoringActive(antiCheatEnabled && browserMonitoringEnabled, attemptStatus, Boolean(attemptId)), examId, attemptId,
     reporter: incidentReporter,
     shouldIgnoreEvents: shouldIgnoreAntiCheatEvents,
     // Open the dialog here rather than waiting for the violation report to resolve:
@@ -405,14 +411,14 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
 
   // A restored attempt can also land here out of fullscreen, with no violation
   // to announce - the gate has to follow the lock, not the warning.
-  const fullscreenGateOpen = fullscreenLocked && antiCheatEnabled && !isTerminated;
+  const fullscreenGateOpen = fullscreenLocked && antiCheatEnabled && browserMonitoringEnabled && !isTerminated;
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
   const currentAnswerIsValid = isAnswered(answers[current.id]);
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} violationLimit={violationLimit} />
-    {mediaStream && <WebcamMonitor stream={mediaStream} />}
+    {mediaStream && cameraMonitoringEnabled && <WebcamMonitor stream={mediaStream} />}
     <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} isMarked={markedQuestionIds.includes(current.id)} onToggleMark={() => toggleMarkedQuestion(current.id)} /></div>
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />

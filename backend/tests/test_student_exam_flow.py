@@ -258,11 +258,15 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertTrue(result["requiresFullscreen"])
         self.assertTrue(result["antiCheatEnabled"])
         self.assertEqual(result["violationLimit"], 5)
-        self.assertEqual(result["settings"], {
+        self.assertEqual({key: result["settings"][key] for key in (
+            "anti_cheat_enabled", "violation_limit", "sequential_navigation",
+        )}, {
             "anti_cheat_enabled": True,
             "violation_limit": 5,
             "sequential_navigation": True,
         })
+        self.assertTrue(result["settings"]["anti_cheat_measures"]["TAB_HIDDEN"]["enabled"])
+        self.assertEqual(result["settings"]["anti_cheat_measures"]["TAB_HIDDEN"]["threshold"], 5)
 
     def test_open_attempt_resumes_when_max_attempt_is_reached(self):
         exam = {

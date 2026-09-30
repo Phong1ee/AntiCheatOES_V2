@@ -9,17 +9,15 @@ from decimal import Decimal
 from src.a_db_config.config import get_db_connection
 from src.service.exam_pool_service import seeded_random, select_unique_candidates
 from src.service.scoring_service import GRADING_SCALE, normalize_score, validate_max_score
+from src.models.teacher.antiCheatPolicy import (
+    ANTI_CHEAT_MEASURES,
+    make_anti_cheat_policy_snapshot,
+    normalize_anti_cheat_measures,
+    normalize_anti_cheat_policy_snapshot,
+)
 
 
-VIOLATION_EVENT_TYPES = {
-    "TAB_HIDDEN", "WINDOW_BLUR", "FULLSCREEN_EXIT", "COPY_ATTEMPT",
-    "PASTE_ATTEMPT", "CUT_ATTEMPT", "PRINT_ATTEMPT", "BLOCKED_SHORTCUT",
-    "PAGE_REFRESH", "CAMERA_PERMISSION_DENIED", "CAMERA_TRACK_MUTED",
-    "CAMERA_TRACK_ENDED", "MIC_PERMISSION_DENIED", "MIC_TRACK_MUTED",
-    "MIC_TRACK_ENDED", "NO_FACE_DETECTED", "MULTIPLE_FACES_DETECTED",
-    "GAZE_AWAY_SUSTAINED", "HEAD_AWAY_SUSTAINED",
-    "MULTIPLE_VOICES_DETECTED",
-}
+VIOLATION_EVENT_TYPES = set(ANTI_CHEAT_MEASURES)
 
 ALLOWED_CLIENT_EVENT_TYPES = VIOLATION_EVENT_TYPES
 ALLOWED_EVENT_SOURCES = {"browser", "camera", "microphone"}
@@ -130,6 +128,7 @@ def getStudentExams(school_id: str):
         e.result_visibility,
         COALESCE(es.anti_cheat_enabled, FALSE) AS anti_cheat_enabled,
         COALESCE(es.violation_limit, 5) AS violation_limit,
+        (SELECT settings.anti_cheat_measures FROM exam_setting settings WHERE settings.exam_id = e.exam_id) AS anti_cheat_measures,
         COALESCE(es.anti_cheat_enabled, FALSE) AS requires_fullscreen
         ,MAX(CASE
             WHEN a.status = 'in_progress'
@@ -205,6 +204,9 @@ def getStudentExams(school_id: str):
             exam["remaining_attempts"] = remaining_attempts
             exam["status"] = status
             exam["requires_fullscreen"] = bool(exam.get("requires_fullscreen"))
+            exam["anti_cheat_measures"] = normalize_anti_cheat_measures(
+                exam.get("anti_cheat_measures"), exam.get("violation_limit", 5),
+            )
             exam["has_open_attempt"] = has_open_attempt
             exam["open_attempt_id"] = int(open_attempt_id) if has_open_attempt else None
             exam["can_resume"] = has_open_attempt and status != "closed"
@@ -234,7 +236,8 @@ def getAssignedExamById(school_id: str, exam_id: int):
         e.end_time,
         e.result_visibility,
         COALESCE(es.anti_cheat_enabled, FALSE) AS anti_cheat_enabled,
-        COALESCE(es.violation_limit, 5) AS violation_limit
+        COALESCE(es.violation_limit, 5) AS violation_limit,
+        (SELECT settings.anti_cheat_measures FROM exam_setting settings WHERE settings.exam_id = e.exam_id) AS anti_cheat_measures
     FROM student_exam se
     JOIN user u
         ON u.school_id = se.student_id
@@ -267,6 +270,9 @@ def getAssignedExamById(school_id: str, exam_id: int):
             return None
 
         exam["attempts_used"] = int(exam["attempts_used"] or 0)
+        exam["anti_cheat_measures"] = normalize_anti_cheat_measures(
+            exam.get("anti_cheat_measures"), exam["violation_limit"],
+        )
         return exam
     except Exception as e:
         raise e
@@ -514,7 +520,7 @@ def getOpenAttempt(exam_id: int, student_id: str):
     cursor = cnx.cursor(dictionary=True)
     query = """
     SELECT attempt_id, attempt_no, exam_id, student_id, start_time, status, last_saved_at,
-           violation_count, device_id_hash
+           violation_count, device_id_hash, anti_cheat_policy_snapshot
     FROM attempt
     WHERE exam_id = %s
       AND student_id = %s
@@ -557,9 +563,10 @@ def createAttempt(
         status,
         device_id_hash,
         session_token_hash,
-        last_heartbeat_at
+        last_heartbeat_at,
+        anti_cheat_policy_snapshot
     )
-    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress', %s, %s, NOW())
+    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress', %s, %s, NOW(), %s)
     """
     try:
         cnx.start_transaction()
@@ -638,7 +645,33 @@ def createAttempt(
         # Derive the number under the assignment lock instead of trusting a
         # preflight count taken by a concurrent request.
         attempt_no = attempts_used + 1
-        cursor.execute(insert_attempt, (exam_id, student_id, attempt_no, _sha256(device_id), _sha256(session_token)))
+        cursor.execute(
+            """
+            SELECT anti_cheat_enabled, violation_limit, anti_cheat_measures
+            FROM exam_setting WHERE exam_id = %s FOR UPDATE
+            """,
+            (exam_id,),
+        )
+        policy_setting = cursor.fetchone() or (False, 5, None)
+        # Older test doubles and rolling deployments may not return the new
+        # JSON column yet; treat the missing value as the default policy.
+        if isinstance(policy_setting, dict):
+            policy_snapshot = make_anti_cheat_policy_snapshot(
+                policy_setting.get("anti_cheat_enabled", False),
+                policy_setting.get("violation_limit", 5),
+                policy_setting.get("anti_cheat_measures"),
+            )
+        else:
+            policy_snapshot = make_anti_cheat_policy_snapshot(
+                policy_setting[0], policy_setting[1], policy_setting[2] if len(policy_setting) > 2 else None,
+            )
+        cursor.execute(
+            insert_attempt,
+            (
+                exam_id, student_id, attempt_no, _sha256(device_id), _sha256(session_token),
+                json.dumps(policy_snapshot),
+            ),
+        )
         attempt_id = cursor.lastrowid
         mode = str(exam_row[5] or "manual")
         cursor.execute(
@@ -830,7 +863,7 @@ def getAttemptById(attempt_id: int):
     query = """
     SELECT attempt_id, exam_id, student_id, attempt_no, score, start_time, end_time,
            submitted_at, status, last_saved_at, violation_count, last_violation_at,
-           device_id_hash, session_token_hash, last_heartbeat_at
+           device_id_hash, session_token_hash, last_heartbeat_at, anti_cheat_policy_snapshot
     FROM attempt
     WHERE attempt_id = %s
     """
@@ -849,22 +882,54 @@ def getExamSettings(exam_id: int):
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
-        cursor.execute(
-            """
-            SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit
-            FROM exam_setting WHERE exam_id = %s
-            """,
-            (exam_id,),
-        )
-        return cursor.fetchone() or {
+        try:
+            cursor.execute(
+                """
+                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit, anti_cheat_measures
+                FROM exam_setting WHERE exam_id = %s
+                """,
+                (exam_id,),
+            )
+        except Exception as exc:
+            # Keep Student reads safe during a rolling release until its migration runs.
+            if "anti_cheat_measures" not in str(exc):
+                raise
+            cursor.execute(
+                """
+                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit
+                FROM exam_setting WHERE exam_id = %s
+                """,
+                (exam_id,),
+            )
+        setting = cursor.fetchone() or {
             "auto_submit_on_expire": True,
             "sequential_navigation": False,
             "anti_cheat_enabled": False,
             "violation_limit": 5,
         }
+        setting["anti_cheat_measures"] = normalize_anti_cheat_measures(
+            setting.get("anti_cheat_measures"), setting["violation_limit"],
+        )
+        return setting
     finally:
         cursor.close()
         cnx.close()
+
+
+def getAttemptAntiCheatPolicy(attempt: dict, exam_id: int | None = None) -> dict:
+    """Return the policy frozen at Start, with a safe legacy fallback."""
+    snapshot = normalize_anti_cheat_policy_snapshot(attempt.get("anti_cheat_policy_snapshot"))
+    if snapshot is not None:
+        return snapshot
+    target_exam_id = attempt.get("exam_id") or exam_id
+    if target_exam_id is None:
+        raise Exception("Attempt exam ID is missing")
+    settings = getExamSettings(int(target_exam_id))
+    return make_anti_cheat_policy_snapshot(
+        settings.get("anti_cheat_enabled", False),
+        settings.get("violation_limit", 5),
+        settings.get("anti_cheat_measures"),
+    )
 
 
 def _decode_snapshot_options(value):
@@ -1352,7 +1417,7 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, attempt_no, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash
+                   score, violation_count, device_id_hash, anti_cheat_policy_snapshot
             FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s FOR UPDATE
             """,
             (attempt_id, exam_id, student_id),
@@ -1417,7 +1482,8 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash, session_token_hash
+                   score, violation_count, device_id_hash, session_token_hash,
+                   anti_cheat_policy_snapshot
             FROM attempt
             WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
             FOR UPDATE
@@ -1432,13 +1498,24 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         if session_token and (not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token))):
             raise Exception("Attempt session is invalid")
 
-        cursor.execute(
-            "SELECT anti_cheat_enabled, violation_limit FROM exam_setting WHERE exam_id = %s",
-            (exam_id,),
-        )
-        setting = cursor.fetchone() or {"anti_cheat_enabled": False, "violation_limit": 5}
-        enabled = bool(setting["anti_cheat_enabled"])
-        limit = int(setting["violation_limit"] or 5)
+        policy = normalize_anti_cheat_policy_snapshot(attempt.get("anti_cheat_policy_snapshot"))
+        if policy is None:
+            # Legacy attempts created before the snapshot migration cannot have
+            # their historical policy reconstructed. Active Exam Manager writes
+            # are locked, so this fallback remains stable for their lifetime.
+            cursor.execute(
+                "SELECT anti_cheat_enabled, violation_limit, anti_cheat_measures FROM exam_setting WHERE exam_id = %s",
+                (exam_id,),
+            )
+            setting = cursor.fetchone() or {"anti_cheat_enabled": False, "violation_limit": 5}
+            policy = make_anti_cheat_policy_snapshot(
+                setting.get("anti_cheat_enabled", False),
+                setting.get("violation_limit", 5),
+                setting.get("anti_cheat_measures"),
+            )
+        enabled = bool(policy["anti_cheat_enabled"])
+        limit = int(policy["violation_limit"])
+        measures = policy["anti_cheat_measures"]
         client_event_id = event["clientEventId"]
 
         cursor.execute(
@@ -1455,9 +1532,10 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             return _event_response(attempt, enabled, limit, event_accepted=False, duplicate=False)
 
         event_type = event["eventType"]
+        measure = measures[event_type]
         # Event source is derived from the approved event type, never trusted from the client.
         event_source = EVENT_SOURCE_BY_TYPE[event_type]
-        is_violation = enabled and event_type in VIOLATION_EVENT_TYPES
+        is_violation = enabled and bool(measure["enabled"])
         # Disabled exams retain a non-violation diagnostic event for auditing.
         cursor.execute(
             """
@@ -1482,7 +1560,18 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             )
             attempt["violation_count"] = int(attempt["violation_count"] or 0) + 1
 
-        if is_violation and attempt["violation_count"] >= limit:
+        measure_count = 0
+        if is_violation:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count FROM exam_event
+                WHERE attempt_id = %s AND event_type = %s AND is_violation = 1
+                """,
+                (attempt["attempt_id"], event_type),
+            )
+            measure_count = int((cursor.fetchone() or {"count": 0})["count"] or 0)
+
+        if is_violation and measure_count >= int(measure["threshold"]):
             questions = _load_attempt_questions(cursor, attempt["attempt_id"], exam_id)
             for answer in event.get("answers", []):
                 question = questions.get(int(answer["questionId"]))
@@ -1536,7 +1625,10 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             )
 
         cnx.commit()
-        return _event_response(attempt, enabled, limit, event_accepted=True, duplicate=False)
+        return _event_response(
+            attempt, enabled, limit, event_accepted=True, duplicate=False,
+            measure_threshold=int(measure["threshold"]), measure_count=measure_count,
+        )
     except Exception:
         cnx.rollback()
         raise
@@ -1545,7 +1637,10 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         cnx.close()
 
 
-def _event_response(attempt: dict, enabled: bool, limit: int, event_accepted: bool, duplicate: bool) -> dict:
+def _event_response(
+    attempt: dict, enabled: bool, limit: int, event_accepted: bool, duplicate: bool,
+    measure_threshold: int | None = None, measure_count: int | None = None,
+) -> dict:
     count = int(attempt.get("violation_count") or 0)
     terminated = attempt.get("status") == "terminated"
     return {
@@ -1554,8 +1649,11 @@ def _event_response(attempt: dict, enabled: bool, limit: int, event_accepted: bo
         "duplicate": duplicate,
         "antiCheatEnabled": enabled,
         "violationCount": count,
-        "violationLimit": limit,
-        "remainingViolations": max(limit - count, 0) if enabled else None,
+        # Retained for old clients. New clients use the per-measure values below.
+        "violationLimit": measure_threshold or limit,
+        "remainingViolations": max((measure_threshold or limit) - (measure_count if measure_count is not None else count), 0) if enabled else None,
+        "measureThreshold": measure_threshold,
+        "measureViolationCount": measure_count,
         "terminated": terminated,
         "attemptStatus": attempt.get("status"),
         "score": attempt.get("score"),

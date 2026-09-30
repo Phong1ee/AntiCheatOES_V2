@@ -7,6 +7,8 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from src.models.teacher import examModel
+from src.models.teacher.antiCheatPolicy import default_anti_cheat_measures
+from src.models.teacher.requestModel.ExamSettingsRequest import ExamSettingsRequest
 from src.route.studentRoute.examRoute import AntiCheatEventRequest
 
 
@@ -16,7 +18,11 @@ class _EventCursor:
             "attempt_id": 10, "exam_id": 5, "student_id": "S1", "status": "in_progress",
             "submitted_at": None, "end_time": None, "score": None, "violation_count": 0,
         }
-        self.setting = {"anti_cheat_enabled": enabled, "violation_limit": limit}
+        self.setting = {
+            "anti_cheat_enabled": enabled,
+            "violation_limit": limit,
+            "anti_cheat_measures": default_anti_cheat_measures(limit),
+        }
         self.events = set()
         self.event_rows = []
         self.outbox_events = []
@@ -49,6 +55,13 @@ class _EventCursor:
             self.outbox_events.append(params)
         elif sql.startswith("UPDATE attempt SET violation_count"):
             self.attempt["violation_count"] += 1
+        elif sql.startswith("SELECT COUNT(*) AS count FROM exam_event"):
+            self.fetchone_value = {
+                "count": sum(
+                    1 for row in self.event_rows
+                    if row["event_type"] == params[1] and row["is_violation"]
+                ),
+            }
         elif "FROM attempt_question aq" in sql:
             self.fetchall_value = []
         elif sql.startswith("UPDATE essay_answers SET score = 0"):
@@ -135,7 +148,7 @@ class AntiCheatEventTests(unittest.TestCase):
         self.assertNotIn("details", payload)
         self.assertNotIn("metadata", payload)
 
-    def test_camera_ai_events_increment_the_shared_counter(self):
+    def test_only_teacher_visible_camera_rules_increment_the_counter(self):
         cursor = _EventCursor(limit=5)
         results = [
             self._record(cursor, event(event_type, f"camera-{index}", source="camera"))
@@ -144,7 +157,7 @@ class AntiCheatEventTests(unittest.TestCase):
                 "GAZE_AWAY_SUSTAINED", "HEAD_AWAY_SUSTAINED",
             ), start=1)
         ]
-        self.assertEqual([result["violationCount"] for result in results], [1, 2, 3, 4])
+        self.assertEqual([result["violationCount"] for result in results], [1, 2, 2, 2])
         self.assertEqual([row["source"] for row in cursor.event_rows], ["camera"] * 4)
 
     def test_metadata_is_persisted_and_source_is_server_mapped(self):
@@ -173,6 +186,35 @@ class AntiCheatEventTests(unittest.TestCase):
         cursor = _EventCursor(enabled=False)
         result = self._record(cursor, event("MULTIPLE_VOICES_DETECTED", "overlap-disabled", source="microphone"))
         self.assertEqual(result["violationCount"], 0)
+
+    def test_disabled_measure_records_diagnostic_without_counting(self):
+        cursor = _EventCursor()
+        cursor.setting["anti_cheat_measures"]["COPY_ATTEMPT"]["enabled"] = False
+        result = self._record(cursor, event("COPY_ATTEMPT", "copy-disabled"))
+        self.assertTrue(result["eventAccepted"])
+        self.assertEqual(result["violationCount"], 0)
+        self.assertFalse(cursor.event_rows[0]["is_violation"])
+
+    def test_threshold_is_enforced_per_measure_not_by_total_count(self):
+        cursor = _EventCursor(limit=3)
+        cursor.setting["anti_cheat_measures"]["TAB_HIDDEN"]["threshold"] = 2
+        cursor.setting["anti_cheat_measures"]["COPY_ATTEMPT"]["threshold"] = 1
+        first = self._record(cursor, event("TAB_HIDDEN", "tab-1"))
+        self.assertFalse(first["terminated"])
+        self.assertEqual((first["measureViolationCount"], first["measureThreshold"]), (1, 2))
+        second = self._record(cursor, event("TAB_HIDDEN", "tab-2"))
+        self.assertTrue(second["terminated"])
+        self.assertEqual(second["violationCount"], 2)
+
+    def test_exam_settings_requires_a_complete_per_measure_policy(self):
+        measures = default_anti_cheat_measures(3)
+        measures["FULLSCREEN_EXIT"]["enabled"] = False
+        measures["TAB_HIDDEN"]["threshold"] = 2
+        request = ExamSettingsRequest(anti_cheat_enabled=True, anti_cheat_measures=measures)
+        self.assertFalse(request.anti_cheat_measures["FULLSCREEN_EXIT"].enabled)
+        self.assertEqual(request.anti_cheat_measures["TAB_HIDDEN"].threshold, 2)
+        with self.assertRaises(ValidationError):
+            ExamSettingsRequest(anti_cheat_measures={"TAB_HIDDEN": {"enabled": True, "threshold": 2}})
 
     def test_limit_terminates_once_with_zero_score(self):
         cursor = _EventCursor(limit=1)

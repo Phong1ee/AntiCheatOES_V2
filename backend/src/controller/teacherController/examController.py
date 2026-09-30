@@ -2,6 +2,7 @@ import src.models.teacher.examModel as examModel
 import src.models.userModel as userModel
 from datetime import timedelta
 from src.service.cache_service import cache_aside, student_exam_list_key
+from src.models.teacher.antiCheatPolicy import normalize_anti_cheat_measures
 
 
 class ExamController:
@@ -81,9 +82,10 @@ class ExamController:
 
     @staticmethod
     def _start_response(exam: dict, attempt: dict, resumed: bool, database_now=None, session_token: str | None = None) -> dict:
-        settings = examModel.getExamSettings(exam["exam_id"])
-        anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
-        violation_limit = int(settings.get("violation_limit") or 5)
+        policy = examModel.getAttemptAntiCheatPolicy(attempt, exam["exam_id"])
+        anti_cheat_enabled = bool(policy["anti_cheat_enabled"])
+        violation_limit = int(policy["violation_limit"])
+        anti_cheat_measures = policy["anti_cheat_measures"]
         return {
             "success": True,
             "exam_id": exam["exam_id"],
@@ -98,6 +100,7 @@ class ExamController:
             "antiCheatEnabled": anti_cheat_enabled,
             "violationCount": int(attempt.get("violation_count") or 0),
             "violationLimit": violation_limit,
+            "antiCheatMeasures": anti_cheat_measures,
             "sessionToken": session_token,
             **ExamController._timer_payload(exam, attempt, database_now),
         }
@@ -201,9 +204,11 @@ class ExamController:
                 "requiresFullscreen": bool(settings.get("anti_cheat_enabled", False)),
                 "antiCheatEnabled": bool(settings.get("anti_cheat_enabled", False)),
                 "violationLimit": int(settings.get("violation_limit") or 5),
+                "antiCheatMeasures": normalize_anti_cheat_measures(settings.get("anti_cheat_measures"), int(settings.get("violation_limit") or 5)),
                 "settings": {
                     "anti_cheat_enabled": bool(settings.get("anti_cheat_enabled", False)),
                     "violation_limit": int(settings.get("violation_limit") or 5),
+                    "anti_cheat_measures": normalize_anti_cheat_measures(settings.get("anti_cheat_measures"), int(settings.get("violation_limit") or 5)),
                     "sequential_navigation": bool(settings["sequential_navigation"]),
                 },
             }
@@ -270,8 +275,10 @@ class ExamController:
             examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
 
         settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
-        anti_cheat_enabled = bool(settings.get("anti_cheat_enabled", False))
-        violation_limit = int(settings.get("violation_limit") or 5)
+        policy = examModel.getAttemptAntiCheatPolicy(attempt, exam_id)
+        settings.update(policy)
+        anti_cheat_enabled = bool(policy["anti_cheat_enabled"])
+        violation_limit = int(policy["violation_limit"])
         timer = ExamController._timer_payload(exam, attempt, examModel.get_database_now())
         if attempt["status"] == "in_progress" and timer["remainingSeconds"] <= 0:
             examModel.finalizeAttempt(attempt_id, exam_id, [])
@@ -285,6 +292,7 @@ class ExamController:
                 "antiCheatEnabled": anti_cheat_enabled,
                 "violationCount": int(attempt.get("violation_count") or 0),
                 "violationLimit": violation_limit,
+                "antiCheatMeasures": policy["anti_cheat_measures"],
                 "settings": settings,
                 "questions": [],
             }
@@ -303,6 +311,7 @@ class ExamController:
             "antiCheatEnabled": anti_cheat_enabled,
             "violationCount": int(attempt.get("violation_count") or 0),
             "violationLimit": violation_limit,
+            "antiCheatMeasures": policy["anti_cheat_measures"],
             **timer,
             "settings": settings,
             "questions": examModel.getExamQuestions(exam_id, attempt_id),
@@ -389,9 +398,10 @@ class ExamController:
         if exam.get("end_time") and now_time > exam["end_time"]:
             raise Exception("Exam has closed")
         attempt, session_token, _claimed_legacy = examModel.resumeAttempt(exam_id, attempt_id, school_id, device_id)
-        settings = examModel.getExamSettings(exam_id)
+        policy = examModel.getAttemptAntiCheatPolicy(attempt, exam_id)
+        measures = policy["anti_cheat_measures"]
         event_state = None
-        if resume_cause == "page_refresh" and settings.get("anti_cheat_enabled"):
+        if resume_cause == "page_refresh" and policy["anti_cheat_enabled"] and measures["PAGE_REFRESH"]["enabled"]:
             event_state = examModel.recordAntiCheatEvent(
                 exam_id,
                 school_id,
@@ -411,9 +421,10 @@ class ExamController:
             "success": True,
             "attemptId": attempt_id,
             "sessionToken": session_token,
-            "antiCheatEnabled": bool(settings.get("anti_cheat_enabled", False)),
+            "antiCheatEnabled": bool(policy["anti_cheat_enabled"]),
             "violationCount": event_state["violationCount"] if event_state else int(attempt.get("violation_count") or 0),
-            "violationLimit": int(settings.get("violation_limit") or 5),
+            "violationLimit": int(policy["violation_limit"]),
+            "antiCheatMeasures": measures,
             "terminated": event_state["terminated"] if event_state else attempt["status"] == "terminated",
             "attemptStatus": event_state["attemptStatus"] if event_state else attempt["status"],
         }

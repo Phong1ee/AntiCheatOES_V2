@@ -31,8 +31,11 @@ export async function startSecuredAttempt<TRuntime extends PreparedSecurityRunti
   }
 }
 
-export async function preflightAntiCheatRuntime(stream: MediaStream): Promise<AntiCheatRuntime> {
-  const runtime = new AntiCheatRuntime(stream);
+export async function preflightAntiCheatRuntime(
+  stream: MediaStream,
+  requirements: { camera: boolean; microphone: boolean },
+): Promise<AntiCheatRuntime> {
+  const runtime = new AntiCheatRuntime(stream, undefined, undefined, requirements);
   try {
     await runtime.start();
     return runtime;

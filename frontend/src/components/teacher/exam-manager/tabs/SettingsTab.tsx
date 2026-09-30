@@ -15,6 +15,7 @@ import { Switch } from '../../../ui/switch';
 import { SectionSaveBar } from '../SectionSaveBar';
 import type { ResultStrategy } from '../../../../types/teacher-results';
 import type { ResultVisibility } from '../../../../types/teacher-exam';
+import { antiCheatMeasureLabels, isMonitoringGroupEnabled, monitoringGroups, normalizeAntiCheatMeasures, setMonitoringGroupEnabled, type AntiCheatMeasures } from '../../../../anti-cheat/measure-policy';
 
 interface SettingsTabProps {
   examId: string | null;
@@ -53,6 +54,12 @@ const validateSettings = (settings: TeacherExamSettingsPayload): string | null =
     && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
   ) {
     return 'Maximum Violations must be a whole number from 1 to 100 when anti-cheat is enabled.';
+  }
+  if (settings.anti_cheat_enabled) {
+    const measures = normalizeAntiCheatMeasures(settings.anti_cheat_measures, settings.violation_limit);
+    if (Object.values(measures).some((measure) => measure.enabled && (!Number.isInteger(measure.threshold) || measure.threshold < 1 || measure.threshold > 100))) {
+      return 'Each anti-cheat threshold must be a whole number from 1 to 100.';
+    }
   }
   return null;
 };
@@ -103,6 +110,7 @@ export function SettingsTab(
           grace_period: data.grace_period,
           anti_cheat_enabled: data.anti_cheat_enabled ?? false,
           violation_limit: data.violation_limit ?? 5,
+          anti_cheat_measures: normalizeAntiCheatMeasures(data.anti_cheat_measures, data.violation_limit ?? 5),
           auto_grade: data.auto_grade,
           result_strategy: data.result_strategy,
         };
@@ -142,6 +150,22 @@ export function SettingsTab(
     setSettings((current) => ({ ...current, violation_limit }));
   };
 
+  const updateMeasure = (eventType: string, patch: Partial<AntiCheatMeasures[string]>) => {
+    setSettings((current) => {
+      const measures = normalizeAntiCheatMeasures(current.anti_cheat_measures, current.violation_limit);
+      return { ...current, anti_cheat_measures: { ...measures, [eventType]: { ...measures[eventType], ...patch } } };
+    });
+  };
+
+  const setMonitoringGroup = (groupId: 'browser' | 'camera' | 'microphone', enabled: boolean) => {
+    setSettings((current) => ({
+      ...current,
+      anti_cheat_measures: setMonitoringGroupEnabled(
+        normalizeAntiCheatMeasures(current.anti_cheat_measures, current.violation_limit), groupId, enabled,
+      ),
+    }));
+  };
+
   const saveSettings = async () => {
     if (!persistedExamId) {
       setError('Create the exam before saving settings.');
@@ -170,6 +194,7 @@ export function SettingsTab(
         grace_period: saved.grace_period,
         anti_cheat_enabled: saved.anti_cheat_enabled,
         violation_limit: saved.violation_limit,
+        anti_cheat_measures: normalizeAntiCheatMeasures(saved.anti_cheat_measures, saved.violation_limit),
         auto_grade: saved.auto_grade,
         result_strategy: saved.result_strategy,
       };
@@ -255,7 +280,7 @@ export function SettingsTab(
       <Card className="rounded-2xl border-0 border-l-4 border-l-red-500 shadow-md">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Shield className="size-5 text-red-600" /> Anti-Cheating Measures</CardTitle>
-          <CardDescription>Set one shared limit for every recorded anti-cheat violation.</CardDescription>
+          <CardDescription>Enable each measure separately and set the count that ends the current attempt.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex items-center justify-between"><Label htmlFor="anti-cheat">Enable Anti-Cheat</Label><Switch id="anti-cheat" checked={settings.anti_cheat_enabled} onCheckedChange={(value) => setBoolean('anti_cheat_enabled', value)} /></div>
@@ -273,13 +298,45 @@ export function SettingsTab(
                   onChange={(event) => updateViolationLimit(event.target.value)}
                   className="max-w-xs"
                 />
-                <p className="text-xs text-gray-500">All recorded anti-cheat violations count toward this shared limit.</p>
+                <p className="text-xs text-gray-500">Default threshold for measures that have not been customized yet.</p>
+              </div>
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-slate-800">Per-measure rules shown to students before they start</p>
+                {monitoringGroups.map((group) => {
+                  const measures = normalizeAntiCheatMeasures(settings.anti_cheat_measures, settings.violation_limit);
+                  const enabled = isMonitoringGroupEnabled(measures, group.id);
+                  return <div key={group.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-4"><div><p className="font-medium text-slate-900">{group.label}</p><p className="text-xs text-slate-500">{group.description}</p></div><Switch checked={enabled} onCheckedChange={(value) => setMonitoringGroup(group.id, value)} aria-label={`Enable ${group.label}`} /></div>
+                    {enabled && <div className="mt-4 space-y-2 border-t border-slate-100 pt-3">
+                      {group.eventTypes.map((eventType) => {
+                        const measure = measures[eventType];
+                        const measureEnabled = measure.enabled;
+                        const label = antiCheatMeasureLabels[eventType].label;
+                        return <div key={eventType} className="rounded-lg bg-slate-50 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <Label htmlFor={`enable-measure-${eventType}`} className="text-sm font-medium text-slate-800">{label}</Label>
+                            <Switch
+                              id={`enable-measure-${eventType}`}
+                              checked={measureEnabled}
+                              onCheckedChange={(value) => updateMeasure(eventType, { enabled: value })}
+                              aria-label={`Enable ${label}`}
+                            />
+                          </div>
+                          {measureEnabled && <div className="mt-3 grid grid-cols-[1fr_7rem] items-center gap-3 border-t border-slate-200 pt-3">
+                            <Label htmlFor={`measure-${eventType}`} className="text-xs text-slate-600">Terminate this attempt after</Label>
+                            <Input id={`measure-${eventType}`} type="number" min="1" max="100" step="1" value={measure.threshold} onChange={(event) => updateMeasure(eventType, { threshold: Number(event.target.value) })} aria-label={`${label} threshold`} />
+                          </div>}
+                        </div>;
+                      })}
+                    </div>}
+                  </div>;
+                })}
               </div>
             </div>
           )}
           <div className="space-y-1 rounded-lg bg-red-50 p-3 text-sm text-red-900">
-            <p>Anti-cheat requires camera, microphone, and fullscreen before an attempt starts.</p>
-            <p>Reaching the limit automatically ends the current attempt with a score of 0.</p>
+            <p>Enabled browser, camera, and microphone measures are shown to the student before the attempt starts.</p>
+            <p>Reaching an enabled measure's threshold automatically ends the current attempt with a score of 0.</p>
             <p>Other attempts remain available when the exam still has attempts left.</p>
           </div>
         </CardContent>

@@ -1,5 +1,6 @@
 import { apiClient } from "./api-client";
 import { attemptSessionStorage } from "./attempt-session.storage";
+import { normalizeAntiCheatMeasures, type AntiCheatMeasures } from '../anti-cheat/measure-policy';
 import type { AutoSaveResult, StudentAnswer, StudentAnswers, StudentExamAttempt, StudentExamSettings, StudentQuestion } from "../types/student-exam";
 
 interface RawQuestion {
@@ -30,11 +31,15 @@ interface RawExam {
   description?: string | null;
   anti_cheat_enabled?: boolean;
   violation_limit?: number;
+  anti_cheat_measures?: AntiCheatMeasures;
 }
 
 interface RawVerifyCodeResult {
   examId?: number;
   exam_id?: number;
+  antiCheatEnabled?: boolean;
+  violationLimit?: number;
+  antiCheatMeasures?: AntiCheatMeasures;
   settings?: Record<string, unknown>;
 }
 
@@ -63,6 +68,7 @@ export interface StudentExamListItem {
   canResume: boolean;
   antiCheatEnabled: boolean;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
   requiresExamCode: boolean;
   releasedExamCode: string | null;
 }
@@ -76,6 +82,7 @@ export interface VerifyCodeResult {
   examId: number;
   antiCheatEnabled: boolean;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
   settings: StudentExamSettings;
 }
 
@@ -88,6 +95,7 @@ export interface StartExamResult extends StudentExamAttempt {
   remainingSeconds: number;
   antiCheatEnabled: boolean;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
 }
 
 export interface SubmitExamResult {
@@ -106,6 +114,8 @@ export interface AntiCheatEventResult {
   antiCheatEnabled: boolean;
   violationCount: number;
   violationLimit: number;
+  measureThreshold?: number | null;
+  measureViolationCount?: number | null;
   remainingViolations: number | null;
   terminated: boolean;
   attemptStatus: string;
@@ -121,6 +131,7 @@ export interface ResumeAttemptResult {
   terminated: boolean;
   violationCount: number;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
 }
 
 export interface RestoreAttemptResult {
@@ -134,6 +145,7 @@ export interface RestoreAttemptResult {
   antiCheatEnabled: boolean;
   violationCount: number;
   violationLimit: number;
+  antiCheatMeasures: AntiCheatMeasures;
 }
 
 const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
@@ -152,6 +164,7 @@ const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSetti
   sequentialNavigation: Boolean(settings?.sequential_navigation ?? settings?.sequentialNavigation ?? false),
   antiCheatEnabled: Boolean(settings?.anti_cheat_enabled ?? settings?.antiCheatEnabled ?? false),
   violationLimit: Number(settings?.violation_limit ?? settings?.violationLimit ?? 5),
+  antiCheatMeasures: normalizeAntiCheatMeasures(settings?.anti_cheat_measures ?? settings?.antiCheatMeasures, Number(settings?.violation_limit ?? settings?.violationLimit ?? 5)),
 });
 
 const normalizeExam = (exam: RawExam): StudentExamListItem => ({
@@ -159,7 +172,7 @@ const normalizeExam = (exam: RawExam): StudentExamListItem => ({
   startTime: exam.start_time, endTime: exam.end_time, durationMinutes: exam.duration_minutes,
   status: exam.status, maxAttempts: exam.max_attempt, attemptsUsed: exam.attempts_used,
   hasOpenAttempt: Boolean(exam.has_open_attempt), openAttemptId: exam.open_attempt_id ?? null,
-  canResume: Boolean(exam.can_resume), antiCheatEnabled: Boolean(exam.anti_cheat_enabled), violationLimit: Number(exam.violation_limit ?? 5),
+  canResume: Boolean(exam.can_resume), antiCheatEnabled: Boolean(exam.anti_cheat_enabled), violationLimit: Number(exam.violation_limit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(exam.anti_cheat_measures, Number(exam.violation_limit ?? 5)),
   requiresExamCode: Boolean(exam.requires_exam_code),
   releasedExamCode: exam.released_examcode?.trim() || null,
 });
@@ -189,7 +202,7 @@ export const studentExamService = {
     const { data } = await apiClient.post<RawVerifyCodeResult>(`/api/exams/${examId}/verify-code`, { code });
     return {
       examId: Number(data.examId ?? data.exam_id ?? examId),
-      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5),
+      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures ?? data.settings?.anti_cheat_measures, Number(data.violationLimit ?? 5)),
       settings: normalizeSettings(data.settings),
     };
   },
@@ -204,7 +217,7 @@ export const studentExamService = {
       attemptNo: Number(data.attemptNo ?? data.attempt_no), durationMinutes: Number(data.duration_minutes),
       resumed: Boolean(data.resumed), status: String(data.status ?? "in_progress"),
       serverTime: String(data.serverTime), expiresAt: String(data.expiresAt), remainingSeconds: Number(data.remainingSeconds),
-      violationCount: Number(data.violationCount ?? 0), antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5),
+      violationCount: Number(data.violationCount ?? 0), antiCheatEnabled: Boolean(data.antiCheatEnabled), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures, Number(data.violationLimit ?? 5)),
     };
     const sessionToken = String(data.sessionToken ?? "");
     if (!sessionToken) throw new Error("Server did not create an attempt session.");
@@ -219,7 +232,7 @@ export const studentExamService = {
       attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0) },
       questions: (data.questions ?? []).map(normalizeQuestion), serverTime: data.serverTime,
       expiresAt: data.expiresAt, remainingSeconds: Number(data.remainingSeconds), settings: normalizeSettings(data.settings),
-      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5),
+      antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures ?? data.settings?.anti_cheat_measures, Number(data.violationLimit ?? 5)),
     };
   },
 
@@ -258,6 +271,7 @@ export const studentExamService = {
     const antiCheatEnabled = Boolean(data.antiCheatEnabled);
     const violationCount = Number(data.violationCount ?? 0);
     const violationLimit = Number(data.violationLimit ?? 5);
+    const antiCheatMeasures = normalizeAntiCheatMeasures(data.antiCheatMeasures, violationLimit);
     return {
       antiCheatEnabled,
       attemptId: Number(data.attemptId ?? attemptId),
@@ -268,6 +282,7 @@ export const studentExamService = {
       terminated: Boolean(data.terminated),
       violationCount,
       violationLimit,
+      antiCheatMeasures,
     };
   },
 

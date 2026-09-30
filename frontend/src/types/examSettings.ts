@@ -1,3 +1,6 @@
+import type { ResultStrategy } from './teacher-results';
+import type { AntiCheatMeasures } from '../anti-cheat/measure-policy';
+
 export interface ExamSettings {
   // Randomization
   shuffleQuestions: boolean;
@@ -44,6 +47,7 @@ export interface TeacherExamSettingsPayload {
   grace_period: number;
   anti_cheat_enabled: boolean;
   violation_limit: number;
+  anti_cheat_measures?: AntiCheatMeasures;
   auto_grade: boolean;
   result_strategy: ResultStrategy;
   result_visibility?: 'hidden' | 'score-only' | 'full';
@@ -63,7 +67,7 @@ export const defaultTeacherExamSettings: TeacherExamSettingsPayload = {
   grace_period: 0,
   anti_cheat_enabled: false,
   violation_limit: 5,
+  anti_cheat_measures: undefined,
   auto_grade: true,
   result_strategy: 'highest',
 };
-import type { ResultStrategy } from './teacher-results';

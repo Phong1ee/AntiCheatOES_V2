@@ -591,6 +591,8 @@ class ExamSetting(Base):
     violation_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=5, server_default=text("5")
     )
+    # JSON permits a focused per-exam policy without a duplicate anti-cheat table.
+    anti_cheat_measures: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     auto_grade: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")
     )
@@ -760,6 +762,8 @@ class Attempt(Base):
     session_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     submit_request_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    # The policy accepted before Start; later ExamSetting edits never rewrite it.
+    anti_cheat_policy_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class OutboxEvent(Base):

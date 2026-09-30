@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from fastapi.params import Query
 from sqlalchemy.orm import Session
 
-from src.a_db_config import Exam
+from src.a_db_config import Attempt, AttemptStatus, Exam
 from src.service.teacher_subject_service import require_active_subject_assignment
 
 
@@ -22,6 +22,24 @@ def claim_exam_version(
     # This query is intentionally uncached: mutation authorization is always
     # decided from the current MySQL teacher_subject state.
     require_active_subject_assignment(db, teacher_school_id, exam.subject_id)
+
+    # An active attempt must see the exact exam configuration it accepted at
+    # Start. Reject all Exam Manager writes before advancing the version.
+    active_attempt = (
+        db.query(Attempt.attempt_id)
+        .filter(
+            Attempt.exam_id == exam_id,
+            Attempt.status == AttemptStatus.in_progress,
+            Attempt.submitted_at.is_(None),
+            Attempt.end_time.is_(None),
+        )
+        .first()
+    )
+    if active_attempt:
+        raise HTTPException(
+            status_code=409,
+            detail="This exam is locked while a student has an attempt in progress.",
+        )
 
     # Direct unit calls receive FastAPI's Query default object rather than None.
     expected = expected_version if isinstance(expected_version, int) else exam.version

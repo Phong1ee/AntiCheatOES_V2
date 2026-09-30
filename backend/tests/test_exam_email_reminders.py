@@ -98,7 +98,7 @@ class ExamEmailReminderTests(unittest.TestCase):
         self.db.commit()
         _, _, body = send.call_args.args
         self.assertNotIn("SECRET-CODE", body)
-        self.assertIn("https://frontend.test/student/exams/", body)
+        self.assertIn("Open exam portal: https://frontend.test", body)
         saved = self.db.get(ExamEmailDelivery, delivery.delivery_id)
         self.assertEqual(saved.status, EmailDeliveryStatus.sent)
         self.assertIsNotNone(saved.sent_at)

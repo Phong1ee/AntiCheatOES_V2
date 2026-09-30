@@ -72,7 +72,7 @@ def handle_notification_requested(envelope: dict, db) -> None:
         intro,
         f"Exam: {exam.title}",
         f"Start time (Asia/Ho_Chi_Minh): {start_text}",
-        f"Open exam: {base_url}/student/exams/{exam.exam_id}",
+        f"Open exam portal: {base_url}",
         "",
         "Please sign in with your student account to access the exam.",
     ])

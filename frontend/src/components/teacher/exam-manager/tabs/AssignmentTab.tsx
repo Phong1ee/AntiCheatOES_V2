@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Search, Users } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { teacherExamService } from '../../../../services/teacher-exam.service';
 import { SectionSaveBar } from '../SectionSaveBar';
@@ -120,27 +121,16 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
     if (!examId) return;
     try {
       setSaving(true);
-      setSaving(true);
-      try {
-        setSaveError(null);
-        const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds], expectedVersion);
-        if (result && typeof result.added_count === 'number') {
-          toast.success(
-            `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
-          );
-        } else {
-          // older API responses may not return details
-          toast.success('Assignments saved.');
-        }
-      } catch (error) {
-        setSaveError(error instanceof Error ? error.message : 'Unable to save assignments.');
-      } finally {
-        setSaving(false);
+      setSaveError(null);
+      const result = await teacherExamService.saveAssignments(Number(examId), [...selectedIds], expectedVersion);
+      if (typeof result.added_count === 'number') {
+        toast.success(
+          `Assignments saved: ${result.added_count} added, ${result.removed_count} removed, ${result.final_count} total.`,
+        );
+      } else {
+        // Older API responses may not return details.
+        toast.success('Assignments saved.');
       }
-
-      setConfirmRemoval(false);
-      await onSaved();
-      await load();
       setConfirmRemoval(false);
       await onSaved();
       await load();

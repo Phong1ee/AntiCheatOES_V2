@@ -20,6 +20,7 @@ def consume(
     *,
     prefetch: int = 10,
     retry_limit: int = 3,
+    on_retry: Callable[[dict, Exception, object], None] | None = None,
     on_retry_exhausted: Callable[[dict, Exception, object], None] | None = None,
 ) -> None:
     """ACK only after handler returns; poison messages enter the queue DLQ."""
@@ -110,6 +111,15 @@ def consume(
                         failure_db.close()
                 ch.basic_reject(method.delivery_tag, requeue=False)
             else:
+                if on_retry is not None:
+                    retry_db = SessionLocal()
+                    try:
+                        on_retry(payload, processing_error, retry_db)
+                        retry_db.commit()
+                    except Exception:
+                        retry_db.rollback()
+                    finally:
+                        retry_db.close()
                 headers = dict(properties.headers or {})
                 headers["x-retry-count"] = retries + 1
                 ch.basic_publish(

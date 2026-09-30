@@ -41,6 +41,7 @@ from src.service.exam_notification_service import (
     notify_exam_changes,
     snapshot_exam_notification_fields,
 )
+from src.service.exam_email_reminder_service import queue_existing_assignment_emails_on_publish
 
 router = APIRouter()
 
@@ -310,6 +311,8 @@ def update_exam_in_database(
         exam.total_points = 100
         exam.passing_score = request.passing_score
         notify_exam_changes(db, exam, previous)
+        if request.status == "published" and previous_status != "published":
+            queue_existing_assignment_emails_on_publish(db, exam)
         record_audit(
             db,
             actor_school_id=current_user["school_id"],
@@ -406,6 +409,8 @@ def update_exam_status(
             _validate_publishable(db, exam)
         exam.status = request.status
         notify_exam_changes(db, exam, previous)
+        if request.status == "published" and previous.status != "published":
+            queue_existing_assignment_emails_on_publish(db, exam)
         record_audit(
             db,
             actor_school_id=current_user["school_id"],

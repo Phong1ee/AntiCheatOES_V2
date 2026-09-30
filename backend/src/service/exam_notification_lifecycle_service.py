@@ -14,6 +14,7 @@ from src.a_db_config import (
     StudentExam,
 )
 from src.service.notification_service import create_notifications
+from src.service.exam_email_reminder_service import queue_due_exam_reminders
 from src.service.time_service import vietnam_now
 
 
@@ -142,6 +143,7 @@ def process_due_exam_notifications(
             emitted += _record_event_and_notify(
                 db, exam, NotificationType.EXAM_OPENED, exam.start_time
             )
+    emitted += queue_due_exam_reminders(db, now=current_time, batch_size=batch_size)
     return emitted
 
 

@@ -62,6 +62,30 @@ class NotificationType(str, enum.Enum):
     EXAM_CLOSED = "EXAM_CLOSED"
     EXAM_CODE_CHANGED = "EXAM_CODE_CHANGED"
 
+
+class ExamEmailDeliveryType(str, enum.Enum):
+    exam_assigned = "EXAM_ASSIGNED"
+    reminder_30m = "REMINDER_30M"
+
+
+class EmailDeliveryStatus(str, enum.Enum):
+    queued = "QUEUED"
+    sent = "SENT"
+    failed = "FAILED"
+
+
+exam_email_delivery_type_enum = Enum(
+    ExamEmailDeliveryType,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="exemaildeliverytype",
+)
+
+email_delivery_status_enum = Enum(
+    EmailDeliveryStatus,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="emaildeliverystatus",
+)
+
 class AttemptStatus(str, enum.Enum):
     in_progress = "in_progress"
     submitted = "submitted"
@@ -710,6 +734,48 @@ class ExamNotificationLifecycle(Base):
     )
 
     exam: Mapped["Exam"] = relationship(back_populates="lifecycle_notification_events")
+
+
+class ExamEmailDelivery(Base):
+    """One durable, idempotent email request for a student and exam schedule."""
+
+    __tablename__ = "exam_email_delivery"
+    __table_args__ = (
+        UniqueConstraint("delivery_key", name="uq_exam_email_delivery_key"),
+        Index("ix_exam_email_delivery_due", "status", "scheduled_for"),
+        Index("ix_exam_email_delivery_exam_student", "exam_id", "student_id"),
+    )
+
+    delivery_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("exam.exam_id", ondelete="CASCADE"), nullable=False
+    )
+    student_id: Mapped[str] = mapped_column(
+        String(30), ForeignKey("user.school_id", ondelete="CASCADE"), nullable=False
+    )
+    delivery_type: Mapped[ExamEmailDeliveryType] = mapped_column(
+        exam_email_delivery_type_enum, nullable=False
+    )
+    # The reminder must match this exact schedule version before it can send.
+    exam_start_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    delivery_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[EmailDeliveryStatus] = mapped_column(
+        email_delivery_status_enum,
+        nullable=False,
+        default=EmailDeliveryStatus.queued,
+        server_default=text("'QUEUED'"),
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    skipped_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    exam: Mapped["Exam"] = relationship()
+    student: Mapped["User"] = relationship(foreign_keys=[student_id])
 
 
 class Attempt(Base):

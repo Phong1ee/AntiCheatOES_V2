@@ -22,6 +22,7 @@ import smtplib
 import base64
 from contextlib import closing
 from email.message import EmailMessage
+from email.utils import formataddr
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -181,7 +182,7 @@ def _gmail_access_token() -> str:
 def _send_via_gmail(to_address: str, subject: str, body: str) -> None:
     """Send through Gmail API over HTTPS, avoiding provider SMTP restrictions."""
     message = EmailMessage()
-    message["From"] = _env("GOOGLE_GMAIL_SENDER")
+    message["From"] = formataddr(("AntiCheat OES", _env("GOOGLE_GMAIL_SENDER")))
     message["To"] = to_address
     message["Subject"] = subject
     message.set_content(body)

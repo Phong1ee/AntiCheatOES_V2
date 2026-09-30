@@ -30,6 +30,7 @@ from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_assignment_changed
 from src.service.cache_service import invalidate_student_exam_lists
 from src.service.exam_notification_service import notify_new_exam_assignments
+from src.service.exam_email_reminder_service import queue_new_assignment_emails
 from src.service.time_service import vietnam_now
 
 router = APIRouter()
@@ -380,6 +381,7 @@ def sync_assignments(
             for student_id in sorted(added_ids)
         )
         notify_new_exam_assignments(db, exam, added_ids)
+        queue_new_assignment_emails(db, exam, added_ids)
         record_audit(
             db,
             actor_school_id=teacher_school_id,

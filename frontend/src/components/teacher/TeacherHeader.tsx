@@ -31,7 +31,7 @@ const navigation = [
   { id: 'exams', label: 'Exams', icon: ClipboardList },
   { id: 'questions', label: 'Question Bank', icon: BookOpen },
   { id: 'results', label: 'Results', icon: BarChart2 },
-  { id: 'anticheat', label: 'Anti-Cheat', icon: Shield },
+  { id: 'anticheat', label: 'Exam Monitoring', icon: Shield },
 ];
 
 function getStoredTeacherName(): string {

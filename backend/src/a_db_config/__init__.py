@@ -827,6 +827,11 @@ class Attempt(Base):
     device_id_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     session_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # A teacher can temporarily pause an active attempt without making it terminal.
+    is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    locked_by: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    lock_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     submit_request_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     # The policy accepted before Start; later ExamSetting edits never rewrite it.
     anti_cheat_policy_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

@@ -52,7 +52,7 @@ def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_
     try:
         cursor.execute(
             """
-            SELECT device_id_hash, session_token_hash, status, submitted_at, end_time
+            SELECT device_id_hash, session_token_hash, status, submitted_at, end_time, is_locked
             FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
             """,
             (attempt_id, exam_id, student_id),
@@ -60,6 +60,8 @@ def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_
         attempt = cursor.fetchone()
         if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         if not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id)):
             raise Exception("Attempt device does not match")
         if not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token)):
@@ -1231,7 +1233,7 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         cnx.start_transaction()
         cursor.execute(
             """
-            SELECT a.status, a.submitted_at, a.end_time, a.start_time, a.last_saved_at,
+            SELECT a.status, a.submitted_at, a.end_time, a.start_time, a.last_saved_at, a.is_locked,
                    e.duration_minutes, e.end_time AS exam_end_time
             FROM attempt a JOIN exam e ON e.exam_id = a.exam_id
             WHERE a.attempt_id = %s FOR UPDATE
@@ -1241,6 +1243,8 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         attempt = cursor.fetchone()
         if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         cursor.execute("SELECT NOW() AS database_now")
         database_now = cursor.fetchone()["database_now"]
         duration_expiry = attempt["start_time"] + timedelta(minutes=int(attempt["duration_minutes"] or 0))
@@ -1292,7 +1296,7 @@ def finalizeAttempt(
     try:
         cnx.start_transaction()
         cursor.execute(
-            "SELECT status, submitted_at, end_time, score, student_id, submit_request_id FROM attempt WHERE attempt_id = %s FOR UPDATE",
+            "SELECT status, submitted_at, end_time, score, student_id, submit_request_id, is_locked FROM attempt WHERE attempt_id = %s FOR UPDATE",
             (attempt_id,),
         )
         attempt = cursor.fetchone()
@@ -1315,6 +1319,8 @@ def finalizeAttempt(
             }
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         questions = _load_attempt_questions(cursor, attempt_id, exam_id)
         cursor.execute("SELECT sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
         settings = cursor.fetchone()
@@ -1417,7 +1423,7 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, attempt_no, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash, anti_cheat_policy_snapshot
+                   score, violation_count, device_id_hash, anti_cheat_policy_snapshot, is_locked
             FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s FOR UPDATE
             """,
             (attempt_id, exam_id, student_id),
@@ -1425,6 +1431,8 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
         attempt = cursor.fetchone()
         if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         device_hash = _sha256(device_id)
         claimed_legacy = attempt["device_id_hash"] is None
         if not claimed_legacy and not hmac.compare_digest(attempt["device_id_hash"], device_hash):
@@ -1461,9 +1469,11 @@ def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: 
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
-        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s", (attempt_id,))
+        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s AND is_locked = 0", (attempt_id,))
+        if getattr(cursor, "rowcount", 1) != 1:
+            raise Exception("Attempt is locked by teacher")
         cnx.commit()
-        cursor.execute("SELECT last_heartbeat_at, violation_count, status FROM attempt WHERE attempt_id = %s", (attempt_id,))
+        cursor.execute("SELECT last_heartbeat_at, violation_count, status, is_locked FROM attempt WHERE attempt_id = %s", (attempt_id,))
         return cursor.fetchone()
     except Exception:
         cnx.rollback()
@@ -1482,7 +1492,7 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash, session_token_hash,
+                   score, violation_count, device_id_hash, session_token_hash, is_locked,
                    anti_cheat_policy_snapshot
             FROM attempt
             WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
@@ -1493,6 +1503,8 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         attempt = cursor.fetchone()
         if not attempt:
             raise Exception("Attempt does not belong to student")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         if device_id and (not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id))):
             raise Exception("Attempt device does not match")
         if session_token and (not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token))):

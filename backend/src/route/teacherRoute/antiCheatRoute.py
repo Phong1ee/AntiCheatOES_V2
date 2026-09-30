@@ -1,9 +1,12 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from src.a_db_config import Attempt, AttemptQuestion, EssayAnswer, Exam, ExamEvent, ExamSetting, MCQAnswer
+from src.a_db_config import Attempt, AttemptQuestion, AttemptStatus, EssayAnswer, Exam, ExamEvent, ExamSetting, MCQAnswer
 from src.a_db_config.config import get_db_connection
 from src.middleware.authMiddleware import verify_token
 from src.service.audit_service import record_audit
@@ -14,6 +17,14 @@ from src.service.result_strategy_service import (
 )
 
 router = APIRouter(prefix="/anti-cheat")
+
+
+class LockAttemptRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=255)
+
+
+class TerminateAttemptRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=255)
 
 CAMERA_AI_EVENT_TYPES = "'NO_FACE_DETECTED','MULTIPLE_FACES_DETECTED','GAZE_AWAY_SUSTAINED','HEAD_AWAY_SUSTAINED'"
 AUDIO_EVENT_TYPES = "'MULTIPLE_VOICES_DETECTED','MIC_TRACK_MUTED','MIC_TRACK_ENDED'"
@@ -82,7 +93,7 @@ def exams(subject_id: str, user=Depends(teacher)):
 @router.get("/exams/{exam_id}/attempts")
 def attempts(exam_id:int, search:str="", status:str="", limit:int=Query(50,ge=1,le=100), offset:int=Query(0,ge=0), user=Depends(teacher)):
     owned_exam(exam_id,user["school_id"])
-    return rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
+    return rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.last_heartbeat_at lastHeartbeatAt,a.is_locked isLocked,a.locked_at lockedAt,a.locked_by lockedBy,a.lock_reason lockReason,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
     latest_event.event_type latestEventType,latest_event.event_timestamp latestEventAt,event_summary.lastViolationAt,
     COALESCE(event_summary.cameraFlagCount,0) cameraFlagCount,COALESCE(event_summary.audioFlagCount,0) audioFlagCount,COALESCE(event_summary.browserViolationCount,0) browserViolationCount,
     COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
@@ -92,12 +103,28 @@ def attempts(exam_id:int, search:str="", status:str="", limit:int=Query(50,ge=1,
 
 @router.get("/exams/{exam_id}/students")
 def students(exam_id: int, user=Depends(teacher)):
-    """Return only the students explicitly assigned to this teacher's exam."""
+    """Return assigned students and their latest active-attempt liveness."""
     owned_exam(exam_id, user["school_id"])
-    return rows("""SELECT se.student_id studentId, u.full_name studentName, COUNT(a.attempt_id) attemptCount
+    return rows("""SELECT se.student_id studentId, u.full_name studentName, COUNT(a.attempt_id) attemptCount,
+    active.attempt_id activeAttemptId, active.last_heartbeat_at lastHeartbeatAt,
+    COALESCE(active.is_locked, 0) isLocked, active.lock_reason lockReason,
+    CASE
+        WHEN active.attempt_id IS NULL THEN 'not-started'
+        WHEN active.is_locked = 1 THEN 'locked'
+        WHEN active.last_heartbeat_at >= DATE_SUB(NOW(), INTERVAL 60 SECOND) THEN 'active'
+        ELSE 'offline'
+    END activityStatus
     FROM student_exam se JOIN user u ON u.school_id=se.student_id
     LEFT JOIN attempt a ON a.exam_id=se.exam_id AND a.student_id=se.student_id
-    WHERE se.exam_id=%s GROUP BY se.student_id,u.full_name ORDER BY u.full_name,se.student_id""", (exam_id,))
+    LEFT JOIN attempt active ON active.attempt_id = (
+        SELECT candidate.attempt_id FROM attempt candidate
+        WHERE candidate.exam_id=se.exam_id AND candidate.student_id=se.student_id
+          AND candidate.status='in_progress' AND candidate.submitted_at IS NULL AND candidate.end_time IS NULL
+        ORDER BY candidate.attempt_id DESC LIMIT 1
+    )
+    WHERE se.exam_id=%s
+    GROUP BY se.student_id,u.full_name,active.attempt_id,active.last_heartbeat_at,active.is_locked,active.lock_reason
+    ORDER BY u.full_name,se.student_id""", (exam_id,))
 
 @router.get("/exams/{exam_id}/students/{student_id}/attempts")
 def student_attempts(
@@ -115,7 +142,7 @@ def student_attempts(
     page_size = 10
     total = rows("SELECT COUNT(*) total FROM attempt WHERE exam_id=%s AND student_id=%s", (exam_id, student_id))[0]["total"]
     offset = (page - 1) * page_size
-    items = rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
+    items = rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.start_time startTime,a.submitted_at submittedAt,a.last_heartbeat_at lastHeartbeatAt,a.is_locked isLocked,a.locked_at lockedAt,a.locked_by lockedBy,a.lock_reason lockReason,a.score,a.violation_count violationCount,COALESCE(es.violation_limit,5) violationLimit,a.termination_reason terminationReason,
     latest_event.event_type latestEventType,latest_event.event_timestamp latestEventAt,event_summary.lastViolationAt,
     COALESCE(event_summary.cameraFlagCount,0) cameraFlagCount,COALESCE(event_summary.audioFlagCount,0) audioFlagCount,COALESCE(event_summary.browserViolationCount,0) browserViolationCount,
     COALESCE(event_summary.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(event_summary.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged
@@ -152,7 +179,7 @@ def student_attempts(
 def detail(attempt_id:int,user=Depends(teacher)):
     # aiFlagCount/flagged are part of the MonitorAttempt contract, so this must
     # summarise events the same way the list endpoints do.
-    base=rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.score,a.violation_count violationCount,a.termination_reason terminationReason,e.exam_id examId,e.title,COALESCE(es.anti_cheat_enabled,0) antiCheatEnabled,COALESCE(es.violation_limit,5) violationLimit,
+    base=rows(f"""SELECT a.attempt_id attemptId,a.student_id studentId,u.full_name studentName,a.attempt_no attemptNo,a.status attemptStatus,a.last_heartbeat_at lastHeartbeatAt,a.is_locked isLocked,a.locked_at lockedAt,a.locked_by lockedBy,a.lock_reason lockReason,a.score,a.violation_count violationCount,a.termination_reason terminationReason,e.exam_id examId,e.title,COALESCE(es.anti_cheat_enabled,0) antiCheatEnabled,COALESCE(es.violation_limit,5) violationLimit,
     COALESCE(ev.aiFlagCount,0) aiFlagCount,CASE WHEN COALESCE(ev.aiFlagCount,0)>0 THEN 1 ELSE 0 END flagged,
     COALESCE(ev.cameraFlagCount,0) cameraFlagCount,COALESCE(ev.audioFlagCount,0) audioFlagCount,COALESCE(ev.browserViolationCount,0) browserViolationCount
     FROM attempt a JOIN exam e ON e.exam_id=a.exam_id JOIN user u ON u.school_id=a.student_id LEFT JOIN exam_setting es ON es.exam_id=e.exam_id
@@ -167,6 +194,127 @@ def detail(attempt_id:int,user=Depends(teacher)):
     WHERE a.attempt_id=%s AND e.manage_by=%s""",(attempt_id,attempt_id,user["school_id"]))
     if not base: raise HTTPException(404,"Attempt not found or not authorized")
     return {"attempt":base[0],"breakdown":rows("SELECT event_type eventType,COUNT(*) count FROM exam_event WHERE attempt_id=%s AND is_violation=1 GROUP BY event_type",(attempt_id,)),"timeline":rows("SELECT event_type eventType,event_timestamp eventTimestamp,source,details,metadata,is_violation isViolation FROM exam_event WHERE attempt_id=%s ORDER BY event_timestamp,event_id",(attempt_id,))}
+
+
+def _owned_active_attempt_for_update(db: Session, attempt_id: int, teacher_id: str) -> Attempt:
+    attempt = (
+        db.query(Attempt)
+        .join(Exam, Exam.exam_id == Attempt.exam_id)
+        .filter(Attempt.attempt_id == attempt_id, Exam.manage_by == teacher_id)
+        .with_for_update()
+        .first()
+    )
+    if attempt is None:
+        raise HTTPException(404, "Attempt not found or not authorized")
+    if attempt.status != AttemptStatus.in_progress or attempt.submitted_at or attempt.end_time:
+        raise HTTPException(409, "Only an in-progress attempt can be managed")
+    return attempt
+
+
+@router.post("/attempts/{attempt_id}/lock")
+def lock_attempt(attempt_id: int, payload: LockAttemptRequest, user=Depends(teacher), db: Session = Depends(get_db)):
+    try:
+        attempt = _owned_active_attempt_for_update(db, attempt_id, user["school_id"])
+        if attempt.is_locked:
+            raise HTTPException(409, "Attempt is already locked")
+        reason = (payload.reason or "Teacher temporarily locked this attempt").strip()
+        attempt.is_locked = True
+        attempt.locked_at = datetime.now()
+        attempt.locked_by = user["school_id"]
+        attempt.lock_reason = reason
+        db.add(ExamEvent(
+            attempt_id=attempt_id, event_type="ATTEMPT_LOCKED", event_timestamp=datetime.now(),
+            details=reason, source="system", is_violation=False,
+            metadata_={"actorSchoolId": user["school_id"]},
+        ))
+        record_audit(
+            db, actor_school_id=user["school_id"], actor_role=user.get("role"),
+            action="ATTEMPT_LOCKED", entity_type="attempt", entity_id=attempt_id,
+            metadata={"exam_id": attempt.exam_id, "student_id": attempt.student_id, "reason": reason},
+        )
+        db.commit()
+        return {"success": True, "attemptId": attempt_id, "isLocked": True, "lockReason": reason}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/attempts/{attempt_id}/unlock")
+def unlock_attempt(attempt_id: int, user=Depends(teacher), db: Session = Depends(get_db)):
+    try:
+        attempt = _owned_active_attempt_for_update(db, attempt_id, user["school_id"])
+        if not attempt.is_locked:
+            raise HTTPException(409, "Attempt is not locked")
+        previous_reason = attempt.lock_reason
+        attempt.is_locked = False
+        attempt.locked_at = None
+        attempt.locked_by = None
+        attempt.lock_reason = None
+        db.add(ExamEvent(
+            attempt_id=attempt_id, event_type="ATTEMPT_UNLOCKED", event_timestamp=datetime.now(),
+            details=previous_reason, source="system", is_violation=False,
+            metadata_={"actorSchoolId": user["school_id"]},
+        ))
+        record_audit(
+            db, actor_school_id=user["school_id"], actor_role=user.get("role"),
+            action="ATTEMPT_UNLOCKED", entity_type="attempt", entity_id=attempt_id,
+            metadata={"exam_id": attempt.exam_id, "student_id": attempt.student_id},
+        )
+        db.commit()
+        return {"success": True, "attemptId": attempt_id, "isLocked": False}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/attempts/{attempt_id}/terminate")
+def terminate_attempt(attempt_id: int, payload: TerminateAttemptRequest, user=Depends(teacher), db: Session = Depends(get_db)):
+    try:
+        attempt = _owned_active_attempt_for_update(db, attempt_id, user["school_id"])
+        reason = payload.reason.strip()
+        if not reason:
+            raise HTTPException(422, "Termination reason is required")
+        termination_reason = f"teacher_terminated: {reason}"
+        db.query(EssayAnswer).filter(EssayAnswer.attempt_id == attempt_id, EssayAnswer.score.is_(None)).update(
+            {EssayAnswer.score: 0}, synchronize_session=False
+        )
+        attempt.score = 0
+        attempt.status = AttemptStatus.terminated
+        attempt.end_time = datetime.now()
+        attempt.submitted_at = datetime.now()
+        attempt.termination_reason = termination_reason
+        attempt.is_locked = False
+        attempt.locked_at = None
+        attempt.locked_by = None
+        attempt.lock_reason = None
+        attempt.score_scale_version = 3
+        db.add(ExamEvent(
+            attempt_id=attempt_id, event_type="ATTEMPT_TERMINATED", event_timestamp=datetime.now(),
+            details=termination_reason, source="system", is_violation=False,
+            metadata_={"actorSchoolId": user["school_id"], "terminationSource": "teacher"},
+        ))
+        exam = db.get(Exam, attempt.exam_id)
+        if exam is not None and attempt.student_id is not None:
+            sync_student_final_score(db, exam, attempt.student_id)
+        record_audit(
+            db, actor_school_id=user["school_id"], actor_role=user.get("role"),
+            action="ATTEMPT_TERMINATED_BY_TEACHER", entity_type="attempt", entity_id=attempt_id,
+            metadata={"exam_id": attempt.exam_id, "student_id": attempt.student_id, "reason": reason},
+        )
+        db.commit()
+        return {"success": True, "attemptId": attempt_id, "attemptStatus": "terminated"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 @router.delete("/attempts/{attempt_id}", status_code=status.HTTP_200_OK)
 def delete_attempt(attempt_id: int, user=Depends(teacher), db: Session = Depends(get_db)):

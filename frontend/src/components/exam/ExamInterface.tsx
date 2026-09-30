@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Lock } from "lucide-react";
 import { ExamTopBar } from "./ExamTopBar";
 import { QuestionArea } from "./QuestionArea";
 import { QuestionPanel } from "./QuestionPanel";
@@ -50,6 +51,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const [attemptStatus, setAttemptStatus] = useState("initializing");
   const [timerReady, setTimerReady] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
+  const [isTeacherLocked, setIsTeacherLocked] = useState(false);
   const [violationType, setViolationType] = useState<string>("");
   const [violationCount, setViolationCount] = useState(0);
   const [violationLimit, setViolationLimit] = useState(5);
@@ -122,6 +124,15 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     if (message) setSubmitError(message);
   }, []);
 
+  const handleTeacherLock = useCallback((message = "This attempt was locked by your teacher.") => {
+    examEndingRef.current = true;
+    setIsTeacherLocked(true);
+    setShowSubmitDialog(false);
+    stopAutoSave(message);
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    void exitFullscreenIntentionally();
+  }, [exitFullscreenIntentionally, mediaStream, stopAutoSave]);
+
   const saveQuestion = useCallback(async (questionId: number, force = false): Promise<boolean> => {
     if (!attemptId || attemptStatus !== "in_progress" || !navigator.onLine) return false;
     if (!dirtyRef.current.has(questionId) && !force) return true;
@@ -152,7 +163,9 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       if (sequenceRef.current.get(questionId) === sequence) {
         setSaveStatus("Save failed");
         const message = error instanceof Error ? error.message : "Save failed";
-        if (message === "Attempt has expired" || message === "Attempt is no longer in progress") {
+        if (message === "Attempt is locked by teacher") {
+          handleTeacherLock(message);
+        } else if (message === "Attempt has expired" || message === "Attempt is no longer in progress") {
           setAttemptStatus("expired");
           stopAutoSave(message);
         } else {
@@ -161,7 +174,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       }
       return false;
     }
-  }, [attemptId, attemptStatus, examId, stopAutoSave]);
+  }, [attemptId, attemptStatus, examId, handleTeacherLock, stopAutoSave]);
 
   const flushDirty = useCallback(async () => {
     await Promise.all([...dirtyRef.current].map(saveQuestion));
@@ -169,14 +182,17 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
 
   useEffect(() => {
     if (!attemptId || attemptStatus !== "in_progress") return undefined;
-    const heartbeat = window.setInterval(() => {
+    const heartbeat = () => {
       void studentExamService.heartbeat(examId, attemptId).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Attempt session is invalid. Resume from My Exams.";
-        stopAutoSave(message);
+        if (message === "Attempt is locked by teacher") handleTeacherLock(message);
+        else stopAutoSave(message);
       });
-    }, 25_000);
-    return () => window.clearInterval(heartbeat);
-  }, [attemptId, attemptStatus, examId, stopAutoSave]);
+    };
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 10_000);
+    return () => window.clearInterval(interval);
+  }, [attemptId, attemptStatus, examId, handleTeacherLock, stopAutoSave]);
 
   const submit = useCallback(async (automatic = false) => {
     if (!attemptId || attemptStatus !== "in_progress" || isSubmitted) return;
@@ -196,9 +212,11 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       mediaStream?.getTracks().forEach((track) => track.stop());
       void exitFullscreenIntentionally();
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : automatic ? "Auto-submit failed" : "Submit failed");
+      const message = error instanceof Error ? error.message : automatic ? "Auto-submit failed" : "Submit failed";
+      if (message === "Attempt is locked by teacher") handleTeacherLock(message);
+      else setSubmitError(message);
     }
-  }, [attemptId, attemptStatus, examId, exitFullscreenIntentionally, flushDirty, isSubmitted, stopAutoSave]);
+  }, [attemptId, attemptStatus, examId, exitFullscreenIntentionally, flushDirty, handleTeacherLock, isSubmitted, stopAutoSave]);
 
   useEffect(() => {
     const raw = localStorage.getItem(attemptKey);
@@ -281,7 +299,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   }, [attemptStatus, flushDirty]);
 
   const handleAnswerChange = (questionId: number, answer: StudentAnswer) => {
-    if (attemptStatus !== "in_progress" || fullscreenLocked) return;
+    if (attemptStatus !== "in_progress" || fullscreenLocked || isTeacherLocked) return;
     const next = { ...answersRef.current, [questionId]: answer };
     answersRef.current = next; setAnswers(next); dirtyRef.current.add(questionId);
     if (attemptId) persistDraft(attemptId, next);
@@ -405,6 +423,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
   if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
+  if (isTeacherLocked) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-slate-100 p-6"><div className="max-w-md rounded-2xl border border-amber-200 bg-white p-8 text-center shadow-xl"><Lock className="mx-auto size-10 text-amber-600" /><h1 className="mt-4 text-xl font-semibold text-slate-900">Attempt locked by teacher</h1><p className="mt-3 text-sm leading-6 text-slate-600">Your teacher has temporarily paused this attempt. You cannot save answers or submit until it is unlocked.</p><button className="mt-6 rounded-lg bg-slate-800 px-5 py-3 text-sm font-medium text-white hover:bg-slate-700" onClick={handleNormalExit}>Return to Dashboard</button></div></div>;
 
   if (aiRuntimeActive && aiRuntime.readiness === "error") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security runtime error</h1><p className="mt-3 text-sm leading-6 text-slate-600">Anti-cheat monitoring was interrupted. Restore camera and audio monitoring to continue the exam.</p><div className="mt-6 flex gap-3"><button className="flex-1 rounded-lg border border-slate-300 px-5 py-3 font-medium text-slate-700 hover:bg-slate-50" onClick={handleNormalExit}>Return to Dashboard</button><button className="flex-1 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={aiRuntime.retry}>Retry</button></div></div></div>;
   if (aiRuntimeActive && aiRuntime.readiness === "loading") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Preparing secure exam</h1><p className="mt-3 text-sm leading-6 text-slate-600">Camera and microphone monitoring are being initialized. Please wait.</p></div></div>;

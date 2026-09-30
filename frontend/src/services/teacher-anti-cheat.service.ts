@@ -7,5 +7,8 @@ export const teacherAntiCheatService={
  students:async(examId:string)=> (await apiClient.get<MonitorStudent[]>(`/api/teacher/anti-cheat/exams/${examId}/students`)).data,
  studentAttempts:async(examId:string,studentId:string,page:number)=> (await apiClient.get<MonitorAttemptPage>(`/api/teacher/anti-cheat/exams/${examId}/students/${encodeURIComponent(studentId)}/attempts`,{params:{page,page_size:10}})).data,
  detail:async(id:number)=> (await apiClient.get<MonitorDetail>(`/api/teacher/anti-cheat/attempts/${id}`)).data,
+ lockAttempt:async(id:number,reason?:string)=> (await apiClient.post(`/api/teacher/anti-cheat/attempts/${id}/lock`,{reason})).data,
+ unlockAttempt:async(id:number)=> (await apiClient.post(`/api/teacher/anti-cheat/attempts/${id}/unlock`)).data,
+ terminateAttempt:async(id:number,reason:string)=> (await apiClient.post(`/api/teacher/anti-cheat/attempts/${id}/terminate`,{reason})).data,
  deleteAttempt:async(id:number)=> { await apiClient.delete(`/api/teacher/anti-cheat/attempts/${id}`); },
 };

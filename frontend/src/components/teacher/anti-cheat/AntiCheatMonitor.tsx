@@ -22,6 +22,9 @@ import {
   FileText,
   Filter,
   Trash2,
+  Lock,
+  Unlock,
+  Radio,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -95,6 +98,9 @@ interface Attempt {
   aiFlags: AiFlag[];
   startTime?: string;
   submittedAt?: string;
+  lastHeartbeatAt?: string;
+  isLocked: boolean;
+  lockReason?: string;
   antiCheatStatus: AntiCheatStatus;
   score?: number;
   terminationReason?: string;
@@ -131,6 +137,8 @@ function mapAttempt(attempt: MonitorAttempt): Attempt {
     aiFlags: [], aiFlagCount: attempt.aiFlagCount,
     startTime: attempt.startTime ? String(attempt.startTime) : undefined,
     submittedAt: attempt.submittedAt ? String(attempt.submittedAt) : undefined,
+    lastHeartbeatAt: attempt.lastHeartbeatAt ? String(attempt.lastHeartbeatAt) : undefined,
+    isLocked: Boolean(attempt.isLocked), lockReason: attempt.lockReason ?? undefined,
     antiCheatStatus: status === 'terminated' ? 'terminated' : attempt.flagged ? 'flagged' : attempt.violationCount > 0 ? 'warning' : 'clean',
     score: attempt.score ?? undefined, terminationReason: attempt.terminationReason ?? undefined,
     cameraFlagCount: attempt.cameraFlagCount ?? 0, audioFlagCount: attempt.audioFlagCount ?? 0, browserViolationCount: attempt.browserViolationCount ?? 0,
@@ -239,18 +247,25 @@ function EmptyState({ icon: Icon, title, description }: { icon: typeof Shield; t
   );
 }
 
-function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
+function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete, onLock, onUnlock, onTerminate }: {
   attempt: Attempt;
   onClose: () => void;
   /** Opens this attempt's graded result; absent while the attempt is still running. */
   onViewExamResult?: () => void;
   /** Permanently deletes this attempt; absent while the attempt is still running. */
   onDelete?: (attemptId: number) => Promise<void>;
+  onLock?: (attemptId: number) => Promise<void>;
+  onUnlock?: (attemptId: number) => Promise<void>;
+  onTerminate?: (attemptId: number, reason: string) => Promise<void>;
 }) {
   const ac = acConfig[attempt.antiCheatStatus];
   const AcIcon = ac.icon;
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [terminateReason, setTerminateReason] = useState('');
+  const [terminateOpen, setTerminateOpen] = useState(false);
 
   const handleConfirmDelete = async () => {
     if (!onDelete) return;
@@ -263,6 +278,15 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const runAction = async (action: () => Promise<void>) => {
+    setActionBusy(true);
+    setActionError(null);
+    try { await action(); return true; } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to update this attempt.');
+      return false;
+    } finally { setActionBusy(false); }
   };
 
   const eventTypeLabel: Record<EventType, string> = {
@@ -319,6 +343,7 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
               <Badge variant="outline" className={`text-xs ${asConfig[attempt.attemptStatus].cls}`}>
                 {asConfig[attempt.attemptStatus].label}
               </Badge>
+              {attempt.isLocked && <Badge variant="outline" className="text-xs border-amber-300 bg-amber-50 text-amber-700"><Lock className="size-3 mr-1" />Locked</Badge>}
               <Badge variant="outline" className={`text-xs ${ac.cls}`}>
                 <AcIcon className="size-3 mr-1" />
                 {ac.label}
@@ -430,6 +455,12 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
                 </div>
               </div>
             )}
+            {attempt.isLocked && (
+              <div className="flex gap-3 p-4 bg-amber-50 border border-amber-100 rounded-xl">
+                <Lock className="size-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div><p className="text-xs font-medium text-amber-800 mb-0.5">Attempt locked</p><p className="text-sm text-amber-700">{attempt.lockReason ?? 'Teacher temporarily paused this attempt.'}</p></div>
+              </div>
+            )}
 
             {/* Applied Policy */}
             <div>
@@ -531,6 +562,25 @@ function AttemptDrawer({ attempt, onClose, onViewExamResult, onDelete }: {
             </AlertDialog>
           ) : <div />}
           <div className="flex items-center gap-3">
+            {attempt.attemptStatus === 'in-progress' && onLock && onUnlock && onTerminate && (
+              <>
+                {attempt.isLocked ? (
+                  <Button variant="outline" size="sm" disabled={actionBusy} onClick={() => void runAction(() => onUnlock(Number(attempt.id)))} className="text-teal-700 border-teal-200 hover:bg-teal-50"><Unlock className="size-4 mr-1.5" />Unlock</Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled={actionBusy} onClick={() => void runAction(() => onLock(Number(attempt.id)))} className="text-amber-700 border-amber-200 hover:bg-amber-50"><Lock className="size-4 mr-1.5" />Lock</Button>
+                )}
+                <AlertDialog open={terminateOpen} onOpenChange={setTerminateOpen}>
+                  <AlertDialogTrigger asChild><Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50"><XCircle className="size-4 mr-1.5" />Terminate</Button></AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader><AlertDialogTitle>Terminate this attempt?</AlertDialogTitle><AlertDialogDescription>This immediately ends the attempt, gives score 0, and cannot be undone. Enter a reason for the audit log.</AlertDialogDescription></AlertDialogHeader>
+                    <Input value={terminateReason} onChange={(event) => setTerminateReason(event.target.value)} placeholder="Reason (at least 3 characters)" />
+                    {actionError && <p className="text-sm text-red-600">{actionError}</p>}
+                    <AlertDialogFooter><AlertDialogCancel disabled={actionBusy}>Cancel</AlertDialogCancel><AlertDialogAction disabled={actionBusy || terminateReason.trim().length < 3} className="bg-red-600 hover:bg-red-700" onClick={(event) => { event.preventDefault(); void runAction(() => onTerminate(Number(attempt.id), terminateReason.trim())).then((succeeded) => { if (succeeded) setTerminateOpen(false); }); }}>Terminate attempt</AlertDialogAction></AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            )}
+            {actionError && attempt.attemptStatus === 'in-progress' && <span className="text-xs text-red-600">{actionError}</span>}
             {onViewExamResult && (
               <Button
                 variant="outline"
@@ -586,6 +636,7 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
   const [drawerAttempt, setDrawerAttempt] = useState<Attempt | null>(null);
   const pollingInFlight = useRef(false);
   const detailPollingInFlight = useRef(false);
+  const livePollingInFlight = useRef(false);
   const initialTargetRef = useRef(initialTarget);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
@@ -654,6 +705,27 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
     await teacherAntiCheatService.deleteAttempt(attemptId);
     setDrawerAttempt(null);
     await refreshSelectedData();
+  };
+
+  const refreshAfterTeacherAction = async (attemptId: number) => {
+    if (selectedExamId) setAssignedStudents(await teacherAntiCheatService.students(selectedExamId));
+    if (selectedStudent) await loadStudentAttempts(selectedStudent, attemptPage?.page ?? 1);
+    setDrawerAttempt(mapDetail(await teacherAntiCheatService.detail(attemptId)));
+  };
+
+  const handleLockAttempt = async (attemptId: number) => {
+    await teacherAntiCheatService.lockAttempt(attemptId);
+    await refreshAfterTeacherAction(attemptId);
+  };
+
+  const handleUnlockAttempt = async (attemptId: number) => {
+    await teacherAntiCheatService.unlockAttempt(attemptId);
+    await refreshAfterTeacherAction(attemptId);
+  };
+
+  const handleTerminateAttempt = async (attemptId: number, reason: string) => {
+    await teacherAntiCheatService.terminateAttempt(attemptId, reason);
+    await refreshAfterTeacherAction(attemptId);
   };
 
   // Skipped when arriving via a deep link, which loads the subject list itself
@@ -734,6 +806,28 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
     void open();
     return () => { disposed = true; };
   }, [initialTarget?.requestKey]);
+
+  useEffect(() => {
+    if (!selectedExamId) return undefined;
+    let disposed = false;
+    const pollLiveStudents = async () => {
+      if (disposed || document.hidden || livePollingInFlight.current) return;
+      livePollingInFlight.current = true;
+      try {
+        const students = await teacherAntiCheatService.students(selectedExamId);
+        if (!disposed) setAssignedStudents(students);
+      } catch {
+        if (!disposed) setMonitorError('Live student update failed. Retrying shortly.');
+      } finally {
+        livePollingInFlight.current = false;
+      }
+    };
+    void pollLiveStudents();
+    const interval = window.setInterval(() => void pollLiveStudents(), 4_000);
+    const onVisibilityChange = () => { if (!document.hidden) void pollLiveStudents(); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => { disposed = true; window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibilityChange); };
+  }, [selectedExamId]);
 
   useEffect(() => {
     if (!selectedExamId || !selectedSubjectId || !selectedStudent) return;
@@ -826,7 +920,7 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
               <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 shadow-sm">
                 <Shield className="size-5 text-white" />
               </span>
-              Anti-Cheat Monitor
+              Exam Monitoring
             </h1>
             <p className="text-sm text-gray-500 mt-1">Monitor violations, AI flags, and terminated attempts for a selected exam.</p>
           </div>
@@ -895,18 +989,23 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
 
         {monitorError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{monitorError}</div>}
 
-        {/* Assigned students */}
-        {selectedExamId && selectedExam && !selectedStudent && (
+        {/* Live roster stays visible even while a teacher inspects one student's history. */}
+        {selectedExamId && selectedExam && (
           <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
             <div className="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100">
-              <div><h2 className="text-lg font-semibold text-gray-800">Assigned Students</h2><p className="mt-1 text-sm text-gray-500">Select a student to view that student's attempts.</p></div>
+              <div><h2 className="text-lg font-semibold text-gray-800">Live Students</h2><p className="mt-1 text-sm text-gray-500">Refreshes every 4 seconds. Offline means no heartbeat for more than 60 seconds.</p></div>
               <Badge variant="outline" className="text-teal-700 border-teal-200">{assignedStudents.length} assigned</Badge>
             </div>
             <Table>
-              <TableHeader><TableRow className="bg-gray-50 border-b border-gray-100"><TableHead className="text-xs font-medium text-gray-500">Student</TableHead><TableHead className="text-xs font-medium text-gray-500 text-center">Attempts</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow className="bg-gray-50 border-b border-gray-100"><TableHead className="text-xs font-medium text-gray-500">Student</TableHead><TableHead className="text-xs font-medium text-gray-500">Live status</TableHead><TableHead className="text-xs font-medium text-gray-500">Last heartbeat</TableHead><TableHead className="text-xs font-medium text-gray-500 text-center">Attempts</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
-                {assignedStudents.map((student) => <TableRow key={student.studentId} className="hover:bg-gray-50"><TableCell><p className="text-sm text-gray-800">{student.studentName}</p><p className="text-xs text-gray-400">{student.studentId}</p></TableCell><TableCell className="text-center"><Badge variant="outline" className="text-xs">{student.attemptCount}</Badge></TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => handleStudentSelect(student)} className="text-teal-600 hover:bg-teal-50 hover:text-teal-700 text-xs">View Attempts<ChevronRight className="ml-1 size-3" /></Button></TableCell></TableRow>)}
-                {assignedStudents.length === 0 && <TableRow><TableCell colSpan={3} className="py-12 text-center text-sm text-gray-400">No students are assigned to this exam.</TableCell></TableRow>}
+                {assignedStudents.map((student) => {
+                  const activity = student.activityStatus ?? 'not-started';
+                  const statusClass = activity === 'active' ? 'border-green-200 bg-green-50 text-green-700' : activity === 'locked' ? 'border-amber-200 bg-amber-50 text-amber-700' : activity === 'offline' ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-gray-200 bg-gray-50 text-gray-500';
+                  const label = activity === 'active' ? 'Live' : activity === 'locked' ? 'Locked' : activity === 'offline' ? 'Offline' : 'Not started';
+                  return <TableRow key={student.studentId} className="hover:bg-gray-50"><TableCell><p className="text-sm text-gray-800">{student.studentName}</p><p className="text-xs text-gray-400">{student.studentId}</p></TableCell><TableCell><Badge variant="outline" className={`text-xs ${statusClass}`}>{activity === 'active' && <Radio className="mr-1 size-3" />}{activity === 'locked' && <Lock className="mr-1 size-3" />}{label}</Badge>{student.lockReason && <p className="mt-1 max-w-52 truncate text-xs text-amber-700">{student.lockReason}</p>}</TableCell><TableCell className="text-xs text-gray-500">{student.lastHeartbeatAt ? formatEventTimestamp(String(student.lastHeartbeatAt)) : '—'}</TableCell><TableCell className="text-center"><Badge variant="outline" className="text-xs">{student.attemptCount}</Badge></TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => handleStudentSelect(student)} className="text-teal-600 hover:bg-teal-50 hover:text-teal-700 text-xs">View Attempts<ChevronRight className="ml-1 size-3" /></Button></TableCell></TableRow>;
+                })}
+                {assignedStudents.length === 0 && <TableRow><TableCell colSpan={5} className="py-12 text-center text-sm text-gray-400">No students are assigned to this exam.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </div>
@@ -1027,7 +1126,6 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Attempt</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Status</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Direct Violations</TableHead>
-                    <TableHead className="text-xs font-medium text-gray-500 text-center">AI Flags</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500 text-center">Flag Summary</TableHead>
                     <TableHead className="text-xs font-medium text-gray-500">Anti-Cheat</TableHead>
                     <TableHead />
@@ -1086,17 +1184,6 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
                           </span>
                         </TableCell>
                         <TableCell className="text-center">
-                          <span className={`text-sm font-medium ${
-                            attempt.aiFlagCount >= 2
-                              ? 'text-violet-600'
-                              : attempt.aiFlagCount > 0
-                              ? 'text-amber-500'
-                              : 'text-gray-400'
-                          }`}>
-                            {attempt.aiFlagCount}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-center">
                           <div className="flex justify-center gap-1 text-[11px]">
                             <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">Cam {attempt.cameraFlagCount}</span>
                             <span className="rounded bg-rose-50 px-1.5 py-0.5 text-rose-700">Audio {attempt.audioFlagCount}</span>
@@ -1126,7 +1213,7 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
 
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12 text-gray-400 text-sm">
+                      <TableCell colSpan={7} className="text-center py-12 text-gray-400 text-sm">
                         {attempts.length === 0
                           ? 'No attempt data available for this exam.'
                           : 'No attempts match your filters.'}
@@ -1151,6 +1238,9 @@ export function AntiCheatMonitor({ initialTarget, onTargetHandled, onViewExamRes
           attempt={drawerAttempt}
           onClose={() => setDrawerAttempt(null)}
           onDelete={handleDeleteAttempt}
+          onLock={handleLockAttempt}
+          onUnlock={handleUnlockAttempt}
+          onTerminate={handleTerminateAttempt}
           // A running attempt has no graded result to show yet.
           onViewExamResult={onViewExamResult && selectedExamId && drawerAttempt.attemptStatus !== 'in-progress'
             ? () => {

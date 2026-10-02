@@ -8,10 +8,9 @@ interface ExamTopBarProps {
   onSubmit: () => void;
   antiCheatEnabled: boolean;
   violationCount: number;
-  violationLimit: number;
 }
 
-export function ExamTopBar({ examTitle, timeRemaining, onSubmit, antiCheatEnabled, violationCount, violationLimit }: ExamTopBarProps) {
+export function ExamTopBar({ examTitle, timeRemaining, onSubmit, antiCheatEnabled, violationCount }: ExamTopBarProps) {
   const hours = Math.floor(timeRemaining / 3600);
   const minutes = Math.floor((timeRemaining % 3600) / 60);
   const seconds = timeRemaining % 60;
@@ -26,7 +25,7 @@ export function ExamTopBar({ examTitle, timeRemaining, onSubmit, antiCheatEnable
           {antiCheatEnabled && (
             <div className="flex items-center gap-2 mt-1">
               <AlertTriangle className="size-4 text-red-600" />
-              <span className="text-sm text-red-600">Violations: {violationCount}/{violationLimit}</span>
+              <span className="text-sm text-red-600">Total violations recorded: {violationCount}</span>
             </div>
           )}
         </div>

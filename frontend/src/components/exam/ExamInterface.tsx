@@ -53,8 +53,11 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const [isTerminated, setIsTerminated] = useState(false);
   const [isTeacherLocked, setIsTeacherLocked] = useState(false);
   const [violationType, setViolationType] = useState<string>("");
+  // The aggregate count is useful telemetry, but only the event-type count is
+  // compared with a measure's threshold and can end an attempt.
   const [violationCount, setViolationCount] = useState(0);
-  const [violationLimit, setViolationLimit] = useState(5);
+  const [measureViolationCount, setMeasureViolationCount] = useState(0);
+  const [measureThreshold, setMeasureThreshold] = useState(5);
   const [remainingViolations, setRemainingViolations] = useState<number | null>(null);
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false);
   const [showViolationWarning, setShowViolationWarning] = useState(false);
@@ -248,7 +251,14 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
           localStorage.removeItem(markedQuestionsKey(restored.attempt.attemptId));
         }
         setMarkedQuestionIds(markedIds);
-        setSettings(restored.settings); setAntiCheatEnabled(restored.antiCheatEnabled); setViolationCount(restored.violationCount); setViolationLimit(restored.violationLimit); setRemainingViolations(restored.antiCheatEnabled ? Math.max(restored.violationLimit - restored.violationCount, 0) : null);
+        setSettings(restored.settings);
+        setAntiCheatEnabled(restored.antiCheatEnabled);
+        setViolationCount(restored.violationCount);
+        // Restore has no "last event" context. A later warning receives the
+        // authoritative per-measure values from the event response.
+        setMeasureViolationCount(0);
+        setMeasureThreshold(restored.violationLimit);
+        setRemainingViolations(null);
         if (restored.settings.sequentialNavigation) {
           const firstUnanswered = restored.questions.findIndex((question) => !isAnswered(saved[question.id]));
           setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
@@ -368,8 +378,22 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     }
   };
 
-  const handleAntiCheatEvent = useCallback((event: { violationCount: number; violationLimit: number; remainingViolations: number | null; terminated: boolean }, eventType: string) => {
-    setViolationType(eventType); setViolationCount(event.violationCount); setViolationLimit(event.violationLimit); setRemainingViolations(event.remainingViolations); setShowViolationWarning(true);
+  const handleAntiCheatEvent = useCallback((event: {
+    violationCount: number;
+    violationLimit: number;
+    measureViolationCount?: number | null;
+    measureThreshold?: number | null;
+    remainingViolations: number | null;
+    terminated: boolean;
+  }, eventType: string) => {
+    const eventCount = event.measureViolationCount ?? event.violationCount;
+    const eventThreshold = event.measureThreshold ?? event.violationLimit;
+    setViolationType(eventType);
+    setViolationCount(event.violationCount);
+    setMeasureViolationCount(eventCount);
+    setMeasureThreshold(eventThreshold);
+    setRemainingViolations(event.remainingViolations);
+    setShowViolationWarning(true);
     if (event.terminated) {
       setAttemptStatus("terminated"); setIsTerminated(true); stopAutoSave();
       examEndingRef.current = true;
@@ -436,7 +460,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const current = questions[currentQuestion];
   const currentAnswerIsValid = isAnswered(answers[current.id]);
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
-    <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} violationLimit={violationLimit} />
+    <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} />
     {mediaStream && cameraMonitoringEnabled && <WebcamMonitor stream={mediaStream} />}
     <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} isMarked={markedQuestionIds.includes(current.id)} onToggleMark={() => toggleMarkedQuestion(current.id)} /></div>
       <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
@@ -444,6 +468,6 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
     {/* This dialog is the whole fullscreen gate: while locked it stays open, its
         only button is Return to Fullscreen, and answering is blocked underneath. */}
-    <ViolationWarningDialog open={showViolationWarning || fullscreenGateOpen} onOpenChange={setShowViolationWarning} eventType={violationType} violationCount={violationCount} violationLimit={violationLimit} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={(violationType === "FULLSCREEN_EXIT" || fullscreenGateOpen) && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} error={fullscreenGateOpen ? submitError : null} />
+    <ViolationWarningDialog open={showViolationWarning || fullscreenGateOpen} onOpenChange={setShowViolationWarning} eventType={violationType} measureViolationCount={measureViolationCount} measureThreshold={measureThreshold} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={(violationType === "FULLSCREEN_EXIT" || fullscreenGateOpen) && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} error={fullscreenGateOpen ? submitError : null} />
   </div>;
 }

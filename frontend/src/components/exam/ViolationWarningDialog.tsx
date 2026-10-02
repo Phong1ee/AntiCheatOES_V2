@@ -3,15 +3,17 @@ import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescript
 import { AlertTriangle, XCircle } from "lucide-react";
 import { Button } from "../ui/button";
 
-export function ViolationWarningDialog({ open, onOpenChange, eventType, violationCount, violationLimit, remainingViolations, terminated, onReturnToFullscreen, onTerminatedExit, error }: {
-  open: boolean; onOpenChange: (open: boolean) => void; eventType?: string; violationCount: number; violationLimit: number; remainingViolations: number | null; terminated: boolean; onReturnToFullscreen?: () => void; onTerminatedExit?: () => void;
+export function ViolationWarningDialog({ open, onOpenChange, eventType, measureViolationCount, measureThreshold, remainingViolations, terminated, onReturnToFullscreen, onTerminatedExit, error }: {
+  open: boolean; onOpenChange: (open: boolean) => void; eventType?: string; measureViolationCount: number; measureThreshold: number; remainingViolations: number | null; terminated: boolean; onReturnToFullscreen?: () => void; onTerminatedExit?: () => void;
   /** Why the last "Return to Fullscreen" attempt failed; this dialog is the only surface left for it. */
   error?: string | null;
 }) {
   const labels: Record<string, string> = { MULTIPLE_VOICES_DETECTED: "Multiple voices were detected." };
   const label = labels[eventType ?? ""] || eventType?.replaceAll("_", " ").toLowerCase() || "Anti-cheat event";
-  const finalWarning = !terminated && violationCount === violationLimit - 1;
-  const message = terminated ? "Violation limit reached. This attempt was ended and scored 0." : `${label.charAt(0).toUpperCase()}${label.slice(1)}${label.endsWith(".") ? "" : " recorded."} Violations: ${violationCount}/${violationLimit}.${finalWarning ? " This is the last warning." : remainingViolations !== null ? ` ${remainingViolations} remaining.` : ""}`;
+  const finalWarning = !terminated && measureViolationCount === measureThreshold - 1;
+  const message = terminated
+    ? `${label.charAt(0).toUpperCase()}${label.slice(1)} Limit reached (${measureViolationCount}/${measureThreshold}). This attempt was ended and scored 0.`
+    : `${label.charAt(0).toUpperCase()}${label.slice(1)}${label.endsWith(".") ? "" : " recorded."} This rule: ${measureViolationCount}/${measureThreshold}.${finalWarning ? " The next violation of this same rule will end the attempt." : remainingViolations !== null ? ` ${remainingViolations} remaining for this rule.` : ""}`;
   // Safety net for a Radix cleanup raced by the fullscreen transition this dialog
   // is reacting to: a stuck pointer-events:none on <body> leaves the exam
   // unclickable. This has to be an effect on `open`, not part of onOpenChange -

@@ -33,6 +33,7 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
 def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
     return ExamSettingsResponse(
         exam_id=setting.exam_id,
+        questions_per_page=setting.questions_per_page,
         shuffle_question=setting.shuffle_question,
         shuffle_answer_options=setting.shuffle_answer_options,
         sequential_navigation=setting.sequential_navigation,
@@ -140,6 +141,18 @@ def update_exam_settings(
     if not setting:
         raise HTTPException(status_code=404, detail="Exam settings not found")
     try:
+        from .questionStructureRoute import validate_structure
+        next_layout = validate_structure(db, exam_id, payload.questions_per_page)
+        if setting.questions_per_page != payload.questions_per_page:
+            old_layout = {r["question_id"]: r for r in validate_structure(db, exam_id)}
+            from src.a_db_config import ExamQuestion, ExamQuestionBlock
+            pinned_ids = {r.question_id for r in db.query(ExamQuestion).filter_by(exam_id=exam_id).all() if r.pinned_position is not None}
+            pinned_blocks = {r.block_id for r in db.query(ExamQuestionBlock).filter_by(exam_id=exam_id).all() if r.pinned_position is not None}
+            for row in next_layout:
+                if row["question_id"] in pinned_ids or (row.get("block") or {}).get("block_id") in pinned_blocks:
+                    old = old_layout[row["question_id"]]
+                    if (old["page"], old["slot"]) != (row["page"], row["slot"]):
+                        raise ValueError("Questions per page changes a pinned page/slot; unpin or reposition the block first")
         previous_strategy = setting.result_strategy
         _apply(setting, payload)
         if payload.result_visibility is not None:
@@ -152,6 +165,9 @@ def update_exam_settings(
         deliver_invalidation(teacher_exam_updated(exam_id))
         db.refresh(setting)
         return _serialize(setting, exam)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Exam settings could not be updated") from exc

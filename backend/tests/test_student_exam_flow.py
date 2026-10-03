@@ -67,6 +67,10 @@ class _CreateCursor:
         return None
 
     def fetchall(self):
+        if "FROM exam_question_block" in self.last_query:
+            return []
+        if "SELECT question_id, block_id" in self.last_query:
+            return [(11, None, 0, None)]
         if "FROM exam_question" in self.last_query:
             return [(11, 3)]
         if "FROM options" in self.last_query:
@@ -125,6 +129,8 @@ class _SelectionCursor:
             return (0,)
         if "FROM attempt" in self.last_query:
             return None
+        if "SELECT questions_per_page" in self.last_query:
+            return (1, False)
         if "FROM exam_setting" in self.last_query:
             return (self.shuffle_questions, self.shuffle_options)
         if "SELECT pool_config_id, version" in self.last_query:
@@ -141,6 +147,10 @@ class _SelectionCursor:
             return [(1, 2), (2, 1)]
         if "FROM exam_pool_question" in self.last_query:
             return [(1,), (2,), (3,)] if int(self.last_params[0]) == 1 else [(3,), (4,)]
+        if "FROM exam_question_block" in self.last_query:
+            return []
+        if "SELECT question_id, block_id" in self.last_query:
+            return [(q, None, 0, None) for q in [1, 2, 3]]
         if "FROM exam_question" in self.last_query:
             return [(1, 4), (2, 3), (3, 3)]
         if "FROM options" in self.last_query:
@@ -284,6 +294,7 @@ class StudentExamFlowTests(unittest.TestCase):
             "status": "in_progress",
         }
         with (
+            patch.object(examModel, "getExamSettings", return_value={"anti_cheat_enabled": False}),
             patch.object(examModel, "getExamById", return_value=exam),
             patch.object(examModel, "isStudentAssignedToExam", return_value=True),
             patch.object(examModel, "getOpenAttempt", return_value=attempt),
@@ -379,6 +390,43 @@ class StudentExamFlowTests(unittest.TestCase):
         inserted = connection.cursor_instance.inserted_rows[0]
         self.assertEqual(inserted[4:7], ("Snapshot text", "MCQ", 3))
         self.assertIn('"isCorrect": true', inserted[7])
+
+    def test_multimedia_attempt_snapshot_survives_live_question_and_layout_changes(self):
+        import json
+        class RichCursor(_CreateCursor):
+            def fetchone(self):
+                if "SELECT questions_per_page" in self.last_query:
+                    return (2, True)
+                if "SELECT question_text" in self.last_query:
+                    return ("Old body", "MCQ", "<b>Old body</b>", "a" * 64, None, "Old diagram")
+                return super().fetchone()
+            def fetchall(self):
+                if "FROM exam_question_block" in self.last_query:
+                    return [(9, "parent", "Old passage", "<p>Read first</p>", None, "b" * 64, "", True, True, 1, 0)]
+                if "SELECT question_id, block_id" in self.last_query:
+                    return [(11, 9, 0, None)]
+                if "FROM options" in self.last_query:
+                    return [(101, "", True, None, "a" * 64, None, "Option diagram", None), (102, "No", False, "<i>No</i>", None, None, "", None)]
+                return super().fetchall()
+        connection = _CreateConnection()
+        connection.cursor_instance = RichCursor()
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            examModel.createAttempt(5, "S1", 1)
+        snapshot = connection.cursor_instance.inserted_rows[0]
+        content, layout = json.loads(snapshot[8]), json.loads(snapshot[9])
+        assert layout["questions_per_page"] == 2 and layout["block"]["title"] == "Old passage"
+        live = {"question_id": 11, "question_text": "Teacher edited", "question_type": "essay", "question_point": 99,
+                "rich_html": "<p>New content</p>", "audio_media_id": "c" * 64,
+                "question_text_snapshot": snapshot[4], "question_type_snapshot": snapshot[5], "question_point_snapshot": snapshot[6],
+                "options_snapshot": snapshot[7], "content_snapshot": content, "layout_snapshot": layout}
+        with patch.object(examModel, "get_db_connection", return_value=_Connection([live])):
+            restored = examModel.getExamQuestions(5, 10)[0]
+        self.assertEqual(restored["text"], "Old body")
+        self.assertEqual(restored["rich_html"], "<b>Old body</b>")
+        self.assertEqual(restored["points"], 3)
+        self.assertEqual(restored["layout"]["questions_per_page"], 2)
+        self.assertEqual(restored["options"][0]["image_media_id"], "a" * 64)
+        self.assertNotIn("isCorrect", restored["options"][0])
 
     def _snapshot_rows(self, mode: str, student_id: str, shuffle_questions: bool, shuffle_options: bool):
         connection = _SelectionConnection(mode, shuffle_questions, shuffle_options)
@@ -502,7 +550,7 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual((result["violationCount"], result["violationLimit"]), (3, 5))
 
     def test_start_response_returns_persisted_violation_count_and_limit(self):
-        with patch.object(examModel, "getExamSettings", return_value={
+        with patch.object(examModel, "get_database_now", return_value=datetime.now()), patch.object(examModel, "getExamSettings", return_value={
             "anti_cheat_enabled": True,
             "violation_limit": 4,
         }):

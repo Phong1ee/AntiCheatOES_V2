@@ -1,3 +1,6 @@
+from src.models.teacher.requestModel.RichContentRequest import RichContentRequest
+from src.service.rich_content_service import has_content
+from src.service.question_content_service import content_dict, apply_content, require_body
 import csv
 from datetime import date, datetime, time, timedelta
 from io import StringIO
@@ -98,14 +101,14 @@ class CreateReportJobPayload(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1, max_length=64)
 
 
-class RevisionOptionPayload(BaseModel):
+class RevisionOptionPayload(RichContentRequest):
     options_id: int | None = None
     options_text: str = ""
     is_correct: bool = False
 
 
-class RevisionSnapshotPayload(BaseModel):
-    question_text: str = Field(min_length=1, max_length=255)
+class RevisionSnapshotPayload(RichContentRequest):
+    question_text: str = Field(max_length=60000)
     question_type: QuestionTypeLiteral
     question_difficulties: QuestionDifficultyLiteral | None = None
     subject_id: str | None = Field(default=None, max_length=20)
@@ -157,7 +160,7 @@ def _subject_summary(subject: Subject | None) -> dict | None:
 
 def _question_options(question: Question) -> list[dict]:
     return [
-        {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
+        {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct, "semantic_value": option.semantic_value, **content_dict(option)}
         for option in sorted(question.options, key=lambda item: item.options_id)
     ]
 
@@ -188,7 +191,7 @@ def _serialize_question(question: Question, include_options: bool = True) -> dic
         "created_at": getattr(question, "created_at", None).isoformat() if getattr(question, "created_at", None) else None,
         "updated_at": getattr(question, "updated_at", None).isoformat() if getattr(question, "updated_at", None) else None,
         "usage_count": len(question.exam_questions),
-        "option_count": len([option for option in question.options if option.options_text.strip()]),
+        "option_count": len([option for option in question.options if has_content(option)]),
     }
     if include_options:
         data["options"] = _question_options(question)
@@ -290,6 +293,7 @@ def _snapshot_from_question(question: Question) -> dict:
         "question_type": _value(question.question_type),
         "question_difficulties": _value(question.question_difficulties) if question.question_difficulties else None,
         "subject_id": question.subject_id,
+        "content_snapshot": content_dict(question),
         "options_snapshot": _question_options(question),
         "chapter_ids_snapshot": [link.chapter_id for link in question.chapter_questions],
         "lo_ids_snapshot": [link.lo_id for link in question.lo_questions],
@@ -299,6 +303,7 @@ def _snapshot_from_question(question: Question) -> dict:
 def _payload_from_question(question: Question) -> RevisionSnapshotPayload:
     return RevisionSnapshotPayload(
         question_text=question.question_text,
+        **content_dict(question),
         question_type=_value(question.question_type),
         question_difficulties=_value(question.question_difficulties) if question.question_difficulties else None,
         subject_id=question.subject_id,
@@ -312,6 +317,7 @@ def _snapshot_payload(revision: QuestionRevision) -> RevisionSnapshotPayload:
     try:
         return RevisionSnapshotPayload(
             question_text=revision.question_text,
+            **(revision.content_snapshot or {}),
             question_type=revision.question_type,
             question_difficulties=revision.question_difficulties,
             subject_id=revision.subject_id,
@@ -326,8 +332,7 @@ def _snapshot_payload(revision: QuestionRevision) -> RevisionSnapshotPayload:
 def _validate_snapshot(db: Session, payload: RevisionSnapshotPayload) -> tuple[list[Chapter], list[LO]]:
     payload.question_text = payload.question_text.strip()
     subject_id = payload.subject_id.strip() if payload.subject_id else None
-    if not payload.question_text:
-        raise HTTPException(status_code=400, detail="Question text is required")
+    require_body(payload)
     if not subject_id:
         raise HTTPException(status_code=400, detail="Subject is required")
     payload.subject_id = subject_id
@@ -364,7 +369,7 @@ def _validate_snapshot(db: Session, payload: RevisionSnapshotPayload) -> tuple[l
         if valid_lo_ids != set(payload.lo_ids):
             raise HTTPException(status_code=400, detail="Every selected learning objective must belong to the selected subject and chapters")
 
-    non_empty = [option for option in payload.options if option.options_text.strip()]
+    non_empty = [option for option in payload.options if has_content(option)]
     correct_count = sum(option.is_correct for option in non_empty)
     if payload.question_type == "MCQ":
         if len(non_empty) < 2:
@@ -372,7 +377,7 @@ def _validate_snapshot(db: Session, payload: RevisionSnapshotPayload) -> tuple[l
         if correct_count < 1:
             raise HTTPException(status_code=400, detail="MCQ questions require at least one correct option")
     elif payload.question_type == "true-false":
-        normalized = {option.options_text.strip().lower() for option in non_empty}
+        normalized = {(option.semantic_value or option.options_text.strip().lower()) for option in non_empty}
         if len(non_empty) != 2 or normalized != {"true", "false"}:
             raise HTTPException(status_code=400, detail="True/false questions require exactly True and False options")
         if correct_count != 1:
@@ -393,7 +398,7 @@ def _replace_taxonomy(db: Session, question: Question, chapters: list[Chapter], 
 
 def _replace_options(db: Session, question: Question, payload: RevisionSnapshotPayload) -> None:
     existing = {option.options_id: option for option in question.options}
-    requested = [option for option in payload.options if option.options_text.strip()]
+    requested = [option for option in payload.options if has_content(option)]
     requested_ids = [option.options_id for option in requested if option.options_id is not None]
     if len(requested_ids) != len(set(requested_ids)):
         raise HTTPException(status_code=400, detail="An option ID was supplied more than once")
@@ -416,13 +421,17 @@ def _replace_options(db: Session, question: Question, payload: RevisionSnapshotP
         db.delete(existing[option_id])
     for item in requested:
         if item.options_id is None:
-            db.add(Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct))
+            option = Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct)
+            apply_content(option, item)
+            db.add(option)
         else:
             existing[item.options_id].options_text = item.options_text.strip()
             existing[item.options_id].is_correct = item.is_correct
+            apply_content(existing[item.options_id], item)
 
 
 def _apply_snapshot(question: Question, payload: RevisionSnapshotPayload) -> None:
+    apply_content(question, payload)
     question.question_text = payload.question_text.strip()
     question.question_type = payload.question_type
     question.question_difficulties = payload.question_difficulties

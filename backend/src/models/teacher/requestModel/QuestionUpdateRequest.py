@@ -1,3 +1,4 @@
+from src.models.teacher.requestModel.RichContentRequest import RichContentRequest
 from decimal import Decimal
 from typing import Literal
 
@@ -6,7 +7,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 
 
-class QuestionUpdateRequest(BaseModel):
+class QuestionUpdateRequest(RichContentRequest):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     question_point: Decimal = Field(
@@ -16,7 +17,7 @@ class QuestionUpdateRequest(BaseModel):
         max_digits=10,
         decimal_places=2,
     )
-    question_text: str | None = Field(default=None, min_length=1, max_length=255)
+    question_text: str | None = Field(default=None, max_length=60000)
     question_difficulties: Literal["easy", "medium", "hard"] | None = None
     question_type: Literal["MCQ", "essay", "true-false"] | None = None
     subject_id: str | None = Field(default=None, min_length=1, max_length=20)

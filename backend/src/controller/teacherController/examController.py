@@ -176,7 +176,7 @@ class ExamController:
                     or attempt["student_id"] != user.get("school_id", school_id)
                 ):
                     raise Exception("Attempt does not belong to student")
-            questions = examModel.getExamQuestions(exam_id, attempt_id)
+            questions = examModel.getExamQuestions(exam_id, attempt_id) if attempt_id is not None else []
 
             return {
                 "success": True,
@@ -275,6 +275,11 @@ class ExamController:
             examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
 
         settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
+        snapshot_questions = examModel.getExamQuestions(exam_id, attempt_id)
+        if snapshot_questions and snapshot_questions[0].get("layout"):
+            layout = snapshot_questions[0]["layout"]
+            settings["questions_per_page"] = layout.get("questions_per_page", 1)
+            settings["sequential_navigation"] = layout.get("sequential_navigation", settings["sequential_navigation"])
         policy = examModel.getAttemptAntiCheatPolicy(attempt, exam_id)
         settings.update(policy)
         anti_cheat_enabled = bool(policy["anti_cheat_enabled"])
@@ -314,7 +319,7 @@ class ExamController:
             "antiCheatMeasures": policy["anti_cheat_measures"],
             **timer,
             "settings": settings,
-            "questions": examModel.getExamQuestions(exam_id, attempt_id),
+            "questions": snapshot_questions,
         }
 
     @staticmethod

@@ -1,11 +1,14 @@
 import importlib.util
+import runpy
 import unittest
+from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy.engine import URL
 from src.service.scoring_service import normalize_score
 
 
@@ -29,6 +32,15 @@ class _ExamMigrationOperations:
 
 
 class ExamDataMigrationTests(unittest.TestCase):
+    def test_alembic_connection_url_preserves_password_and_percent_characters(self):
+        config = Config()
+        connection_url = URL.create("mysql+pymysql", username="test-user", password="test@pass%word", host="localhost", database="test-db")
+        path = Path(__file__).parents[1] / "alembic" / "env.py"
+        with patch("database.URL_DATABASE", connection_url), patch("alembic.context.config", config, create=True), patch("alembic.context.is_offline_mode", return_value=True), patch("alembic.context.configure") as configure, patch("alembic.context.begin_transaction", return_value=nullcontext()), patch("alembic.context.run_migrations"):
+            runpy.run_path(str(path))
+        self.assertEqual(configure.call_args.kwargs["url"], connection_url.render_as_string(hide_password=False))
+        self.assertNotIn("***", config.get_main_option("sqlalchemy.url"))
+
     @staticmethod
     def _load(filename: str):
         path = Path(__file__).parents[1] / "alembic" / "versions" / filename

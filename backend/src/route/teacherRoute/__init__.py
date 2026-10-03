@@ -21,3 +21,8 @@ router.include_router(results_router)
 router.include_router(anti_cheat_router)
 router.include_router(bulk_data_request_router)
 router.include_router(question_image_router)
+
+from .questionMediaRoute import router as media_router
+from .questionStructureRoute import router as structure_router
+router.include_router(media_router)
+router.include_router(structure_router)

@@ -1,3 +1,6 @@
+from src.models.teacher.requestModel.RichContentRequest import RichContentRequest
+from src.service.rich_content_service import has_content
+from src.service.question_content_service import content_dict, apply_content, validate_media, require_body, normalize_existing_content
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -40,14 +43,14 @@ QuestionDifficultyLiteral = Literal["easy", "medium", "hard"]
 QuestionStatusLiteral = Literal["draft", "pending", "approved", "rejected"]
 
 
-class QuestionOptionPayload(BaseModel):
+class QuestionOptionPayload(RichContentRequest):
     options_id: int | None = None
     options_text: str = ""
     is_correct: bool = False
 
 
-class QuestionBankPayload(BaseModel):
-    question_text: str = Field(min_length=1, max_length=255)
+class QuestionBankPayload(RichContentRequest):
+    question_text: str = Field(default="", max_length=60000)
     question_type: QuestionTypeLiteral
     question_difficulties: QuestionDifficultyLiteral | None = None
     subject_id: str | None = Field(default=None, max_length=20)
@@ -142,10 +145,11 @@ def _permission_flags(question: Question, teacher: User, bank: bool, can_manage_
 def _serialize_item(question: Question, teacher: User, bank: bool, db: Session, subject_ids: set[str] | None = None) -> dict:
     subject_ids = subject_ids if subject_ids is not None else _active_subject_ids(db, teacher.school_id)
     revision_data = _revision_metadata(db, question.question_id, teacher.school_id)
-    option_count = len([option for option in question.options if option.options_text.strip()])
+    option_count = len([option for option in question.options if has_content(option)])
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
+        **content_dict(question),
         "question_type": _value(question.question_type),
         "question_difficulties": _value(question.question_difficulties) if question.question_difficulties else None,
         "question_status": _status(question),
@@ -180,7 +184,7 @@ def _serialize_detail(question: Question, teacher: User, db: Session) -> dict:
                 else None
             ),
             "options": [
-                {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
+                {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct, "semantic_value": option.semantic_value, **content_dict(option)}
                 for option in sorted(question.options, key=lambda item: item.options_id)
             ],
             "rejected_feedback": data["revision_rejection_reason"],
@@ -196,11 +200,12 @@ def _serialize_edit_question(question: Question) -> dict:
         "version_number": None,
         "question_status": _status(question),
         "question_text": question.question_text,
+        **content_dict(question),
         "question_type": _value(question.question_type),
         "question_difficulties": _value(question.question_difficulties) if question.question_difficulties else None,
         "subject_id": question.subject_id,
         "options": [
-            {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
+            {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct, "semantic_value": option.semantic_value, **content_dict(option)}
             for option in sorted(question.options, key=lambda item: item.options_id)
         ],
         "chapter_ids": [item.chapter_id for item in question.chapter_questions],
@@ -219,6 +224,7 @@ def _serialize_edit_revision(revision: QuestionRevision, has_pending_revision: b
         "version_number": revision.version_number,
         "question_status": _revision_status(revision),
         "question_text": revision.question_text,
+        **(revision.content_snapshot or {}),
         "question_type": revision.question_type,
         "question_difficulties": revision.question_difficulties,
         "subject_id": revision.subject_id,
@@ -372,11 +378,10 @@ def _validate_taxonomy_for_payload(db: Session, payload: QuestionBankPayload) ->
 
 
 def _validate_submit_payload(payload: QuestionBankPayload) -> None:
-    if not payload.question_text.strip():
-        raise HTTPException(status_code=400, detail="Question text is required")
+    require_body(payload)
     if payload.question_difficulties is None:
         raise HTTPException(status_code=400, detail="Difficulty is required when submitting for approval")
-    non_empty = [option for option in payload.options if option.options_text.strip()]
+    non_empty = [option for option in payload.options if has_content(option)]
     correct_count = sum(option.is_correct for option in non_empty)
     if payload.question_type == "MCQ":
         if len(non_empty) < 2:
@@ -384,7 +389,7 @@ def _validate_submit_payload(payload: QuestionBankPayload) -> None:
         if correct_count < 1:
             raise HTTPException(status_code=400, detail="MCQ questions require at least one correct option")
     elif payload.question_type == "true-false":
-        normalized = {option.options_text.strip().lower() for option in non_empty}
+        normalized = {(option.semantic_value or option.options_text.strip().lower()) for option in non_empty}
         if len(non_empty) != 2 or normalized != {"true", "false"}:
             raise HTTPException(status_code=400, detail="True/false questions require exactly True and False options")
         if correct_count != 1:
@@ -396,18 +401,20 @@ def _validate_submit_payload(payload: QuestionBankPayload) -> None:
 def _payload_from_question(question: Question) -> QuestionBankPayload:
     return QuestionBankPayload(
         question_text=question.question_text,
+        **content_dict(question),
         question_type=_value(question.question_type),
         question_difficulties=_value(question.question_difficulties) if question.question_difficulties else None,
         subject_id=question.subject_id,
         chapter_ids=[item.chapter_id for item in question.chapter_questions],
         lo_ids=[item.lo_id for item in question.lo_questions],
-        options=[QuestionOptionPayload(options_id=item.options_id, options_text=item.options_text, is_correct=item.is_correct) for item in question.options],
+        options=[QuestionOptionPayload(options_id=item.options_id, options_text=item.options_text, is_correct=item.is_correct, semantic_value=item.semantic_value, **content_dict(item)) for item in question.options],
     )
 
 
 def _payload_from_revision(revision: QuestionRevision) -> QuestionBankPayload:
     return QuestionBankPayload(
         question_text=revision.question_text,
+        **(revision.content_snapshot or {}),
         question_type=revision.question_type,
         question_difficulties=revision.question_difficulties,
         subject_id=revision.subject_id,
@@ -428,7 +435,7 @@ def _replace_taxonomy(db: Session, question: Question, chapters: list[Chapter], 
 
 def _replace_options(db: Session, question: Question, payload: QuestionBankPayload) -> None:
     existing = {option.options_id: option for option in question.options}
-    requested = [option for option in payload.options if option.options_text.strip()]
+    requested = [option for option in payload.options if has_content(option)]
     requested_ids = {option.options_id for option in requested if option.options_id is not None}
     unknown_ids = requested_ids - set(existing)
     if unknown_ids:
@@ -438,13 +445,17 @@ def _replace_options(db: Session, question: Question, payload: QuestionBankPaylo
             db.delete(option)
     for item in requested:
         if item.options_id is None:
-            db.add(Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct))
+            new_option = Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct)
+            apply_content(new_option, item)
+            db.add(new_option)
         else:
             existing[item.options_id].options_text = item.options_text.strip()
             existing[item.options_id].is_correct = item.is_correct
+            apply_content(existing[item.options_id], item)
 
 
 def _apply_payload(question: Question, payload: QuestionBankPayload) -> None:
+    apply_content(question, payload)
     question.question_text = payload.question_text.strip()
     question.question_type = payload.question_type
     question.question_difficulties = payload.question_difficulties
@@ -457,10 +468,11 @@ def _revision_values(payload: QuestionBankPayload) -> dict:
         "question_type": payload.question_type,
         "question_difficulties": payload.question_difficulties,
         "subject_id": payload.subject_id.strip() if payload.subject_id else None,
+        "content_snapshot": content_dict(payload),
         "options_snapshot": [
-            {"options_id": item.options_id, "options_text": item.options_text.strip(), "is_correct": item.is_correct}
+            {"options_id": item.options_id, "options_text": item.options_text.strip(), "is_correct": item.is_correct, "semantic_value": item.semantic_value, **content_dict(item)}
             for item in payload.options
-            if item.options_text.strip()
+            if has_content(item)
         ],
         "chapter_ids_snapshot": list(payload.chapter_ids),
         "lo_ids_snapshot": list(payload.lo_ids),
@@ -681,7 +693,10 @@ def create_draft_question(payload: QuestionBankPayload, current_user: dict = Dep
         teacher = _teacher(db, current_user["school_id"])
         _require_subject_permission(db, teacher, payload.subject_id)
         chapters, los = _validate_taxonomy_for_payload(db, payload)
+        require_body(payload)
+        validate_media(db, payload, teacher.school_id, payload.subject_id)
         question = Question(question_text=payload.question_text.strip(), question_type=payload.question_type, question_difficulties=payload.question_difficulties, subject_id=payload.subject_id, created_by=teacher.school_id, question_status=QuestionStatus.draft)
+        apply_content(question, payload)
         db.add(question)
         db.flush()
         _replace_taxonomy(db, question, chapters, los)
@@ -713,6 +728,11 @@ def update_question(
     try:
         teacher = _teacher(db, current_user["school_id"])
         question = _locked_question(db, question_id)
+        if _status(question) != "approved" and question.created_by != teacher.school_id:
+            raise HTTPException(404, "Question not found")
+        payload = normalize_existing_content(payload, question)
+        require_body(payload)
+        validate_media(db, payload, teacher.school_id, payload.subject_id)
         question_status = _status(question)
         if isinstance(expected_status, str) and question_status != expected_status:
             raise HTTPException(status_code=409, detail="Question status changed before the update could be applied")

@@ -24,13 +24,14 @@ from sqlalchemy import (
     JSON,
     Index
 )
-from sqlalchemy.dialects.mysql import MEDIUMBLOB
+from sqlalchemy.dialects.mysql import MEDIUMBLOB, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
 # MEDIUMBLOB on MySQL (16 MB); plain BLOB elsewhere so tests can run on SQLite.
 ImageBlob = LargeBinary().with_variant(MEDIUMBLOB(), "mysql")
+ContentText = Text().with_variant(MEDIUMTEXT(), "mysql")
 # Kept as the old name for anything still importing it.
 QuestionImage = ImageBlob
 
@@ -397,7 +398,11 @@ class Question(Base):
     __tablename__ = "question"
 
     question_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    question_text: Mapped[str] = mapped_column(String(255), nullable=False)
+    question_text: Mapped[str] = mapped_column(ContentText, nullable=False)
+    rich_html: Mapped[Optional[str]] = mapped_column(ContentText, nullable=True)
+    image_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    audio_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    image_alt: Mapped[str] = mapped_column(String(300), default="", server_default="", nullable=False)
     question_difficulties: Mapped[
         Optional[QuestionDifficulty]
     ] = mapped_column(
@@ -491,7 +496,12 @@ class Option(Base):
     question_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("question.question_id", ondelete="CASCADE")
     )
-    options_text: Mapped[str] = mapped_column(String(255), nullable=False)
+    options_text: Mapped[str] = mapped_column(ContentText, nullable=False)
+    rich_html: Mapped[Optional[str]] = mapped_column(ContentText, nullable=True)
+    image_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    audio_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    image_alt: Mapped[str] = mapped_column(String(300), default="", server_default="", nullable=False)
+    semantic_value: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
 
     question: Mapped[Optional["Question"]] = relationship(back_populates="options")
@@ -594,6 +604,7 @@ class ExamSetting(Base):
         ForeignKey("exam.exam_id", ondelete="CASCADE"),
         primary_key=True,
     )
+    questions_per_page: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     shuffle_question: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("0")
     )
@@ -638,6 +649,9 @@ class ExamQuestion(Base):
     question_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("question.question_id", ondelete="CASCADE"), primary_key=True
     )
+    block_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("exam_question_block.block_id", ondelete="SET NULL"), nullable=True)
+    structure_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    pinned_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     question_point: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
 
     exam: Mapped["Exam"] = relationship(back_populates="exam_questions")
@@ -1001,8 +1015,10 @@ class AttemptQuestion(Base):
         back_populates="attempt_question", uselist=False
     )
     
+    content_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    layout_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     question_text_snapshot: Mapped[Optional[str]] = mapped_column(
-        Text,
+        ContentText,
         nullable=True,
     )
 
@@ -1262,6 +1278,7 @@ class TeacherSubject(Base):
     
 class QuestionRevision(Base):
     __tablename__ = "question_revision"
+    content_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -1299,7 +1316,7 @@ class QuestionRevision(Base):
     )
 
     question_text: Mapped[str] = mapped_column(
-        String(255),
+        ContentText,
         nullable=False,
     )
 
@@ -1440,3 +1457,32 @@ class PasswordResetOtp(Base):
     reset_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship()
+
+
+class QuestionMedia(Base):
+    __tablename__ = "question_media_asset"
+    media_id: Mapped[str] = mapped_column("asset_id", String(64), primary_key=True)
+    question_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    content: Mapped[bytes] = mapped_column(ImageBlob, nullable=False, deferred=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    kind: Mapped[str] = mapped_column(String(5), nullable=False)
+    created_by: Mapped[Optional[str]] = mapped_column(String(30), ForeignKey("user.school_id"), nullable=True)
+    subject_id: Mapped[Optional[str]] = mapped_column(String(20), ForeignKey("subject.subject_id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+
+
+class ExamQuestionBlock(Base):
+    __tablename__ = "exam_question_block"
+    __table_args__ = (CheckConstraint("kind IN ('group', 'parent')", name="ck_question_block_kind"),)
+    block_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(Integer, ForeignKey("exam.exam_id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="", server_default="")
+    rich_html: Mapped[Optional[str]] = mapped_column(ContentText, nullable=True)
+    image_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    audio_media_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("question_media_asset.asset_id"), nullable=True)
+    image_alt: Mapped[str] = mapped_column(String(300), default="", server_default="", nullable=False)
+    keep_order: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    keep_together: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    pinned_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    structure_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)

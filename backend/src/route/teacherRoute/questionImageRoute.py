@@ -7,6 +7,9 @@ the browser rendering it, which can cache it.
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session, undefer
 
@@ -15,6 +18,7 @@ from src.a_db_config import (
     Attempt,
     AttemptQuestion,
     Question,
+    QuestionMedia,
     StudentExam,
     User,
     UserRole,
@@ -65,6 +69,8 @@ def _question_for_write(db: Session, question_id: int, school_id: str) -> Questi
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
     teacher = _teacher(db, school_id)
+    if question.created_by != teacher.school_id:
+        raise HTTPException(404, "Question not found")
     require_active_subject_assignment(db, teacher.school_id, question.subject_id)
     return question
 
@@ -101,7 +107,7 @@ async def upload_question_image(
     """Attach or replace the question's image."""
     del role_check
     question = _question_for_write(db, question_id, current_user["school_id"])
-    content = await file.read()
+    content = await file.read(MAX_IMAGE_SIZE + 1)
     if not content:
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
     if len(content) > MAX_IMAGE_SIZE:
@@ -110,6 +116,11 @@ async def upload_question_image(
     if media_type is None:
         raise HTTPException(status_code=422, detail="Upload a PNG, JPEG, WebP or GIF image")
     try:
+        media_id = hashlib.sha256((question.subject_id or "").encode() + b":" + content).hexdigest()
+        if not db.get(QuestionMedia, media_id):
+            db.add(QuestionMedia(media_id=media_id, content=content, mime_type=media_type, kind="image", created_by=current_user["school_id"], subject_id=question.subject_id))
+            db.flush()
+        question.image_media_id = media_id
         question.question_image = content
         question.question_image_mime = media_type
         db.commit()
@@ -129,6 +140,9 @@ def delete_question_image(
     del role_check
     question = _question_for_write(db, question_id, current_user["school_id"])
     try:
+        if not question.question_text.strip() and not question.audio_media_id:
+            raise HTTPException(422, "Removing this image would leave the question empty")
+        question.image_media_id = None
         question.question_image = None
         question.question_image_mime = None
         db.commit()
@@ -170,7 +184,7 @@ def get_question_image_for_student(
     # Their own attempt is the proof: assignment alone would expose questions
     # from exams they have not started, and from other students' pool draws.
     served = (
-        db.query(AttemptQuestion.attempt_id)
+        db.query(AttemptQuestion)
         .join(Attempt, Attempt.attempt_id == AttemptQuestion.attempt_id)
         .join(StudentExam, StudentExam.exam_id == Attempt.exam_id)
         .filter(
@@ -182,6 +196,12 @@ def get_question_image_for_student(
     )
     if not served:
         raise HTTPException(status_code=404, detail="Question not found")
+    content = served.content_snapshot
+    if isinstance(content, str): content = json.loads(content)
+    if content is not None:
+        media = db.get(QuestionMedia, content.get("image_media_id")) if content.get("image_media_id") else None
+        if not media: raise HTTPException(404, "This question has no image")
+        return Response(media.content, media_type=media.mime_type, headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"})
     question = _load_with_image(db, question_id)
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")

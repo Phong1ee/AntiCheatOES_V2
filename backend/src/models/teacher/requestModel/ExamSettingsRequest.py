@@ -20,6 +20,7 @@ class AntiCheatMeasureRequest(BaseModel):
 class ExamSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    questions_per_page: int = Field(default=1, strict=True, ge=1, le=50)
     shuffle_question: bool = False
     shuffle_answer_options: bool = False
     sequential_navigation: bool = False

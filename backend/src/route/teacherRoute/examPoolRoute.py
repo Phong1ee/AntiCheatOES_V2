@@ -46,6 +46,8 @@ from src.service.exam_pool_service import (
 from src.service.teacher_subject_service import require_active_subject_assignment
 from src.service.exam_version_service import claim_exam_version
 
+from src.service.question_content_service import apply_content, require_body, validate_media, content_dict, normalize_existing_content
+
 router = APIRouter()
 
 
@@ -410,6 +412,7 @@ def get_pool_rule_questions(
             {
                 "question_id": question.question_id,
                 "question_text": question.question_text,
+                **content_dict(question),
                 "question_type": question.question_type.value,
                 "question_difficulties": question.question_difficulties.value,
                 "subject_id": question.subject_id,
@@ -439,6 +442,8 @@ def get_pool_rule_questions(
                     {
                         "options_id": option.options_id,
                         "options_text": option.options_text,
+                        **content_dict(option),
+                        "semantic_value": option.semantic_value,
                         "is_correct": option.is_correct,
                     }
                     for option in sorted(question.options, key=lambda item: item.options_id)
@@ -568,6 +573,7 @@ def preview_pool_draw(
                     {
                         "question_id": question_id,
                         "question_text": question_map[question_id].question_text,
+                        **content_dict(question_map[question_id]),
                         "question_type": question_map[question_id].question_type.value,
                     }
                     for question_id in selected[rule.rule_id]
@@ -610,6 +616,7 @@ def update_pool_candidate(
         question = db.get(Question, question_id)
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
+        request = normalize_existing_content(request, question)
         if not _has_content_changes(question, request):
             return {"success": True, "question_id": question_id, "cloned": False}
 
@@ -688,7 +695,9 @@ def update_pool_candidate(
             and not db.query(ExamQuestion).filter_by(question_id=question_id).first()
             and not db.query(AttemptQuestion).filter_by(question_id=question_id).first()
         )
+        validate_media(db, request, teacher.school_id, target_subject)
         if safe_in_place:
+            apply_content(question, request, partial=True)
             if request.question_text is not None:
                 question.question_text = request.question_text.strip()
             if request.question_type is not None:
@@ -704,6 +713,7 @@ def update_pool_candidate(
             )
             if request.options is not None:
                 _replace_options(db, question, request.options)
+            require_body(question)
             effective = question
         else:
             effective = _clone_question(

@@ -3,7 +3,7 @@ import { attemptSessionStorage } from "./attempt-session.storage";
 import { normalizeAntiCheatMeasures, type AntiCheatMeasures } from '../anti-cheat/measure-policy';
 import type { AutoSaveResult, StudentAnswer, StudentAnswers, StudentExamAttempt, StudentExamSettings, StudentQuestion } from "../types/student-exam";
 
-interface RawQuestion {
+interface RawQuestion extends Partial<StudentQuestion> {
   id: number;
   question_id?: number;
   text: string;
@@ -35,10 +35,10 @@ interface RawExam {
 }
 
 interface RawVerifyCodeResult {
-  examId?: number;
-  exam_id?: number;
   antiCheatEnabled?: boolean;
   violationLimit?: number;
+  examId?: number;
+  exam_id?: number;
   antiCheatMeasures?: AntiCheatMeasures;
   settings?: Record<string, unknown>;
 }
@@ -157,9 +157,11 @@ const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
   points: Number(question.points ?? 0),
   options: question.options ?? [],
   savedAnswer: question.savedAnswer,
+  rich_html: question.rich_html, image_media_id: question.image_media_id, audio_media_id: question.audio_media_id, image_alt: question.image_alt, layout: question.layout,
 });
 
 const normalizeSettings = (settings?: Record<string, unknown>): StudentExamSettings => ({
+  questionsPerPage: Number(settings?.questions_per_page ?? 1),
   autoSubmitOnExpire: Boolean(settings?.auto_submit_on_expire ?? settings?.autoSubmitOnExpire ?? true),
   sequentialNavigation: Boolean(settings?.sequential_navigation ?? settings?.sequentialNavigation ?? false),
   antiCheatEnabled: Boolean(settings?.anti_cheat_enabled ?? settings?.antiCheatEnabled ?? false),
@@ -230,7 +232,7 @@ export const studentExamService = {
     return {
       exam: { examId: Number(data.exam.exam_id), title: data.exam.title, durationMinutes: Number(data.exam.duration_minutes) },
       attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0) },
-      questions: (data.questions ?? []).map(normalizeQuestion), serverTime: data.serverTime,
+      questions: (data.questions ?? []).map(q => ({ ...normalizeQuestion(q), attemptId })), serverTime: data.serverTime,
       expiresAt: data.expiresAt, remainingSeconds: Number(data.remainingSeconds), settings: normalizeSettings(data.settings),
       antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures ?? data.settings?.anti_cheat_measures, Number(data.violationLimit ?? 5)),
     };

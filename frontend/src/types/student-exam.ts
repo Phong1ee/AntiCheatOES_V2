@@ -1,11 +1,14 @@
 import type { AntiCheatMeasures } from '../anti-cheat/measure-policy';
 
-export interface QuestionOption {
+import type { RichContent, QuestionLayout } from "./rich-content";
+export interface QuestionOption extends RichContent {
   id: number;
   text: string;
 }
 
-export interface StudentQuestion {
+export interface StudentQuestion extends RichContent {
+  layout?: QuestionLayout;
+  attemptId?: number;
   id: number;
   text: string;
   /** Whether the question carries an image; the bytes come from its own endpoint. */
@@ -29,6 +32,7 @@ export interface AutoSaveResult {
 export type StudentAnswers = Record<number, StudentAnswer>;
 
 export interface StudentExamSettings {
+  questionsPerPage?: number;
   autoSubmitOnExpire: boolean;
   sequentialNavigation: boolean;
   antiCheatEnabled: boolean;

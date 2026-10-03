@@ -317,7 +317,7 @@ export function QuestionList({
 
                   <div className="min-w-0 flex-1">
                     <p className="line-clamp-2 text-sm font-medium leading-snug text-gray-800">
-                      {question.question_text}
+                      {question.question_text || (question.image_media_id ? "[Image question]" : question.audio_media_id ? "[Audio question]" : "[Question]")}
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -511,7 +511,7 @@ export function QuestionList({
 
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-sm font-medium leading-snug text-gray-800">
-                        {question.question_text}
+                        {question.question_text || (question.image_media_id ? "[Image question]" : question.audio_media_id ? "[Audio question]" : "[Question]")}
                       </p>
 
                       <div className="mt-2 flex flex-wrap items-center gap-2">

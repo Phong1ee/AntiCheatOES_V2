@@ -1,3 +1,8 @@
+import { trueFalseSemantic } from '../../../common/content-utils';
+import { QuestionStructurePanel } from "../QuestionStructurePanel";
+import { ContentEditor } from "../../../common/ContentEditor";
+import { RichContent as ContentRenderer } from "../../../common/RichContent";
+import type { RichContent } from "../../../../types/rich-content";
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import './QuestionsTab.css';
 import { Button } from '../../../ui/button';
@@ -46,7 +51,7 @@ import {
   type PoolRule,
 } from '../../../../services/question.service';
 import { teacherQuestionBankService } from '../../../../services/teacher-question-bank.service';
-import type { ChapterSummary, LearningObjectiveSummary, QuestionDifficulty } from '../../../../types/question-bank';
+import type { ChapterSummary, LearningObjectiveSummary, QuestionDifficulty, QuestionType } from '../../../../types/question-bank';
 import { Checkbox } from '../../../ui/checkbox';
 import {
   AlertDialog,
@@ -59,7 +64,8 @@ import {
   AlertDialogTitle,
 } from '../../../ui/alert-dialog';
 
-interface Question {
+interface Question extends RichContent {
+  optionContent?: RichContent[];
   id: string;
   type: 'mcq' | 'true-false' | 'essay' | 'matching';
   question: string;
@@ -99,6 +105,7 @@ interface QuestionsTabProps {
 
 /** Only the fields that get written back, so unrelated re-renders stay "clean". */
 const questionSnapshot = (question: Question) => JSON.stringify({
+  rich_html: question.rich_html, image_media_id: question.image_media_id, audio_media_id: question.audio_media_id, image_alt: question.image_alt, optionContent: question.optionContent,
   type: question.type,
   question: question.question,
   maxScore: question.maxScore,
@@ -159,6 +166,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exitPoolOpen, setExitPoolOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [structureDirty, setStructureDirty] = useState(false);
   const [poolDraft, setPoolDraft] = useState<PoolDraft | null>(null);
   /** Candidate inclusions edited locally, keyed by rule identity. */
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, number[]>>({});
@@ -185,13 +193,14 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       return {
         id: String(question.question_id),
         type: question.question_type === 'MCQ' ? 'mcq' : question.question_type,
+        rich_html: question.rich_html, image_media_id: question.image_media_id, audio_media_id: question.audio_media_id, image_alt: question.image_alt, optionContent: question.options.map(o => ({ rich_html: o.rich_html, image_media_id: o.image_media_id, audio_media_id: o.audio_media_id, image_alt: o.image_alt, semantic_value: o.semantic_value })),
         question: question.question_text,
         maxScore: Number(question.max_score ?? question.question_point),
         difficulty: question.question_difficulties,
         options: question.options.map((option) => option.options_text),
         optionIds: question.options.map((option) => option.options_id),
         correctAnswer: question.question_type === 'true-false'
-          ? (question.options[correctIndexes[0]]?.options_text.toLowerCase() ?? 'true')
+          ? (question.options[correctIndexes[0]]?.semantic_value ?? question.options[correctIndexes[0]]?.options_text.toLowerCase() ?? 'true')
           : correctIndexes.length > 1 ? correctIndexes : correctIndexes[0] ?? 0,
         hasMultipleCorrect: correctIndexes.length > 1,
         chapterId: question.chapter_ids[0],
@@ -348,30 +357,9 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       if (selectedQuestion === id) setSelectedQuestion(remaining[0]?.id ?? null);
       return;
     }
-    const next = new Set(removedQuestionIds);
+    const next = new Set(pendingRemovals);
     if (next.has(id)) next.delete(id); else next.add(id);
-    setRemovedQuestionIds(next);
-  };
-
-  const deleteQuestion = (id: string) => setQuestionToDelete(questions.find((question) => question.id === id) ?? null);
-
-  const confirmDeleteQuestion = async () => {
-    if (!questionToDelete) return;
-    try {
-      setIsDeleting(true);
-      if (!questionToDelete.id.startsWith('new-') && examId) {
-        const removal = await questionService.removeFromExam(Number(examId), Number(questionToDelete.id), expectedVersion);
-        onVersionClaimed?.(removal.version);
-      }
-      const remaining = questions.filter((question) => question.id !== questionToDelete.id);
-      setQuestions(remaining);
-      if (selectedQuestion === questionToDelete.id) setSelectedQuestion(remaining[0]?.id ?? null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to delete question.');
-    } finally {
-      setQuestionToDelete(null);
-      setIsDeleting(false);
-    }
+    setPendingRemovals(next);
   };
 
   const markSelectedForRemoval = () => {
@@ -541,7 +529,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       setQuestions(reconciled);
       setSelectedQuestion(reconciled[0]?.id ?? null);
       setSelectedIds(new Set());
-      setBulkRemoveOpen(false);
       toast.success(`${persistedIds.length} persisted question${persistedIds.length === 1 ? '' : 's'} removed from the exam.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to remove selected questions.');
@@ -714,8 +701,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   }, [examId, mapQuestions]);
 
   useEffect(() => {
-    onDirtyChange?.(questionsDirty || poolDirty);
-  }, [questionsDirty, poolDirty, onDirtyChange]);
+    onDirtyChange?.(questionsDirty || poolDirty || structureDirty);
+  }, [questionsDirty, poolDirty, structureDirty, onDirtyChange]);
 
   /** Returns a user-facing problem with the question, or null when it can be sent. */
   const validateQuestion = (question: Question): string | null => {
@@ -726,12 +713,12 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
     // Questions from another teacher's subject only ever send their score.
     if (!question.canEditContent && !question.id.startsWith('new-')) return null;
     if (question.type === 'matching') return 'Matching questions are not supported by the API.';
-    if (!question.question.trim() || !(question.subjectId ?? subjectId) || !question.difficulty) {
+    if ((!question.question.trim() && !question.image_media_id && !question.audio_media_id) || !(question.subjectId ?? subjectId) || !question.difficulty) {
       return 'Question text, subject, and difficulty are required.';
     }
     if (question.type === 'mcq') {
       const optionTexts = question.options ?? [];
-      if (optionTexts.length < 2 || optionTexts.some((option) => !option.trim())) {
+      if (optionTexts.length < 2 || optionTexts.some((option, index) => !option.trim() && !question.optionContent?.[index]?.image_media_id && !question.optionContent?.[index]?.audio_media_id)) {
         return 'Multiple-choice questions require at least two non-empty options.';
       }
     }
@@ -740,12 +727,14 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
   const buildQuestionPayload = (question: Question) => {
     const isTrueFalse = question.type === 'true-false';
-    const questionType = question.type === 'mcq' ? 'MCQ' : question.type;
-    const optionTexts = isTrueFalse ? ['True', 'False'] : question.options ?? [];
+    if (question.type === 'matching') throw new Error('Matching questions are not supported by the API.');
+    const questionType: QuestionType = question.type === 'mcq' ? 'MCQ' : question.type;
+    const optionTexts = isTrueFalse ? (question.options?.length === 2 ? question.options : ['True', 'False']) : question.options ?? [];
     const correctIndices: number[] = isTrueFalse
-      ? [question.correctAnswer === 'false' ? 1 : 0]
+      ? optionTexts.map((text, index) => trueFalseSemantic(text, index, question.optionContent?.[index]) === question.correctAnswer ? index : -1).filter(index => index >= 0)
       : Array.isArray(question.correctAnswer) ? question.correctAnswer : [Number(question.correctAnswer ?? 0)];
     return {
+      rich_html: question.rich_html, image_media_id: question.image_media_id, audio_media_id: question.audio_media_id, image_alt: question.image_alt,
       question_text: question.question.trim(),
       question_difficulties: question.difficulty as QuestionDifficulty,
       question_type: questionType as 'MCQ' | 'essay' | 'true-false',
@@ -756,6 +745,8 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
       max_score: question.maxScore,
       options: optionTexts.map((options_text, index) => ({
         options_id: question.optionIds?.[index],
+        ...question.optionContent?.[index],
+        semantic_value: isTrueFalse ? trueFalseSemantic(options_text, index, question.optionContent?.[index]) : null,
         options_text,
         is_correct: correctIndices.includes(index),
       })),
@@ -801,6 +792,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
         if (question.id.startsWith('new-')) {
           const payload = buildQuestionPayload(question);
           await questionService.create({
+            rich_html: payload.rich_html, image_media_id: payload.image_media_id, audio_media_id: payload.audio_media_id, image_alt: payload.image_alt,
             question_text: payload.question_text,
             question_difficulties: payload.question_difficulties,
             question_type: payload.question_type,
@@ -820,23 +812,26 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
           // Editable content: full update path; pool candidates saved via pool API
           const isTrueFalse = question.type === 'true-false';
           if (question.type === 'matching') throw new Error('Matching questions are not supported by the API.');
-          const questionType = question.type === 'mcq' ? 'MCQ' : question.type;
-          const optionTexts = isTrueFalse ? ['True', 'False'] : question.options ?? [];
+          const questionType: QuestionType = question.type === 'mcq' ? 'MCQ' : question.type;
+          const optionTexts = isTrueFalse ? (question.options?.length === 2 ? question.options : ['True', 'False']) : question.options ?? [];
           const correctIndices: number[] = isTrueFalse
-            ? [question.correctAnswer === 'false' ? 1 : 0]
+            ? optionTexts.map((text, index) => trueFalseSemantic(text, index, question.optionContent?.[index]) === question.correctAnswer ? index : -1).filter(index => index >= 0)
             : Array.isArray(question.correctAnswer) ? question.correctAnswer : [Number(question.correctAnswer ?? 0)];
 
-          if (questionType === 'MCQ' && (optionTexts.length < 2 || optionTexts.some((option) => !option.trim()))) {
+          if (questionType === 'MCQ' && (optionTexts.length < 2 || optionTexts.some((option, index) => !option.trim() && !question.optionContent?.[index]?.image_media_id && !question.optionContent?.[index]?.audio_media_id))) {
             throw new Error('Multiple-choice questions require at least two non-empty options.');
           }
 
           const options = optionTexts.map((options_text, index) => ({
             options_id: question.optionIds?.[index],
+            ...question.optionContent?.[index],
+            semantic_value: isTrueFalse ? trueFalseSemantic(options_text, index, question.optionContent?.[index]) : null,
             options_text,
             is_correct: correctIndices.includes(index),
           }));
 
           const payload = {
+            rich_html: question.rich_html, image_media_id: question.image_media_id, audio_media_id: question.audio_media_id, image_alt: question.image_alt,
             question_text: question.question.trim(),
             question_difficulties: question.difficulty,
             question_type: questionType,
@@ -889,6 +884,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   if (isPoolMode && poolConfig) {
     return (
       <div className="flex h-full min-h-0 flex-col">
+      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-r bg-gray-50">
           <div className="space-y-3 border-b p-4">
@@ -991,7 +987,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                         <div className="mt-3 space-y-2">
                           {group.questions.map((question) => (
                             <div key={question.question_id} className="rounded border p-3 text-sm">
-                              <Badge variant="outline" className="mr-2">{question.question_type}</Badge>{question.question_text}
+                              <Badge variant="outline" className="mr-2">{question.question_type}</Badge>{question.question_text || (question.image_media_id ? '[Image question]' : question.audio_media_id ? '[Audio question]' : '[Question]')}
                             </div>
                           ))}
                         </div>
@@ -1020,7 +1016,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       <ExternalLink className="mr-2 size-4" />
                       View in Question Bank
                     </Button>
-                    <p className="text-lg text-gray-900">{selectedPoolCandidate.question_text}</p>
+                    <ContentRenderer content={selectedPoolCandidate} text={selectedPoolCandidate.question_text} />
                     <div className="flex flex-wrap gap-2">
                       {selectedPoolCandidate.chapters.map((chapter) => <Badge key={chapter.chapter_id} variant="secondary">{chapter.chapter_name}</Badge>)}
                       {selectedPoolCandidate.learning_objectives.map((lo) => <Badge key={lo.lo_id} variant="outline">{lo.lo_name}</Badge>)}
@@ -1031,7 +1027,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                         {selectedPoolCandidate.options.map((option) => (
                           <div key={option.options_id} className={`rounded-lg border p-3 ${option.is_correct ? 'border-green-400 bg-green-50' : ''}`}>
                             {option.is_correct && <CheckCircle2 className="mr-2 inline size-4 text-green-600" />}
-                            {option.options_text}{option.is_correct && <span className="ml-2 text-xs font-medium text-green-700">Correct answer</span>}
+                            <ContentRenderer content={option} text={option.options_text} />{option.is_correct && <span className="ml-2 text-xs font-medium text-green-700">Correct answer</span>}
                           </div>
                         ))}
                       </div>
@@ -1127,11 +1123,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
               await loadQuestions();
             }}
             onVersionClaimed={onVersionClaimed}
-            onPoolSaved={async (config) => {
-              await handleAddPoolConfig(config);
-              await onSaved();
-              setShowQuestionPool(false);
-            }}
           />
         )}
         <AlertDialog open={exitPoolOpen} onOpenChange={setExitPoolOpen}>
@@ -1146,6 +1137,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
     {poolDraft && (
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-purple-200 bg-purple-50 px-4 py-3">
         <div className="min-w-0 text-sm text-purple-900">
@@ -1440,7 +1432,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       <span className="text-xs text-gray-500 ml-auto">Max {question.maxScore}</span>
                     </div>
                     <p className="text-xs text-gray-600 line-clamp-2">
-                      {question.question || 'Untitled question'}
+                      {question.question || (question.image_media_id ? '[Image question]' : question.audio_media_id ? '[Audio question]' : 'Untitled question')}
                     </p>
                     <p className="text-xs text-teal-600 mt-1 uppercase">{question.type}</p>
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -1540,16 +1532,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                 {/* Question Text */}
                 <div className="space-y-2">
                   <Label>Question</Label>
-                  <Textarea
-                    value={selectedQ.question}
-                    disabled={!selectedQ.canEditContent}
-                    onChange={(e) =>
-                      updateQuestion(selectedQ.id, { question: e.target.value })
-                    }
-                    placeholder="Enter your question here..."
-                    rows={4}
-                    className="resize-none"
-                  />
+                  <ContentEditor label="Question content" content={selectedQ} text={selectedQ.question} subjectId={subjectId} disabled={!selectedQ.canEditContent} onChange={(next, text) => updateQuestion(selectedQ.id, { ...next, question: text })} />
                 </div>
 
                 {/* Question Type */}
@@ -1563,6 +1546,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                         type: value,
                         options: value === 'mcq' ? (selectedQ.options?.length ? selectedQ.options : ['', '']) : undefined,
                         optionIds: value === 'mcq' ? selectedQ.optionIds : undefined,
+                        optionContent: value === 'mcq' ? selectedQ.optionContent : undefined,
                         correctAnswer: value === 'true-false' ? 'true' : value === 'mcq' ? 0 : undefined,
                       })}
                     >
@@ -1610,77 +1594,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                   />
                 </div>
 
-                <div className="col-span-2 space-y-2">
-                  <Label>Image (optional)</Label>
-                  {selectedQ.id.startsWith('new-') ? (
-                    <p className="rounded-lg border border-dashed bg-gray-50 p-3 text-xs text-gray-500">
-                      Save this question first, then an image can be attached to it.
-                    </p>
-                  ) : (() => {
-                    const staged = pendingImages.get(selectedQ.id);
-                    const hasStagedChange = pendingImages.has(selectedQ.id);
-                    const showsImage = hasStagedChange ? staged !== null : selectedQ.hasImage;
-                    return (
-                      <div className="space-y-2">
-                        {showsImage && (
-                          <QuestionImage
-                            // Keyed so switching between the stored image and a
-                            // staged file remounts instead of showing the old one.
-                            key={`${selectedQ.id}-${staged ? staged.name + staged.size : 'stored'}-${imageCacheKey}`}
-                            questionId={Number(selectedQ.id)}
-                            load={staged ? stagedImageLoader : questionService.fetchQuestionImage}
-                          />
-                        )}
-                        {hasStagedChange && (
-                          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            {staged
-                              ? `"${staged.name}" will be uploaded when you save the questions.`
-                              : 'This image will be removed when you save the questions.'}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={!selectedQ.canEditContent}
-                            onClick={() => imageInputRef.current?.click()}
-                          >
-                            <ImagePlus className="size-4" />
-                            {showsImage ? 'Replace image' : 'Add image'}
-                          </Button>
-                          {showsImage && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600"
-                              disabled={!selectedQ.canEditContent}
-                              onClick={() => stageImage(selectedQ.id, null)}
-                            >
-                              Remove image
-                            </Button>
-                          )}
-                          {hasStagedChange && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => unstageImage(selectedQ.id)}
-                            >
-                              Undo
-                            </Button>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-500">PNG, JPEG, WebP or GIF, up to 2 MB.</p>
-                        <input
-                          ref={imageInputRef}
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,image/gif"
-                          className="hidden"
-                          onChange={(event) => stageImage(selectedQ.id, event.target.files?.[0] ?? null)}
-                        />
-                      </div>
-                    );
-                  })()}
-                </div>
                 <div className="col-span-2 grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Chapters (optional)</Label>
@@ -1800,17 +1713,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                               className="size-4 text-teal-600 cursor-pointer"
                             />
                           )}
-                          <Input
-                            value={option}
-                            disabled={!selectedQ.canEditContent}
-                            onChange={(e) => {
-                              const newOptions = [...selectedQ.options!];
-                              newOptions[index] = e.target.value;
-                              updateQuestion(selectedQ.id, { options: newOptions });
-                            }}
-                            placeholder={`Option ${index + 1}`}
-                            className="flex-1"
-                          />
+                          <ContentEditor label={`Option ${index + 1}`} content={selectedQ.optionContent?.[index] ?? {}} text={option} subjectId={subjectId} disabled={!selectedQ.canEditContent} onChange={(next, text) => { const options = [...selectedQ.options!]; options[index] = text; const optionContent = [...(selectedQ.optionContent ?? [])]; optionContent[index] = next; updateQuestion(selectedQ.id, { options, optionContent }); }} />
                           <Button
                             type="button"
                             variant="ghost"
@@ -1836,6 +1739,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                 )}
 
                 {/* True/False */}
+                {selectedQ.type === 'true-false' && <div>{(selectedQ.options ?? ['True', 'False']).map((text, index) => <ContentEditor key={index} label={`${trueFalseSemantic(text, index, selectedQ.optionContent?.[index])} option`} content={selectedQ.optionContent?.[index] ?? {}} text={text} subjectId={subjectId} disabled={!selectedQ.canEditContent} onChange={(next, text) => { const options = [...(selectedQ.options ?? ['True', 'False'])]; options[index] = text; const optionContent = [...(selectedQ.optionContent ?? [])]; optionContent[index] = { ...next, semantic_value: trueFalseSemantic((selectedQ.options ?? ['True', 'False'])[index], index, selectedQ.optionContent?.[index]) }; updateQuestion(selectedQ.id, { options, optionContent }); }} />)}</div>}
                 {selectedQ.type === 'true-false' && (
                   <div className="space-y-2">
                     <Label>Correct Answer</Label>
@@ -1918,10 +1822,6 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
             await loadQuestions();
           }}
           onVersionClaimed={onVersionClaimed}
-          onPoolSaved={async (config) => {
-            await handleAddPoolConfig(config);
-            await onSaved();
-          }}
         />
       )}
       <AlertDialog open={exitPoolOpen} onOpenChange={(open) => { if (!bulkBusy) setExitPoolOpen(open); }}>

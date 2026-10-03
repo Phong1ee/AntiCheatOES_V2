@@ -1,3 +1,5 @@
+import { QuestionPage } from "./QuestionPage";
+import { questionPages, pageIndexForQuestion } from "./question-pages";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Lock } from "lucide-react";
 import { ExamTopBar } from "./ExamTopBar";
@@ -115,6 +117,10 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     if (terminatedRedirectRef.current) window.clearTimeout(terminatedRedirectRef.current);
   }, []);
 
+  useEffect(() => {
+    if (attemptId && !loading) localStorage.setItem(`attempt-page:${attemptId}`, String(currentQuestion));
+  }, [attemptId, currentQuestion, loading]);
+
   const persistDraft = useCallback((id: number, nextAnswers: StudentAnswers) => {
     localStorage.setItem(draftKey(id), JSON.stringify(nextAnswers));
   }, []);
@@ -180,7 +186,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   }, [attemptId, attemptStatus, examId, handleTeacherLock, stopAutoSave]);
 
   const flushDirty = useCallback(async () => {
-    await Promise.all([...dirtyRef.current].map(saveQuestion));
+    await Promise.all([...dirtyRef.current].map(id => saveQuestion(id)));
   }, [saveQuestion]);
 
   useEffect(() => {
@@ -259,6 +265,10 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         setMeasureViolationCount(0);
         setMeasureThreshold(restored.violationLimit);
         setRemainingViolations(null);
+        if (!restored.settings.sequentialNavigation) {
+          const savedIndex = Number(localStorage.getItem(`attempt-page:${restored.attempt.attemptId}`) ?? 0);
+          setCurrentQuestion(Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < restored.questions.length ? savedIndex : 0);
+        }
         if (restored.settings.sequentialNavigation) {
           const firstUnanswered = restored.questions.findIndex((question) => !isAnswered(saved[question.id]));
           setCurrentQuestion(firstUnanswered === -1 ? Math.max(0, restored.questions.length - 1) : firstUnanswered);
@@ -322,37 +332,24 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   };
 
   const handleNextQuestion = useCallback(async () => {
-    if (!settings.sequentialNavigation) {
-      setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1));
-      return;
-    }
-    if (nextInFlightRef.current || currentQuestion >= questions.length - 1) return;
-    const question = questions[currentQuestion];
-    if (!question || !isAnswered(answersRef.current[question.id])) return;
-    const essayTimer = essayTimersRef.current.get(question.id);
-    if (essayTimer) {
-      window.clearTimeout(essayTimer);
-      essayTimersRef.current.delete(question.id);
-    }
-    if (!navigator.onLine) {
-      setSaveStatus("Offline - changes pending");
-      setSubmitError("You must be online to save and continue.");
-      return;
-    }
-    nextInFlightRef.current = true;
-    const needsSave = dirtyRef.current.has(question.id) || !persistedAnsweredRef.current.has(question.id);
-    if (needsSave) {
-      setIsSavingNext(true);
-      const saved = await saveQuestion(question.id, !dirtyRef.current.has(question.id));
-      setIsSavingNext(false);
-      if (!saved) {
-        nextInFlightRef.current = false;
-        return;
+    const pages = questionPages(questions, settings.questionsPerPage);
+    const pageIndex = pageIndexForQuestion(pages, questions[currentQuestion]?.id);
+    if (pageIndex >= pages.length - 1 || nextInFlightRef.current) return;
+    if (settings.sequentialNavigation) {
+      if (!pages[pageIndex].every(q => isAnswered(answersRef.current[q.id]))) return;
+      if (!navigator.onLine) { setSubmitError("You must be online to save and continue."); return; }
+      nextInFlightRef.current = true; setIsSavingNext(true);
+      for (const question of pages[pageIndex]) {
+        const timer = essayTimersRef.current.get(question.id);
+        if (timer) { window.clearTimeout(timer); essayTimersRef.current.delete(question.id); }
+        if (dirtyRef.current.has(question.id) || !persistedAnsweredRef.current.has(question.id)) {
+          if (!await saveQuestion(question.id, !dirtyRef.current.has(question.id))) { nextInFlightRef.current = false; setIsSavingNext(false); return; }
+        }
       }
+      nextInFlightRef.current = false; setIsSavingNext(false);
     }
-    setCurrentQuestion((value) => Math.min(questions.length - 1, value + 1));
-    nextInFlightRef.current = false;
-  }, [currentQuestion, questions, saveQuestion, settings.sequentialNavigation]);
+    setCurrentQuestion(questions.findIndex(q => q.id === pages[pageIndex + 1][0].id));
+  }, [currentQuestion, questions, saveQuestion, settings.sequentialNavigation, settings.questionsPerPage]);
 
   const toggleMarkedQuestion = useCallback((questionId: number) => {
     if (!attemptId) return;
@@ -458,12 +455,15 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
-  const currentAnswerIsValid = isAnswered(answers[current.id]);
+  const pages = questionPages(questions, settings.questionsPerPage);
+  const pageIndex = pageIndexForQuestion(pages, current.id);
+  const pageQuestions = pages[pageIndex];
+  const currentAnswerIsValid = pageQuestions.every(q => isAnswered(answers[q.id]));
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} />
     {mediaStream && cameraMonitoringEnabled && <WebcamMonitor stream={mediaStream} />}
-    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionArea question={current} currentQuestion={currentQuestion} totalQuestions={questions.length} answer={answers[current.id]} onAnswerChange={handleAnswerChange} onPrevious={() => setCurrentQuestion((value) => Math.max(0, value - 1))} onNext={() => void handleNextQuestion()} sequentialNavigation={settings.sequentialNavigation} currentAnswerIsValid={currentAnswerIsValid} isSavingNext={isSavingNext} isMarked={markedQuestionIds.includes(current.id)} onToggleMark={() => toggleMarkedQuestion(current.id)} /></div>
-      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
+    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-6"><QuestionPage questions={pageQuestions} allQuestions={questions} answers={answers} marked={markedQuestionIds} onAnswerChange={handleAnswerChange} onToggleMark={toggleMarkedQuestion} /><div className="max-w-4xl mx-auto flex justify-between mt-6"><button type="button" disabled={settings.sequentialNavigation || pageIndex === 0} onClick={() => setCurrentQuestion(questions.findIndex(q => q.id === pages[pageIndex - 1][0].id))}>Previous page</button><span>Page {pageIndex + 1} / {pages.length}</span><button type="button" disabled={pageIndex === pages.length - 1 || (settings.sequentialNavigation && (!currentAnswerIsValid || isSavingNext))} onClick={() => void handleNextQuestion()}>{isSavingNext ? 'Saving…' : 'Next page'}</button></div></div>
+      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} currentPageQuestionIds={pageQuestions.map(q => q.id)} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
     {/* This dialog is the whole fullscreen gate: while locked it stays open, its

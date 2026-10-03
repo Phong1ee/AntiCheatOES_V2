@@ -1,3 +1,4 @@
+import type { RichContent } from "../types/rich-content";
 import { apiClient } from "./api-client";
 import type {
   ChapterSummary,
@@ -10,13 +11,13 @@ import type {
 
 export type { QuestionDifficulty, QuestionType } from "../types/question-bank";
 
-export interface QuestionOptionRequest {
+export interface QuestionOptionRequest extends RichContent {
   options_id?: number;
   options_text: string;
   is_correct: boolean;
 }
 
-export interface CreateQuestionRequest {
+export interface CreateQuestionRequest extends RichContent {
   question_text: string;
   question_difficulties: QuestionDifficulty;
   question_type: QuestionType;
@@ -29,7 +30,7 @@ export interface CreateQuestionRequest {
   max_score: number;
 }
 
-export interface UpdateQuestionRequest {
+export interface UpdateQuestionRequest extends RichContent {
   max_score: number;
   question_text?: string;
   question_difficulties?: QuestionDifficulty;
@@ -41,7 +42,7 @@ export interface UpdateQuestionRequest {
   options?: QuestionOptionRequest[];
 }
 
-export interface ExamQuestionDetail {
+export interface ExamQuestionDetail extends RichContent {
   question_id: number;
   question_text: string;
   /** Whether the question carries an image; the bytes come from its own endpoint. */
@@ -61,7 +62,7 @@ export interface ExamQuestionDetail {
   question_bank_target_tab: "bank" | "mine";
   chapters: ChapterSummary[];
   learning_objectives: LearningObjectiveSummary[];
-  options: Array<{ options_id: number; options_text: string; is_correct: boolean }>;
+  options: Array<RichContent & { options_id: number; options_text: string; is_correct: boolean }>;
 }
 
 export interface QuestionImportCandidate {
@@ -163,7 +164,7 @@ export interface PoolConfig {
   rules: PoolRule[];
 }
 
-export interface PoolCandidate {
+export interface PoolCandidate extends RichContent {
   question_id: number;
   question_text: string;
   question_type: QuestionType;
@@ -176,7 +177,7 @@ export interface PoolCandidate {
   chapter_ids: number[];
   lo_ids: number[];
   creator: { school_id: string; full_name: string } | null;
-  options: Array<{ options_id: number; options_text: string; is_correct: boolean }>;
+  options: Array<RichContent & { options_id: number; options_text: string; is_correct: boolean }>;
 }
 
 export interface PoolCandidateResponse {
@@ -193,7 +194,7 @@ export interface PoolPreview {
     chapter_name: string | null;
     lo_name: string | null;
     difficulty: QuestionDifficulty;
-    questions: Array<{
+    questions: Array<RichContent & {
       question_id: number;
       question_text: string;
       question_type: QuestionType;

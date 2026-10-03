@@ -190,43 +190,6 @@ export function PoolConfigurationBuilder({
         ? 'Every topic you draw from needs points per question greater than 0.'
         : null;
 
-  const save = async () => {
-    if (rules.length === 0) {
-      setError('Configure at least one question to draw.');
-      return;
-    }
-    if (invalidRows.length > 0) {
-      setError('One or more requested counts exceed server-reported availability.');
-      return;
-    }
-    if (invalidMaxScore) {
-      setError('Every active pool rule requires a positive Max Score.');
-      return;
-    }
-    try {
-      setSaving(true);
-      setError(null);
-      const saved = await questionService.savePoolConfig(examId, {
-        subject_id: subjectId,
-        fixed_randomization: fixedRandomization,
-        rules,
-        expected_version: expectedVersion,
-      });
-      await onSaved(saved);
-      toast.success(
-        fixedRandomization
-          ? 'Fixed randomized question set saved.'
-          : 'Per-student pool configuration saved.',
-      );
-    } catch (saveError) {
-      const message = saveError instanceof Error ? saveError.message : 'Unable to save pool configuration.';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading) {
     return <div className="flex min-h-64 items-center justify-center gap-2 text-gray-600"><Loader2 className="size-5 animate-spin" /> Checking how many questions are available...</div>;
   }

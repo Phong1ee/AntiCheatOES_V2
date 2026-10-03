@@ -1,3 +1,4 @@
+import type { RichContent } from "./rich-content";
 export type QuestionBankTab = "bank" | "mine";
 export type QuestionStatus = "draft" | "pending" | "approved" | "rejected";
 export type QuestionType = "MCQ" | "essay" | "true-false";
@@ -18,7 +19,7 @@ export interface LearningObjectiveSummary {
   lo_name: string;
 }
 
-export interface QuestionOptionSummary {
+export interface QuestionOptionSummary extends RichContent {
   options_id?: number;
   options_text: string;
   is_correct: boolean;
@@ -32,7 +33,7 @@ export interface PermissionFlags {
   can_resubmit: boolean;
 }
 
-export interface QuestionBankItem {
+export interface QuestionBankItem extends RichContent {
   question_id: number;
   question_text: string;
   question_type: QuestionType;
@@ -66,7 +67,7 @@ export interface QuestionDetail extends QuestionBankItem {
   rejected_feedback?: string | null;
 }
 
-export interface QuestionEditPayload {
+export interface QuestionEditPayload extends RichContent {
   question_id: number;
   revision_id: number | null;
   version_number: number | null;
@@ -123,13 +124,13 @@ export interface QuestionBankListParams extends QuestionBankFilters {
 /** Totals per My Questions tab, for the current scope and filters but every status. */
 export type QuestionStatusCounts = Record<QuestionStatus | "all", number>;
 
-export interface QuestionOptionPayload {
+export interface QuestionOptionPayload extends RichContent {
   options_id?: number;
   options_text: string;
   is_correct: boolean;
 }
 
-export interface QuestionPayload {
+export interface QuestionPayload extends RichContent {
   question_text: string;
   question_type: QuestionType;
   question_difficulties?: QuestionDifficulty | null;

@@ -1,3 +1,4 @@
+import { RichContent } from "../../common/RichContent";
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
@@ -272,9 +273,9 @@ export function QuestionDetailModal({
                     </span>
                   </div>
 
-                  <p className="text-lg font-medium leading-snug text-gray-800">
-                    {detail.question_text}
-                  </p>
+                  <div className="text-lg font-medium leading-snug text-gray-800">
+                    <RichContent content={detail} text={detail.question_text} />
+                  </div>
 
                   {detail.rejected_feedback && (
                     <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -386,7 +387,7 @@ export function QuestionDetailModal({
                                       : 'text-gray-700'
                                   }`}
                                 >
-                                  {option.options_text}
+                                  <RichContent content={option} text={option.options_text} />
                                 </span>
 
                                 {isCorrect && (

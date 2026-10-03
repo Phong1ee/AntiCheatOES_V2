@@ -1,3 +1,4 @@
+import { RichContent } from "../common/RichContent";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, EyeOff, ListChecks, RefreshCw, Target, XCircle, type LucideIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -12,7 +13,7 @@ interface ExamResultDetailsPageProps {
 }
 
 function isAnswered(question: StudentResultQuestion): boolean {
-  return Boolean(question.studentAnswer?.trim());
+  return Boolean(question.selectedOptionId != null || question.studentAnswer?.trim());
 }
 
 function questionPoints(question: StudentResultQuestion): string {
@@ -188,12 +189,14 @@ export function ExamResultDetailsPage({ attemptId, onBack }: ExamResultDetailsPa
                 ? "bg-slate-50 border-slate-200"
                 : "bg-sky-50 border-sky-200";
             return <div key={question.id} className={`p-4 rounded-lg border ${question.type === "essay" ? essayClass : question.isCorrect ? "bg-green-50 border-green-200" : answeredWrongMcq ? "bg-red-50 border-red-200" : "bg-white border-gray-200"}`}>
-              <div className="flex justify-between gap-2"><p className="text-gray-800"><span className="font-medium">Q{index + 1}.</span> {question.question}</p><Badge variant="outline">{question.type === "essay" ? "Essay" : "MCQ"}</Badge></div>
-              {question.type === "mcq" && <div className="mt-3 space-y-2">{question.options?.map((option) => {
-                const isCorrect = correctAnswers.includes(option);
-                const isStudentChoice = option === question.studentAnswer;
-                const optionClass = isCorrect ? "bg-green-100 border-green-300 text-green-900" : isStudentChoice ? "bg-red-100 border-red-300 text-red-900" : "bg-white border-gray-200";
-                return <div key={option} className={`p-2 border rounded text-sm flex justify-between ${optionClass}`}><span>{option}</span><span className="flex gap-3">{isStudentChoice && <span className="flex items-center gap-1 text-red-700"><XCircle className="size-3" />Your Choice</span>}{isCorrect && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-3" />Correct</span>}</span></div>;
+              <div className="flex justify-between gap-2"><div className="text-gray-800"><span className="font-medium">Q{index + 1}.</span><RichContent content={question} text={question.question} attemptId={question.attemptId} /></div><Badge variant="outline">{question.type === "essay" ? "Essay" : "MCQ"}</Badge></div>
+              {question.type === "mcq" && <div className="mt-3 space-y-2">{question.options?.map((option, optionIndex) => {
+                const optionContent = question.optionContents?.[optionIndex];
+                const optionId = optionContent?.id ?? optionContent?.options_id;
+                const isCorrect = optionId != null && question.correctOptionIds ? question.correctOptionIds.includes(optionId) : correctAnswers.includes(option);
+                const isStudentChoice = optionId != null && question.selectedOptionId != null ? optionId === question.selectedOptionId : option === question.studentAnswer;
+                const optionClass = isCorrect ? "bg-green-100 border-green-300 text-green-900" : isStudentChoice ? "bg-red-100 border-red-300 text-red-900" : answeredWrongMcq ? "bg-red-50 border-red-100" : "bg-white border-gray-200";
+                return <div key={optionIndex} className={`p-2 border rounded text-sm flex justify-between ${optionClass}`}><span><RichContent content={optionContent ?? {}} text={option} attemptId={question.attemptId} /></span><span className="flex gap-3">{isStudentChoice && <span className="flex items-center gap-1 text-blue-700"><XCircle className="size-3" />Your Choice</span>}{isCorrect && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 className="size-3" />Correct</span>}</span></div>;
               })}</div>}
               {question.type === "mcq" && !isAnswered(question) && <p className="mt-3 text-sm text-gray-600">No answer submitted</p>}
               {question.type === "essay" && <div className="mt-3"><p className="text-xs text-gray-600 mb-1">Your Answer</p><div className="p-3 border rounded text-sm whitespace-pre-wrap bg-white/70">{isAnswered(question) ? question.studentAnswer : "No answer submitted"}</div>{question.gradingStatus === "pending" && <p className="mt-2 text-sm text-amber-800">Awaiting grading</p>}</div>}

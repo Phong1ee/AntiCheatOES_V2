@@ -48,7 +48,7 @@ const emptyMetadata: QuestionImportCandidateResponse['filter_options'] = {
   current_teacher_school_id: '',
 };
 
-export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, poolDraft, onPoolDraftChange, allowManual = true, expectedVersion, onClose, onImported, onVersionClaimed, onPoolSaved }: QuestionPoolModalProps) {
+export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: examSubjectId, initialPoolConfig, poolDraft, onPoolDraftChange, allowManual = true, expectedVersion, onClose, onImported, onVersionClaimed }: QuestionPoolModalProps) {
   const [mode, setMode] = useState<'manual' | 'pool'>(allowManual ? 'manual' : 'pool');
   const [questions, setQuestions] = useState<QuestionImportCandidate[]>([]);
   // Whole candidates (not just ids) so a multi-page selection can be staged
@@ -282,12 +282,6 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
           draft={poolDraft}
           onDraftChange={onPoolDraftChange}
           onDone={onClose}
-          onSaved={async (config) => {
-            if (onPoolSaved) {
-              await onPoolSaved(config);
-            }
-            onClose();
-          }}
             />
           </div>
         )}

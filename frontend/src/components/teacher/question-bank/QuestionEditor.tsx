@@ -1,3 +1,5 @@
+import { ContentEditor } from "../../common/ContentEditor";
+import type { RichContent } from "../../../types/rich-content";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/button";
@@ -106,6 +108,7 @@ export function QuestionEditor({
 
   const [error, setError] = useState<string | null>(null);
 
+  const [content, setContent] = useState<RichContent>({});
   const [questionText, setQuestionText] = useState("");
 
   const [questionType, setQuestionType] = useState<QuestionType>("MCQ");
@@ -161,6 +164,7 @@ export function QuestionEditor({
         setDetail(questionDetail);
 
         setQuestionText(questionDetail?.question_text ?? "");
+        setContent(questionDetail ?? {});
 
         setQuestionType(questionDetail?.question_type ?? "MCQ");
 
@@ -286,8 +290,8 @@ export function QuestionEditor({
   const submitErrors = useMemo(() => {
     const errors: string[] = [];
 
-    if (!questionText.trim()) {
-      errors.push("Question text is required.");
+    if (!questionText.trim() && !content.image_media_id && !content.audio_media_id) {
+      errors.push("Add text, an image or audio.");
     }
 
     if (!hasSubject) {
@@ -299,7 +303,7 @@ export function QuestionEditor({
     }
 
     const nonEmptyOptions = options.filter((option) =>
-      option.options_text.trim(),
+      option.options_text.trim() || option.image_media_id || option.audio_media_id,
     );
 
     const normalizedOptions = nonEmptyOptions.map((option) =>
@@ -307,7 +311,7 @@ export function QuestionEditor({
     );
 
     const hasDuplicateOptions =
-      new Set(normalizedOptions).size !== normalizedOptions.length;
+      new Set(normalizedOptions.filter(Boolean)).size !== normalizedOptions.filter(Boolean).length;
 
     if (questionType === "MCQ") {
       if (nonEmptyOptions.length < 2) {
@@ -325,7 +329,7 @@ export function QuestionEditor({
 
     if (questionType === "true-false") {
       const labels = nonEmptyOptions
-        .map((option) => option.options_text.trim().toLowerCase())
+        .map((option) => (option.semantic_value ?? option.options_text.trim().toLowerCase()))
         .sort()
         .join(",");
 
@@ -343,18 +347,28 @@ export function QuestionEditor({
     }
 
     return errors;
-  }, [difficulty, hasSubject, options, questionText, questionType]);
+  }, [difficulty, hasSubject, options, questionText, questionType, content]);
 
   /*
    * Pending không còn bị khóa ở frontend.
    * Save Draft vẫn được ẩn khỏi footer khi Pending.
    */
   const draftDisabled =
-    !questionText.trim() || !hasSubject || saving || loading;
+    (!questionText.trim() && !content.image_media_id && !content.audio_media_id) || !hasSubject || saving || loading;
 
   const submitActionDisabled = saving || loading;
 
+  useEffect(() => {
+    if (!open) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!saving && !loading) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [open, loading, saving]);
+
   const payload = (): QuestionPayload => ({
+    rich_html: content.rich_html, image_media_id: content.image_media_id, audio_media_id: content.audio_media_id, image_alt: content.image_alt,
     question_text: questionText,
     question_type: questionType,
 
@@ -465,11 +479,11 @@ export function QuestionEditor({
     if (value === "true-false") {
       setOptions([
         {
-          options_text: "True",
+          options_text: "True", semantic_value: "true",
           is_correct: false,
         },
         {
-          options_text: "False",
+          options_text: "False", semantic_value: "false",
           is_correct: false,
         },
       ]);
@@ -524,16 +538,7 @@ export function QuestionEditor({
   };
 
   const setTrueFalseAnswer = (answer: "true" | "false") => {
-    setOptions([
-      {
-        options_text: "True",
-        is_correct: answer === "true",
-      },
-      {
-        options_text: "False",
-        is_correct: answer === "false",
-      },
-    ]);
+    setOptions(current => current.map(option => ({ ...option, is_correct: (option.semantic_value ?? option.options_text.toLowerCase()) === answer })));
   };
 
   const toggleChapter = (chapterId: number, checked: boolean) => {
@@ -567,7 +572,7 @@ export function QuestionEditor({
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onClose();
+        if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose();
       }
     };
 
@@ -591,7 +596,7 @@ export function QuestionEditor({
       aria-modal="true"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
-          onClose();
+          if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose();
         }
       }}
     >
@@ -614,7 +619,7 @@ export function QuestionEditor({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose(); }}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
             aria-label="Close question editor"
           >
@@ -755,24 +760,14 @@ export function QuestionEditor({
 
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium text-gray-700">
-                    Question Text *
+                    Question content (text, image or audio)
                   </Label>
 
-                  <Textarea
-                    value={questionText}
-                    onChange={(event) => setQuestionText(event.target.value)}
-                    rows={4}
-                    placeholder="Enter your question here..."
-                    className={`resize-none rounded-lg bg-gray-50 text-sm placeholder:text-gray-400 focus-visible:border-teal-300 focus-visible:ring-teal-300 ${
-                      !questionText.trim()
-                        ? "border-red-300"
-                        : "border-gray-200"
-                    }`}
-                  />
+                  <ContentEditor label="Question content" content={content} text={questionText} subjectId={hasSubject ? subjectId : ''} disabled={saving} onChange={(next, text) => { setContent(next); setQuestionText(text); }} />
 
-                  {!questionText.trim() && (
+                  {!questionText.trim() && !content.image_media_id && !content.audio_media_id && (
                     <p className="text-xs text-red-500">
-                      Question text is required.
+                      Add text, an image or audio.
                     </p>
                   )}
                 </div>
@@ -987,20 +982,7 @@ export function QuestionEditor({
                         {optionLetters[index] ?? index + 1}
                       </span>
 
-                      <Input
-                        value={option.options_text}
-                        onChange={(event) =>
-                          updateOption(index, {
-                            options_text: event.target.value,
-                          })
-                        }
-                        placeholder={`Option ${index + 1}`}
-                        className={`rounded-lg bg-gray-50 text-sm placeholder:text-gray-400 focus-visible:border-teal-300 focus-visible:ring-teal-300 ${
-                          option.is_correct
-                            ? "border-teal-200 text-teal-800"
-                            : "border-gray-200"
-                        }`}
-                      />
+                      <ContentEditor label={`Option ${index + 1}`} content={option} text={option.options_text} subjectId={hasSubject ? subjectId : ''} disabled={saving} onChange={(next, text) => updateOption(index, { rich_html: next.rich_html, image_media_id: next.image_media_id, audio_media_id: next.audio_media_id, image_alt: next.image_alt, options_text: text })} />
 
                       <Button
                         variant="ghost"
@@ -1014,12 +996,13 @@ export function QuestionEditor({
                     </div>
                   ))}
 
+                {questionType === "true-false" && (<div>{options.map((option, index) => <ContentEditor key={index} label={`True/False ${option.semantic_value ?? index}`} content={option} text={option.options_text} subjectId={hasSubject ? subjectId : ""} disabled={saving} onChange={(next, text) => updateOption(index, { ...next, options_text: text })} />)}</div>)}
                 {questionType === "true-false" && (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {(["true", "false"] as const).map((answer) => {
                       const isCorrect = options.some(
                         (option) =>
-                          option.options_text.toLowerCase() === answer &&
+                          (option.semantic_value ?? option.options_text.toLowerCase()) === answer &&
                           option.is_correct,
                       );
 
@@ -1084,7 +1067,7 @@ export function QuestionEditor({
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <Button
             variant="outline"
-            onClick={onClose}
+            onClick={() => { if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose(); }}
             className="h-10 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancel

@@ -1,3 +1,5 @@
+import { trueFalseSemantic } from '../common/content-utils';
+import { RichContent } from "../common/RichContent";
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -7,6 +9,7 @@ import { QuestionImage } from '../common/QuestionImage';
 import { studentExamService } from '../../services/student-exam.service';
 
 interface QuestionAreaProps {
+  hideNavigation?: boolean;
   question: StudentQuestion;
   currentQuestion: number;
   totalQuestions: number;
@@ -22,6 +25,7 @@ interface QuestionAreaProps {
 }
 
 export function QuestionArea({
+  hideNavigation = false,
   question,
   currentQuestion,
   totalQuestions,
@@ -55,8 +59,8 @@ export function QuestionArea({
         </CardHeader>
         <CardContent className="pt-6">
           <div className="mb-6">
-            <p className="text-lg text-gray-800 leading-relaxed">{question.text}</p>
-            {question.hasImage && (
+            <RichContent content={question} text={question.text} attemptId={question.attemptId} />
+            {question.hasImage && !question.image_media_id && (
               <QuestionImage
                 questionId={question.id}
                 load={studentExamService.fetchQuestionImage}
@@ -68,8 +72,8 @@ export function QuestionArea({
       {(question.type === 'multiple-choice' || question.type === 'true-false') && question.options && (
             <div className="space-y-3">
               {question.options.map((option, index) => {
-                const optionLabel = String.fromCharCode(65 + index); // A, B, C, D
-                const isSelected = 'selectedOptionId' in (answer ?? {}) && answer.selectedOptionId === option.id;
+                const optionLabel = question.type === 'true-false' ? (trueFalseSemantic(option.text, index, option) === 'true' ? 'True' : 'False') : String.fromCharCode(65 + index);
+                const isSelected = answer && 'selectedOptionId' in answer && answer.selectedOptionId === option.id;
 
                 return (
                   <label
@@ -81,6 +85,7 @@ export function QuestionArea({
                     }`}
                   >
                     <input
+                      aria-label={`Option ${optionLabel} for question ${currentQuestion + 1}`}
                       type="radio"
                       name={`question-${question.id}`}
                       value={option.id}
@@ -89,10 +94,10 @@ export function QuestionArea({
                       className="mt-1"
                     />
                     <div className="flex-1">
-                      <span className="inline-flex items-center justify-center size-6 rounded-full bg-gray-200 text-sm mr-3">
+                      <span className="inline-flex items-center justify-center h-6 min-w-6 px-2 rounded-full bg-gray-200 text-sm mr-3">
                         {optionLabel}
                       </span>
-                      <span className="text-gray-800">{option.text}</span>
+                      <RichContent content={option} text={option.text} attemptId={question.attemptId} />
                     </div>
                   </label>
                 );
@@ -103,6 +108,7 @@ export function QuestionArea({
           {question.type === 'essay' && (
             <div>
               <Textarea
+                aria-label={`Answer for question ${currentQuestion + 1}`}
                 value={answer && 'answerText' in answer ? answer.answerText : ''}
                 onChange={(e) => onAnswerChange(question.id, { answerText: e.target.value })}
                 placeholder="Type your answer here..."
@@ -116,7 +122,7 @@ export function QuestionArea({
         </CardContent>
       </Card>
 
-      <div className="flex justify-between items-center">
+      {!hideNavigation && <div className="flex justify-between items-center">
         <Button
           variant="outline"
           onClick={onPrevious}
@@ -140,7 +146,7 @@ export function QuestionArea({
           {sequentialNavigation ? (isSavingNext ? 'Saving...' : 'Continue') : 'Next'}
           <ChevronRight className="size-4 ml-2" />
         </Button>
-      </div>
+      </div>}
     </div>
   );
 }

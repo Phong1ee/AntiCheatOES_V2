@@ -1,0 +1,81 @@
+{"kind":"deck","id":"pr/3hyvyn","name":"Deck"}
+{"kind":"layout","layoutId":"4c46f58f-4d00-4a95-8fca-00c472122525","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"5fc4a65d-84ca-4900-b12b-c9f569b39edd","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/2phlb1","slide":1,"title":"DATABASE & API DESIGN","textShapes":41}
+{"kind":"shape","id":"sh/vm1czyl8","slide":1,"bbox":[72,48,78,7]}
+{"kind":"textbox","id":"sh/gnat83mt","slide":1,"text":"DATABASE & API DESIGN","textPreview":"DATABASE & API DESIGN","textChars":21,"textLines":1,"bbox":[72,67,880,52]}
+{"kind":"textbox","id":"sh/hoju183e","slide":1,"text":"The data model connects exam delivery, answer storage, and anti-cheat events","textPreview":"The data model connects exam delivery, answer storage, and anti-cheat events","textChars":76,"textLines":1,"bbox":[72,115,980,30]}
+{"kind":"textbox","id":"sh/ipcbad4z","slide":1,"text":"CORE DATA MODEL","textPreview":"CORE DATA MODEL","textChars":15,"textLines":1,"bbox":[88,170,300,32]}
+{"kind":"textbox","id":"sh/3qlc3ilk","slide":1,"text":"API SECURITY FLOW","textPreview":"API SECURITY FLOW","textChars":17,"textLines":1,"bbox":[834,170,300,32]}
+{"kind":"shape","id":"sh/4rutc3m5","slide":1,"bbox":[72,208,714,362]}
+{"kind":"shape","id":"sh/5s3u583q","slide":1,"bbox":[812,208,396,362]}
+{"kind":"shape","id":"sh/qtcved4v","slide":1,"bbox":[96,248,150,92]}
+{"kind":"shape","id":"sh/rulc7ilg","slide":1,"bbox":[96,248,150,34]}
+{"kind":"shape","id":"sh/bexovux8","slide":1,"bbox":[96,266,150,16]}
+{"kind":"textbox","id":"sh/adonmpwn","slide":1,"text":"USER","textPreview":"USER","textChars":4,"textLines":1,"bbox":[110,253,122,25]}
+{"kind":"textbox","id":"sh/xgz6x4fe","slide":1,"text":"school_id  PK","textPreview":"school_id  PK","textChars":13,"textLines":1,"bbox":[110,291,122,20]}
+{"kind":"textbox","id":"sh/cf65ozet","slide":1,"text":"role","textPreview":"role","textChars":4,"textLines":1,"bbox":[110,312,122,20]}
+{"kind":"shape","id":"sh/nqxoraxc","slide":1,"bbox":[292,248,150,92]}
+{"kind":"shape","id":"sh/2ponipwr","slide":1,"bbox":[292,248,150,34]}
+{"kind":"shape","id":"sh/pcf6tkfi","slide":1,"bbox":[292,266,150,16]}
+{"kind":"textbox","id":"sh/ob65kfex","slide":1,"text":"EXAM","textPreview":"EXAM","textChars":4,"textLines":1,"bbox":[306,253,122,25]}
+{"kind":"textbox","id":"sh/7mhonexg","slide":1,"text":"exam_id  PK","textPreview":"exam_id  PK","textChars":11,"textLines":1,"bbox":[306,291,122,20]}
+{"kind":"textbox","id":"sh/ml87u9wv","slide":1,"text":"examcode","textPreview":"examcode","textChars":8,"textLines":1,"bbox":[306,312,122,20]}
+{"kind":"shape","id":"sh/i1crmdg3","slide":1,"bbox":[500,248,168,92]}
+{"kind":"shape","id":"sh/32l8viho","slide":1,"bbox":[500,248,168,34]}
+{"kind":"shape","id":"sh/43u9ony9","slide":1,"bbox":[500,266,168,16]}
+{"kind":"textbox","id":"sh/543qxszu","slide":1,"text":"ATTEMPT","textPreview":"ATTEMPT","textChars":7,"textLines":1,"bbox":[514,253,140,25]}
+{"kind":"textbox","id":"sh/q5crqdgf","slide":1,"text":"attempt_id  PK","textPreview":"attempt_id  PK","textChars":14,"textLines":1,"bbox":[514,291,140,20]}
+{"kind":"textbox","id":"sh/r6l8zih0","slide":1,"text":"student_id  FK","textPreview":"student_id  FK","textChars":14,"textLines":1,"bbox":[514,312,140,20]}
+{"kind":"shape","id":"sh/s7e9sny5","slide":1,"bbox":[334,414,176,92]}
+{"kind":"shape","id":"sh/d8na1szq","slide":1,"bbox":[334,414,176,34]}
+{"kind":"shape","id":"sh/69s7etgv","slide":1,"bbox":[334,432,176,16]}
+{"kind":"textbox","id":"sh/7a18nyhg","slide":1,"text":"ANSWERS","textPreview":"ANSWERS","textChars":7,"textLines":1,"bbox":[348,419,148,25]}
+{"kind":"textbox","id":"sh/p47utwjy","slide":1,"text":"attempt_id  FK","textPreview":"attempt_id  FK","textChars":14,"textLines":1,"bbox":[348,457,148,20]}
+{"kind":"textbox","id":"sh/o3ytkrid","slide":1,"text":"MCQ and Essay","textPreview":"MCQ and Essay","textChars":13,"textLines":1,"bbox":[348,478,148,20]}
+{"kind":"shape","id":"sh/n2pcrm18","slide":1,"bbox":[574,414,184,92]}
+{"kind":"shape","id":"sh/21gbih0n","slide":1,"bbox":[574,414,184,34]}
+{"kind":"shape","id":"sh/xsruxgza","slide":1,"bbox":[574,432,184,16]}
+{"kind":"textbox","id":"sh/critobip","slide":1,"text":"EXAM EVENT","textPreview":"EXAM EVENT","textChars":10,"textLines":1,"bbox":[588,419,156,25]}
+{"kind":"textbox","id":"sh/bq9cv614","slide":1,"text":"attempt_id  FK","textPreview":"attempt_id  FK","textChars":14,"textLines":1,"bbox":[588,457,156,20]}
+{"kind":"textbox","id":"sh/a5gbm10j","slide":1,"text":"event_type","textPreview":"event_type","textChars":10,"textLines":1,"bbox":[588,478,156,20]}
+{"kind":"shape","id":"sh/dwnalcjq","slide":1,"bbox":[250,279,38,30]}
+{"kind":"textbox","id":"sh/svetc7il","slide":1,"text":"owns","textPreview":"owns","textChars":4,"textLines":1,"bbox":[252,260,42,18]}
+{"kind":"shape","id":"sh/wrmxkf2t","slide":1,"bbox":[446,279,50,30]}
+{"kind":"textbox","id":"sh/hsvetkje","slide":1,"text":"creates","textPreview":"creates","textChars":7,"textLines":1,"bbox":[444,260,54,18]}
+{"kind":"shape","id":"sh/up4fi5k3","slide":1,"bbox":[582,340,4,40]}
+{"kind":"shape","id":"sh/vqdwra18","slide":1,"bbox":[420,378,248,4]}
+{"kind":"shape","id":"sh/8n2xgf2x","slide":1,"bbox":[420,378,4,36]}
+{"kind":"shape","id":"sh/9obep03i","slide":1,"bbox":[664,378,4,36]}
+{"kind":"textbox","id":"sh/mlkfe5kr","slide":1,"text":"stores","textPreview":"stores","textChars":6,"textLines":1,"bbox":[432,382,52,18]}
+{"kind":"textbox","id":"sh/7mtwnalc","slide":1,"text":"logs","textPreview":"logs","textChars":4,"textLines":1,"bbox":[676,382,42,18]}
+{"kind":"shape","id":"sh/kz2dcv2l","slide":1,"bbox":[96,525,662,28]}
+{"kind":"textbox","id":"sh/lkbel036","slide":1,"text":"Attempt is the central link between the student, exam, answers, and monitoring events","textPreview":"Attempt is the central link between the student, exam, answers, and monitoring events","textChars":85,"textLines":1,"bbox":[108,528,638,22]}
+{"kind":"shape","id":"sh/nu9gvq58","slide":1,"bbox":[836,232,348,48]}
+{"kind":"textbox","id":"sh/2t0f2l4n","slide":1,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[846,242,28,28]}
+{"kind":"textbox","id":"sh/pwryx0ne","slide":1,"text":"REACT CLIENT","textPreview":"REACT CLIENT","textChars":12,"textLines":1,"bbox":[884,236,280,23]}
+{"kind":"textbox","id":"sh/ovix4vmt","slide":1,"text":"Sends the access token","textPreview":"Sends the access token","textChars":22,"textLines":1,"bbox":[884,256,280,20]}
+{"kind":"shape","id":"sh/bytgza54","slide":1,"bbox":[1002,280,16,14]}
+{"kind":"shape","id":"sh/ax0f654j","slide":1,"bbox":[836,294,348,48]}
+{"kind":"textbox","id":"sh/xkby10na","slide":1,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[846,304,28,28]}
+{"kind":"textbox","id":"sh/cj2x8vmp","slide":1,"text":"JWT AUTHENTICATION","textPreview":"JWT AUTHENTICATION","textChars":18,"textLines":1,"bbox":[884,298,280,23]}
+{"kind":"textbox","id":"sh/zmtg3a5g","slide":1,"text":"Verifies identity and token","textPreview":"Verifies identity and token","textChars":27,"textLines":1,"bbox":[884,318,280,20]}
+{"kind":"shape","id":"sh/ylkfa54v","slide":1,"bbox":[1002,342,16,14]}
+{"kind":"shape","id":"sh/utoridsf","slide":1,"bbox":[836,356,348,48]}
+{"kind":"textbox","id":"sh/fuxsrytk","slide":1,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[846,366,28,28]}
+{"kind":"textbox","id":"sh/gvq9k3a5","slide":1,"text":"RBAC AUTHORIZATION","textPreview":"RBAC AUTHORIZATION","textChars":18,"textLines":1,"bbox":[884,360,280,23]}
+{"kind":"textbox","id":"sh/hwzat8bq","slide":1,"text":"Checks Student, Teacher, or Admin","textPreview":"Checks Student, Teacher, or Admin","textChars":33,"textLines":1,"bbox":[884,380,280,20]}
+{"kind":"shape","id":"sh/6porets3","slide":1,"bbox":[1002,404,16,14]}
+{"kind":"shape","id":"sh/7qx8nyto","slide":1,"bbox":[836,418,348,48]}
+{"kind":"textbox","id":"sh/sr69g3a9","slide":1,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[846,428,28,28]}
+{"kind":"textbox","id":"sh/tsfap8bu","slide":1,"text":"FASTAPI ROUTES","textPreview":"FASTAPI ROUTES","textChars":14,"textLines":1,"bbox":[884,422,280,23]}
+{"kind":"textbox","id":"sh/ql8rqxs7","slide":1,"text":"Runs authorized operations","textPreview":"Runs authorized operations","textChars":26,"textLines":1,"bbox":[884,442,280,20]}
+{"kind":"shape","id":"sh/rm1sz2ts","slide":1,"bbox":[1002,466,16,14]}
+{"kind":"shape","id":"sh/1g3upwva","slide":1,"bbox":[836,480,348,48]}
+{"kind":"textbox","id":"sh/0fudgrup","slide":1,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[846,490,28,28]}
+{"kind":"textbox","id":"sh/zelcnmd4","slide":1,"text":"MYSQL DATABASE","textPreview":"MYSQL DATABASE","textChars":14,"textLines":1,"bbox":[884,484,280,23]}
+{"kind":"textbox","id":"sh/etsbehcj","slide":1,"text":"Persists transactional data","textPreview":"Persists transactional data","textChars":27,"textLines":1,"bbox":[884,504,280,20]}
+{"kind":"shape","id":"sh/dsjulcvy","slide":1,"bbox":[72,606,1136,72]}
+{"kind":"textbox","id":"sh/cratc7ud","slide":1,"text":"DESIGN PRINCIPLE","textPreview":"DESIGN PRINCIPLE","textChars":16,"textLines":1,"bbox":[98,621,210,38]}
+{"kind":"textbox","id":"sh/rq1cj2ds","slide":1,"text":"JWT identifies the user. RBAC limits route access. Attempt IDs keep answers and anti-cheat events in the same exam session.","textPreview":"JWT identifies the user. RBAC limits route access. Attempt IDs keep answers and anti-cheat events in the same exam session.","textChars":123,"textLines":1,"bbox":[320,618,850,44]}
+{"kind":"notes","id":"nt/2phlb1","slide":1,"text":"Designed from the user-provided outline: Database & API Design, simplified ERD, JWT, and RBAC."}

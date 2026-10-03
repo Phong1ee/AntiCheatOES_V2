@@ -1,0 +1,22 @@
+
+.rich-editor { padding:12px; border:1px solid #cbd5e1; border-radius:10px; background:white; }
+.rich-editor-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding-bottom:10px; border-bottom:1px solid #e2e8f0; }
+.rich-editor-toolbar button,.rich-editor > div:not([role=textbox]) > button { min-height:32px; border:1px solid #bfdbfe; border-radius:6px; padding:5px 10px; color:#1d4ed8; background:#eff6ff; font-size:12px; font-weight:500; }
+.rich-editor-toolbar button:hover:not(:disabled) { background:#dbeafe; }
+.rich-editor-toolbar button:disabled { opacity:.45; cursor:not-allowed; }
+.rich-editor-toolbar button[data-command=bold] { font-weight:700; }
+.rich-editor-toolbar button[data-command=italic] { font-style:italic; }
+.rich-editor-toolbar button[data-command=underline] { text-decoration:underline; }
+.rich-editor-toolbar button[data-command=strikeThrough] { text-decoration:line-through; }
+.rich-editor-toolbar select { min-height:32px; border:1px solid #cbd5e1; border-radius:6px; padding:5px 8px; color:#334155; font-size:12px; background:white; }
+.rich-editor [role=textbox] { min-height:110px; margin-top:8px; padding:10px; border-radius:6px; line-height:1.6; }
+.rich-editor button:focus-visible,.rich-editor select:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
+.content-media-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:10px; }
+.content-media-action { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.content-media-upload { position:relative; display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:8px 14px; border:1px solid #bfdbfe; border-radius:7px; color:#1d4ed8; background:#eff6ff; font-size:13px; font-weight:500; cursor:pointer; }
+.content-media-upload:hover { background:#dbeafe; }
+.content-media-upload[aria-disabled=true] { opacity:.45; cursor:not-allowed; }
+.content-media-upload:focus-within { outline:2px solid #2563eb; outline-offset:3px; }
+.content-media-file { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+.content-media-remove { color:#b91c1c; font-size:13px; text-decoration:underline; text-underline-offset:4px; padding:6px; }
+.content-media-remove:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }

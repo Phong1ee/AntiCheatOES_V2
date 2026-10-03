@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import type { StudentAnswers, StudentQuestion } from '../../types/student-exam';
 
 interface QuestionPanelProps {
+  currentPageQuestionIds?: number[];
   questions: StudentQuestion[];
   currentQuestion: number;
   answers: StudentAnswers;
@@ -18,6 +19,7 @@ interface QuestionPanelProps {
 }
 
 export function QuestionPanel({
+  currentPageQuestionIds,
   questions,
   currentQuestion,
   answers,
@@ -83,17 +85,17 @@ export function QuestionPanel({
           {questions.map((question, index) => {
             const answer = answers[question.id];
             const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
-            const isCurrent = index === currentQuestion;
-            const isLocked = sequentialNavigation && !isCurrent && !isAnswered;
+            const isCurrent = currentPageQuestionIds ? currentPageQuestionIds.includes(question.id) : index === currentQuestion;
+            const isLocked = sequentialNavigation && !isCurrent;
             const isMarked = markedQuestionIds.includes(question.id);
 
             return (
               <button
                 key={question.id}
                 onClick={() => {
-                  if (!sequentialNavigation) onQuestionSelect(index);
+                  if (!isLocked) onQuestionSelect(index);
                 }}
-                disabled={sequentialNavigation}
+                disabled={isLocked}
                 className={`relative aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${
                   isCurrent
                     ? isMarked

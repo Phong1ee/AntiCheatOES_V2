@@ -1,0 +1,14 @@
+import { QuestionArea } from './QuestionArea';
+import { RichContent } from '../common/RichContent';
+import type { StudentAnswers, StudentAnswer, StudentQuestion } from '../../types/student-exam';
+
+export function QuestionPage({ questions, allQuestions, answers, marked = [], onAnswerChange, onToggleMark }: { questions: StudentQuestion[]; allQuestions: StudentQuestion[]; answers: StudentAnswers; marked?: number[]; onAnswerChange: (id: number, answer: StudentAnswer) => void; onToggleMark: (id: number) => void }) {
+  return <div className="space-y-6">{questions.map((question, index) => {
+    const block = question.layout?.block;
+    const first = block && (index === 0 || questions[index - 1].layout?.block?.block_id !== block.block_id);
+    return <section key={question.id} aria-label={`Question ${allQuestions.findIndex(q => q.id === question.id) + 1}`}>
+      {first && <div className="mx-auto max-w-4xl rounded-lg border border-teal-200 bg-white p-5 mb-4"><h2 className="font-semibold">{block.kind === 'parent' ? 'Passage / parent stimulus' : 'Question group'}: {block.title}{question.layout?.continuation ? ' (continued)' : ''}</h2><RichContent content={block} attemptId={question.attemptId} /></div>}
+      <QuestionArea hideNavigation question={question} currentQuestion={allQuestions.findIndex(q => q.id === question.id)} totalQuestions={allQuestions.length} answer={answers[question.id]} onAnswerChange={onAnswerChange} onPrevious={() => {}} onNext={() => {}} sequentialNavigation={false} currentAnswerIsValid isSavingNext={false} isMarked={marked.includes(question.id)} onToggleMark={() => onToggleMark(question.id)} />
+    </section>;
+  })}</div>;
+}

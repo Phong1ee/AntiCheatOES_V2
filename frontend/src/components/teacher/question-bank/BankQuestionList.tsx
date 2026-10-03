@@ -196,7 +196,7 @@ export function BankQuestionList({
 
                   <div className="min-w-0 flex-1">
                     <p className="line-clamp-2 text-sm font-medium leading-5 text-gray-800">
-                      {question.question_text}
+                      {question.question_text || (question.image_media_id ? "[Image question]" : question.audio_media_id ? "[Audio question]" : "[Question]")}
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">

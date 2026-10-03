@@ -1,3 +1,4 @@
+import type { RichContent, QuestionLayout } from "./rich-content";
 export type StudentResultStatus = "published" | "pending" | "hidden";
 export type StudentQuestionGradingStatus = "graded" | "pending" | "blank";
 
@@ -6,7 +7,12 @@ export interface StudentViolationEvent {
   occurredAt: string | null;
 }
 
-export interface StudentResultQuestion {
+export interface StudentResultQuestion extends RichContent {
+  attemptId?: number;
+  layout?: QuestionLayout;
+  optionContents?: Array<RichContent & { id?: number; options_id?: number; text: string }>;
+  selectedOptionId?: number | null;
+  correctOptionIds?: number[];
   id: number;
   type: "mcq" | "essay";
   topic?: string | null;

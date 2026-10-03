@@ -49,6 +49,7 @@ const snapshotOf = (settings: TeacherExamSettingsPayload, resultVisibility: Resu
 
 /** Returns a message when the payload is not safe to send, otherwise null. */
 const validateSettings = (settings: TeacherExamSettingsPayload): string | null => {
+  if (!Number.isInteger(settings.questions_per_page) || settings.questions_per_page < 1 || settings.questions_per_page > 50) return 'Questions per page must be a whole number from 1 to 50.';
   if (
     settings.anti_cheat_enabled
     && (!Number.isInteger(settings.violation_limit) || settings.violation_limit < 1 || settings.violation_limit > 100)
@@ -103,6 +104,7 @@ export function SettingsTab(
         const data = await teacherExamSettingsService.get(persistedExamId);
         if (!active) return;
         const mapped: TeacherExamSettingsPayload = {
+          questions_per_page: data.questions_per_page ?? 1,
           shuffle_question: data.shuffle_question,
           shuffle_answer_options: data.shuffle_answer_options,
           sequential_navigation: data.sequential_navigation,
@@ -187,6 +189,7 @@ export function SettingsTab(
       const saved = await teacherExamSettingsService.update(targetExamId, payload);
       if (currentExamId.current !== targetExamId) return;
       const persisted: TeacherExamSettingsPayload = {
+        questions_per_page: saved.questions_per_page,
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
         sequential_navigation: saved.sequential_navigation,
@@ -267,6 +270,7 @@ export function SettingsTab(
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between gap-4">
+            <label className="block">Questions per page (1–50)<Input type="number" min={1} max={50} value={settings.questions_per_page} onChange={e => setSettings(current => ({ ...current, questions_per_page: Number(e.target.value) }))} /></label>
             <Label htmlFor="sequential-navigation">Require Sequential Completion</Label>
             <Switch
               id="sequential-navigation"

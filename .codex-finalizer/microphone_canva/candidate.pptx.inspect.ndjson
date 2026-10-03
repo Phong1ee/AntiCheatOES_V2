@@ -1,0 +1,123 @@
+{"kind":"deck","id":"pr/0ou90q","name":"Deck"}
+{"kind":"layout","layoutId":"a9ed3abc-3654-49f7-a3f2-0df60dc9ade4","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"2d637499-5c26-4542-ac9c-95b4a7e86d27","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/zzt1g5","slide":1,"title":"MICROPHONE MONITORING","textShapes":21}
+{"kind":"shape","id":"sh/f29sfahw","slide":1,"bbox":[72,48,78,7]}
+{"kind":"textbox","id":"sh/03i9ofih","slide":1,"text":"MICROPHONE MONITORING","textPreview":"MICROPHONE MONITORING","textChars":21,"textLines":1,"bbox":[72,66,880,52]}
+{"kind":"textbox","id":"sh/14rahkz2","slide":1,"text":"Detecting multiple-speaker activity during an examination","textPreview":"Detecting multiple-speaker activity during an examination","textChars":57,"textLines":1,"bbox":[72,114,930,30]}
+{"kind":"shape","id":"sh/6dgril0z","slide":1,"bbox":[72,202,236,286]}
+{"kind":"textbox","id":"sh/repsrqhk","slide":1,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[94,224,48,48]}
+{"kind":"textbox","id":"sh/szy9kvi5","slide":1,"text":"Audio Capture","textPreview":"Audio Capture","textChars":13,"textLines":1,"bbox":[94,286,194,40]}
+{"kind":"textbox","id":"sh/t0rad0zq","slide":1,"text":"Reuses the microphone stream obtained during the security preflight.","textPreview":"Reuses the microphone stream obtained during the security preflight.","textChars":68,"textLines":1,"bbox":[94,334,192,100]}
+{"kind":"textbox","id":"sh/a9krup0j","slide":1,"text":"LIVE AUDIO","textPreview":"LIVE AUDIO","textChars":10,"textLines":1,"bbox":[94,444,105,27]}
+{"kind":"shape","id":"sh/batsnuh4","slide":1,"bbox":[372,202,236,286]}
+{"kind":"textbox","id":"sh/zupgryhc","slide":1,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[394,224,48,48]}
+{"kind":"textbox","id":"sh/ytgfyt07","slide":1,"text":"Speech Detection","textPreview":"Speech Detection","textChars":16,"textLines":1,"bbox":[394,286,194,40]}
+{"kind":"textbox","id":"sh/lw7ytozi","slide":1,"text":"Silero VAD identifies speech segments and maintains a 10-second, 16 kHz audio buffer.","textPreview":"Silero VAD identifies speech segments and maintains a 10-second, 16 kHz audio buffer.","textChars":85,"textLines":1,"bbox":[394,334,192,100]}
+{"kind":"textbox","id":"sh/0vyx03ix","slide":1,"text":"SILERO VAD","textPreview":"SILERO VAD","textChars":10,"textLines":1,"bbox":[394,444,105,27]}
+{"kind":"shape","id":"sh/ny9gvyho","slide":1,"bbox":[672,202,236,286]}
+{"kind":"textbox","id":"sh/mxgf2t03","slide":1,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[694,224,48,48]}
+{"kind":"textbox","id":"sh/9kryx8zu","slide":1,"text":"Speaker Analysis","textPreview":"Speaker Analysis","textChars":16,"textLines":1,"bbox":[694,286,194,40]}
+{"kind":"textbox","id":"sh/8zix43i9","slide":1,"text":"Pyannote 3.0 INT8 runs locally to detect overlapping speech and alternating speaker turns.","textPreview":"Pyannote 3.0 INT8 runs locally to detect overlapping speech and alternating speaker turns.","textChars":90,"textLines":1,"bbox":[694,334,192,100]}
+{"kind":"textbox","id":"sh/vm9gzihk","slide":1,"text":"BROWSER AI","textPreview":"BROWSER AI","textChars":10,"textLines":1,"bbox":[694,444,105,27]}
+{"kind":"shape","id":"sh/al0f6d0z","slide":1,"bbox":[972,202,236,286]}
+{"kind":"textbox","id":"sh/6hkjyhk7","slide":1,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[994,224,48,48]}
+{"kind":"textbox","id":"sh/7id0rm1s","slide":1,"text":"Event Processing","textPreview":"Event Processing","textChars":16,"textLines":1,"bbox":[994,286,194,40]}
+{"kind":"textbox","id":"sh/sjm10r2d","slide":1,"text":"Temporal filters and a 3-second cooldown reduce repeated alerts before the server records the event.","textPreview":"Temporal filters and a 3-second cooldown reduce repeated alerts before the server records the event.","textChars":100,"textLines":1,"bbox":[994,334,192,100]}
+{"kind":"textbox","id":"sh/tkvitcjy","slide":1,"text":"SERVER VERIFIED","textPreview":"SERVER VERIFIED","textChars":15,"textLines":1,"bbox":[994,444,132,27]}
+{"kind":"shape","id":"sh/itkzuxkb","slide":1,"bbox":[316,326,44,30]}
+{"kind":"shape","id":"sh/jet0n21w","slide":1,"bbox":[616,326,44,30]}
+{"kind":"shape","id":"sh/kf21w72h","slide":1,"bbox":[916,326,44,30]}
+{"kind":"textbox","id":"sh/5gbipcj2","slide":1,"text":"MULTIPLE_VOICES_DETECTED","textPreview":"MULTIPLE_VOICES_DETECTED","textChars":24,"textLines":1,"bbox":[868,508,337,26]}
+{"kind":"shape","id":"sh/2poj61kf","slide":1,"bbox":[72,556,1136,86]}
+{"kind":"textbox","id":"sh/3ax0z610","slide":1,"text":"PRIVACY BY DESIGN","textPreview":"PRIVACY BY DESIGN","textChars":17,"textLines":1,"bbox":[98,575,210,38]}
+{"kind":"textbox","id":"sh/xgjulk7e","slide":1,"text":"Raw audio, transcripts, voiceprints, and biometric data are never uploaded or stored. Only limited event metadata reaches the server.","textPreview":"Raw audio, transcripts, voiceprints, and biometric data are never uploaded or stored. Only limited event metadata reaches the server.","textChars":133,"textLines":1,"bbox":[312,571,860,46]}
+{"kind":"notes","id":"nt/zzt1g5","slide":1,"text":"Source: Content/6_AntiCheat_System.tex, Microphone and Voice Monitoring section."}
+{"kind":"slide","id":"sl/zo3cn6","slide":2,"title":"MICROPHONE AI EVALUATION","textShapes":47}
+{"kind":"shape","id":"sh/dgn2xonq","slide":2,"bbox":[72,48,78,7]}
+{"kind":"textbox","id":"sh/qtwjm9oz","slide":2,"text":"MICROPHONE AI EVALUATION","textPreview":"MICROPHONE AI EVALUATION","textChars":24,"textLines":1,"bbox":[72,66,880,52]}
+{"kind":"textbox","id":"sh/be5kve5k","slide":2,"text":"Four-model comparison highlights the browser deployment trade-off","textPreview":"Four-model comparison highlights the browser deployment trade-off","textChars":65,"textLines":1,"bbox":[72,114,930,30]}
+{"kind":"shape","id":"sh/ore1kz69","slide":2,"bbox":[72,158,1136,36]}
+{"kind":"textbox","id":"sh/psnit4nu","slide":2,"text":"BENCHMARK: 900 clips | 10 seconds | 16 kHz mono | 3 balanced classes","textPreview":"BENCHMARK: 900 clips | 10 seconds | 16 kHz mono | 3 balanced classes","textChars":68,"textLines":1,"bbox":[94,161,1092,28]}
+{"kind":"shape","id":"sh/2pcji9o3","slide":2,"bbox":[72,214,390,386]}
+{"kind":"textbox","id":"sh/3ql0ru5o","slide":2,"text":"DEPLOYED MODEL","textPreview":"DEPLOYED MODEL","textChars":14,"textLines":1,"bbox":[98,228,250,24]}
+{"kind":"textbox","id":"sh/8ny1w36d","slide":2,"text":"Pyannote 3.0 INT8 ONNX","textPreview":"Pyannote 3.0 INT8 ONNX","textChars":22,"textLines":1,"bbox":[98,256,320,30]}
+{"kind":"textbox","id":"sh/9o7258ny","slide":2,"text":"Accuracy","textPreview":"Accuracy","textChars":8,"textLines":1,"bbox":[98,298,225,24]}
+{"kind":"textbox","id":"sh/5kve14r6","slide":2,"text":"67.00%","textPreview":"67.00%","textChars":6,"textLines":1,"bbox":[326,298,110,24]}
+{"kind":"shape","id":"sh/kjmd8zql","slide":2,"bbox":[98,324,338,16]}
+{"kind":"shape","id":"sh/jidwzu90","slide":2,"bbox":[98,324,226.46,16]}
+{"kind":"textbox","id":"sh/ih4v6p8f","slide":2,"text":"Precision","textPreview":"Precision","textChars":9,"textLines":1,"bbox":[98,362,225,24]}
+{"kind":"textbox","id":"sh/xgvexkra","slide":2,"text":"99.35%","textPreview":"99.35%","textChars":6,"textLines":1,"bbox":[326,362,110,24]}
+{"kind":"shape","id":"sh/wfmd4fqp","slide":2,"bbox":[98,388,338,16]}
+{"kind":"shape","id":"sh/vedwva94","slide":2,"bbox":[98,388,335.8,16]}
+{"kind":"textbox","id":"sh/adkv2psj","slide":2,"text":"Multiple-speaker recall","textPreview":"Multiple-speaker recall","textChars":23,"textLines":1,"bbox":[98,426,225,24]}
+{"kind":"textbox","id":"sh/hcfe9ore","slide":2,"text":"50.83%","textPreview":"50.83%","textChars":6,"textLines":1,"bbox":[326,426,110,24]}
+{"kind":"shape","id":"sh/gb6xgjqt","slide":2,"bbox":[98,452,338,16]}
+{"kind":"shape","id":"sh/0rypsr21","slide":2,"bbox":[98,452,171.81,16]}
+{"kind":"shape","id":"sh/ls7q1w3m","slide":2,"bbox":[98,512,96,66]}
+{"kind":"textbox","id":"sh/y5g7qhkb","slide":2,"text":"1.54 MB","textPreview":"1.54 MB","textChars":7,"textLines":1,"bbox":[104,518,84,28]}
+{"kind":"textbox","id":"sh/z6p8zmlw","slide":2,"text":"MODEL SIZE","textPreview":"MODEL SIZE","textChars":10,"textLines":1,"bbox":[104,546,84,20]}
+{"kind":"shape","id":"sh/c3ypo725","slide":2,"bbox":[204,512,112,66]}
+{"kind":"textbox","id":"sh/d476xc3q","slide":2,"text":"107.58 ms","textPreview":"107.58 ms","textChars":9,"textLines":1,"bbox":[210,518,100,28]}
+{"kind":"textbox","id":"sh/q1w7mxkz","slide":2,"text":"P95 LATENCY","textPreview":"P95 LATENCY","textChars":11,"textLines":1,"bbox":[210,546,100,20]}
+{"kind":"shape","id":"sh/r2pov2lk","slide":2,"bbox":[326,512,110,66]}
+{"kind":"textbox","id":"sh/4zepk729","slide":2,"text":"0.67%","textPreview":"0.67%","textChars":5,"textLines":1,"bbox":[332,518,98,28]}
+{"kind":"textbox","id":"sh/p0n6tc3e","slide":2,"text":"FVR","textPreview":"FVR","textChars":3,"textLines":1,"bbox":[332,546,98,20]}
+{"kind":"shape","id":"sh/7ul8325g","slide":2,"bbox":[486,214,722,386]}
+{"kind":"textbox","id":"sh/6tc7uxov","slide":2,"text":"MODEL COMPARISON","textPreview":"MODEL COMPARISON","textChars":16,"textLines":1,"bbox":[510,230,300,28]}
+{"kind":"shape","id":"sh/twnq5snm","slide":2,"bbox":[510,270,190,42]}
+{"kind":"textbox","id":"sh/svepw761","slide":2,"text":"Model","textPreview":"Model","textChars":5,"textLines":1,"bbox":[518,274,174,34]}
+{"kind":"shape","id":"sh/fy58725c","slide":2,"bbox":[700,270,86,42]}
+{"kind":"textbox","id":"sh/uxwryxo7","slide":2,"text":"Accuracy","textPreview":"Accuracy","textChars":8,"textLines":1,"bbox":[708,274,70,34]}
+{"kind":"shape","id":"sh/h0nq9cni","slide":2,"bbox":[786,270,110,42]}
+{"kind":"textbox","id":"sh/gze907mx","slide":2,"text":"Recall","textPreview":"Recall","textChars":6,"textLines":1,"bbox":[794,274,94,34]}
+{"kind":"shape","id":"sh/3258bm5o","slide":2,"bbox":[896,270,72,42]}
+{"kind":"textbox","id":"sh/21wr2h43","slide":2,"text":"FVR","textPreview":"FVR","textChars":3,"textLines":1,"bbox":[904,274,56,34]}
+{"kind":"shape","id":"sh/m54belcf","slide":2,"bbox":[968,270,214,42]}
+{"kind":"textbox","id":"sh/n6ds7qd0","slide":2,"text":"Deployment fit","textPreview":"Deployment fit","textChars":14,"textLines":1,"bbox":[976,274,198,34]}
+{"kind":"shape","id":"sh/o76tgvu5","slide":2,"bbox":[510,312,190,52]}
+{"kind":"textbox","id":"sh/98fa90vq","slide":2,"text":"Pyannote 3.0 INT8","textPreview":"Pyannote 3.0 INT8","textChars":17,"textLines":1,"bbox":[518,317,174,42]}
+{"kind":"shape","id":"sh/a9obi5cb","slide":2,"bbox":[700,312,86,52]}
+{"kind":"textbox","id":"sh/baxsbqdw","slide":2,"text":"67.00%","textPreview":"67.00%","textChars":6,"textLines":1,"bbox":[708,317,70,42]}
+{"kind":"shape","id":"sh/wb6tkvuh","slide":2,"bbox":[786,312,110,52]}
+{"kind":"textbox","id":"sh/xwfad0v2","slide":2,"text":"50.83%","textPreview":"50.83%","textChars":6,"textLines":1,"bbox":[794,317,94,42]}
+{"kind":"shape","id":"sh/qdkr61c7","slide":2,"bbox":[896,312,72,52]}
+{"kind":"textbox","id":"sh/retsz6ds","slide":2,"text":"0.67%","textPreview":"0.67%","textChars":5,"textLines":1,"bbox":[904,317,56,42]}
+{"kind":"shape","id":"sh/t43m18j6","slide":2,"bbox":[968,312,214,52]}
+{"kind":"textbox","id":"sh/s3u5s3i1","slide":2,"text":"Browser, 1.54 MB","textPreview":"Browser, 1.54 MB","textChars":16,"textLines":1,"bbox":[976,317,198,42]}
+{"kind":"shape","id":"sh/7214zy1g","slide":2,"bbox":[510,364,190,52]}
+{"kind":"textbox","id":"sh/61s3qt0v","slide":2,"text":"Legacy Pyannote","textPreview":"Legacy Pyannote","textChars":15,"textLines":1,"bbox":[518,369,174,42]}
+{"kind":"shape","id":"sh/h83m58ji","slide":2,"bbox":[700,364,86,52]}
+{"kind":"textbox","id":"sh/g7u5w3ix","slide":2,"text":"80.67%","textPreview":"80.67%","textChars":6,"textLines":1,"bbox":[708,369,70,42]}
+{"kind":"shape","id":"sh/f6l43y1c","slide":2,"bbox":[786,364,110,52]}
+{"kind":"textbox","id":"sh/u5cnud0r","slide":2,"text":"71.50%","textPreview":"71.50%","textChars":6,"textLines":1,"bbox":[794,369,94,42]}
+{"kind":"shape","id":"sh/xcjmtoje","slide":2,"bbox":[896,364,72,52]}
+{"kind":"textbox","id":"sh/wbqlkjit","slide":2,"text":"1.00%","textPreview":"1.00%","textChars":5,"textLines":1,"bbox":[904,369,56,42]}
+{"kind":"shape","id":"sh/ovu50jqp","slide":2,"bbox":[968,364,214,52]}
+{"kind":"textbox","id":"sh/9w3m9oru","slide":2,"text":"Server candidate","textPreview":"Server candidate","textChars":16,"textLines":1,"bbox":[976,369,198,42]}
+{"kind":"shape","id":"sh/mtcny98j","slide":2,"bbox":[510,416,190,52]}
+{"kind":"textbox","id":"sh/nul47e94","slide":2,"text":"NVIDIA Sortformer","textPreview":"NVIDIA Sortformer","textChars":17,"textLines":1,"bbox":[518,421,174,42]}
+{"kind":"shape","id":"sh/wje54jql","slide":2,"bbox":[700,416,86,52]}
+{"kind":"textbox","id":"sh/xknmdor6","slide":2,"text":"85.89%","textPreview":"85.89%","textChars":6,"textLines":1,"bbox":[708,421,70,42]}
+{"kind":"shape","id":"sh/ahwn2t8f","slide":2,"bbox":[786,416,110,52]}
+{"kind":"textbox","id":"sh/bi54by90","slide":2,"text":"78.83%","textPreview":"78.83%","textChars":6,"textLines":1,"bbox":[794,421,94,42]}
+{"kind":"shape","id":"sh/kne583qh","slide":2,"bbox":[896,416,72,52]}
+{"kind":"textbox","id":"sh/lo7mh8r2","slide":2,"text":"0.00%*","textPreview":"0.00%*","textChars":6,"textLines":1,"bbox":[904,421,56,42]}
+{"kind":"shape","id":"sh/vi9872tk","slide":2,"bbox":[968,416,214,52]}
+{"kind":"textbox","id":"sh/uh07yxsz","slide":2,"text":"CUDA/NeMo, 493 MB","textPreview":"CUDA/NeMo, 493 MB","textChars":17,"textLines":1,"bbox":[976,421,198,42]}
+{"kind":"shape","id":"sh/hkrq9cba","slide":2,"bbox":[510,468,190,52]}
+{"kind":"textbox","id":"sh/gjip07ap","slide":2,"text":"NVIDIA MSDD","textPreview":"NVIDIA MSDD","textChars":11,"textLines":1,"bbox":[518,473,174,42]}
+{"kind":"shape","id":"sh/7epo3it8","slide":2,"bbox":[700,468,86,52]}
+{"kind":"textbox","id":"sh/6dg7uxsn","slide":2,"text":"64.67%","textPreview":"64.67%","textChars":6,"textLines":1,"bbox":[708,473,70,42]}
+{"kind":"shape","id":"sh/tgrq5sbe","slide":2,"bbox":[786,468,110,52]}
+{"kind":"textbox","id":"sh/8fypwnat","slide":2,"text":"60.33%","textPreview":"60.33%","textChars":6,"textLines":1,"bbox":[794,473,94,42]}
+{"kind":"shape","id":"sh/rat8fmts","slide":2,"bbox":[896,468,72,52]}
+{"kind":"textbox","id":"sh/q9k76hs7","slide":2,"text":"26.67%","textPreview":"26.67%","textChars":6,"textLines":1,"bbox":[904,473,56,42]}
+{"kind":"shape","id":"sh/2lgfy9cz","slide":2,"bbox":[968,468,214,52]}
+{"kind":"textbox","id":"sh/nmpwredk","slide":2,"text":"RTF 2.92, too slow","textPreview":"RTF 2.92, too slow","textChars":18,"textLines":1,"bbox":[976,473,198,42]}
+{"kind":"textbox","id":"sh/onix0ju5","slide":2,"text":"* Sortformer's 0.00% FVR applies only to this controlled benchmark.","textPreview":"* Sortformer's 0.00% FVR applies only to this controlled benchmark.","textChars":67,"textLines":1,"bbox":[510,526,672,24]}
+{"kind":"textbox","id":"sh/poretovq","slide":2,"text":"Timing used different hardware providers, so latency is not hardware-equivalent.","textPreview":"Timing used different hardware providers, so latency is not hardware-equivalent.","textChars":80,"textLines":1,"bbox":[510,550,672,28]}
+{"kind":"shape","id":"sh/ehgfu9w3","slide":2,"bbox":[72,624,1136,66]}
+{"kind":"textbox","id":"sh/fipwnudo","slide":2,"text":"DEPLOYMENT DECISION","textPreview":"DEPLOYMENT DECISION","textChars":19,"textLines":1,"bbox":[96,638,240,36]}
+{"kind":"textbox","id":"sh/0jyxwzu9","slide":2,"text":"Sortformer leads accuracy, but Pyannote INT8 remains the practical browser choice: compact, fast, local, and privacy-preserving.","textPreview":"Sortformer leads accuracy, but Pyannote INT8 remains the practical browser choice: compact, fast, local, and privacy-preserving.","textChars":128,"textLines":1,"bbox":[338,632,840,48]}
+{"kind":"notes","id":"nt/zo3cn6","slide":2,"text":"Source: Content/6_AntiCheat_System.tex, Model Validation and Deployment Considerations sections."}

@@ -26,6 +26,7 @@ interface Exam {
   passingScore: number;
   resultVisibility: ResultVisibility;
   version: number;
+  isLocked: boolean;
 }
 
 const toManagerExam = (exam: TeacherExamApi): Exam => ({
@@ -47,6 +48,7 @@ const toManagerExam = (exam: TeacherExamApi): Exam => ({
   passingScore: exam.passing_score,
   resultVisibility: exam.result_visibility ?? "hidden",
   version: exam.version,
+  isLocked: exam.is_locked ?? false,
 });
 
 type EditorTab = 'general' | 'questions' | 'settings';

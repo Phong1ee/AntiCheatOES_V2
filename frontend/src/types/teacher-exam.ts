@@ -31,6 +31,7 @@ export interface TeacherExamApi {
   passing_score: number;
   question_selection_mode: "manual" | "fixed_randomization" | "pool";
   version: number;
+  is_locked?: boolean;
 }
 
 export interface TeacherExamRequest {

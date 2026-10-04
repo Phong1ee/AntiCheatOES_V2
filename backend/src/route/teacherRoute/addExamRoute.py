@@ -34,7 +34,11 @@ from src.models.teacher.requestModel.TeacherExamRequest import (
 from src.service.exam_schedule_service import describe_conflicts, find_schedule_conflicts
 from src.service.teacher_subject_service import require_active_subject_assignment
 from src.service.time_service import vietnam_now
-from src.service.exam_version_service import claim_exam_version
+from src.service.exam_version_service import (
+    STARTED_EXAM_LOCK_MESSAGE,
+    claim_exam_version,
+    is_exam_content_locked,
+)
 from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_exam_updated
 from src.service.exam_notification_service import (
@@ -103,6 +107,7 @@ def _serialize(db: Session, exam: Exam) -> dict:
             else exam.question_selection_mode
         ),
         "version": exam.version,
+        "is_locked": is_exam_content_locked(db, exam),
     }
 
 
@@ -403,7 +408,13 @@ def update_exam_status(
 ):
     del role_check
     try:
-        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
+        exam = claim_exam_version(
+            db, exam_id, current_user["school_id"], request.expected_version,
+            allow_started_exam=True,
+        )
+        # Reverting to draft would otherwise unlock an exam students have started.
+        if request.status == "draft" and is_exam_content_locked(db, exam):
+            raise HTTPException(status_code=409, detail=STARTED_EXAM_LOCK_MESSAGE)
         previous = snapshot_exam_notification_fields(exam)
         if request.status == "published":
             _validate_publishable(db, exam)
@@ -442,7 +453,11 @@ def update_result_visibility(
 ):
     del role_check
     try:
-        exam = claim_exam_version(db, exam_id, current_user["school_id"], request.expected_version)
+        # Releasing results is a post-exam action, so it stays available after students start.
+        exam = claim_exam_version(
+            db, exam_id, current_user["school_id"], request.expected_version,
+            allow_started_exam=True,
+        )
         exam.result_visibility = request.result_visibility
         record_audit(db, actor_school_id=current_user["school_id"], actor_role=current_user.get("role"), action="EXAM_RESULT_VISIBILITY_UPDATED", entity_type="exam", entity_id=exam.exam_id, metadata={"subject_id": exam.subject_id, "result_visibility": exam.result_visibility.value if hasattr(exam.result_visibility, "value") else str(exam.result_visibility)})
         db.commit()
@@ -470,7 +485,10 @@ def delete_exam_from_database(
     """Delete an owned exam and attempt data while retaining reusable questions/options."""
     del role_check
     try:
-        exam = claim_exam_version(db, exam_id, current_user["school_id"], expected_version)
+        exam = claim_exam_version(
+            db, exam_id, current_user["school_id"], expected_version,
+            allow_started_exam=True,
+        )
         attempt_ids = [row[0] for row in db.query(Attempt.attempt_id).filter(Attempt.exam_id == exam_id).all()]
         if attempt_ids:
             db.query(MCQAnswer).filter(MCQAnswer.attempt_id.in_(attempt_ids)).delete(synchronize_session=False)

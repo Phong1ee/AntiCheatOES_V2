@@ -6,16 +6,6 @@ import { teacherExamService } from '../../../../services/teacher-exam.service';
 import { SectionSaveBar } from '../SectionSaveBar';
 import type { AssignmentOptions } from '../../../../types/teacher-exam';
 import { normalizeSearchText } from '../../../../utils/search';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../../../ui/alert-dialog';
 import { Badge } from '../../../ui/badge';
 import { Button } from '../../../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
@@ -42,7 +32,6 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [confirmRemoval, setConfirmRemoval] = useState(false);
 
   const load = useCallback(async () => {
     if (!examId || examId.startsWith('new-')) {
@@ -89,7 +78,6 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
   const visibleSelectedCount = visibleStudents.filter((student) => selectedIds.has(student.school_id)).length;
   const allVisibleSelected = visibleStudents.length > 0 && visibleSelectedCount === visibleStudents.length;
   const selectAllState = allVisibleSelected ? true : visibleSelectedCount > 0 ? 'indeterminate' : false;
-  const removedCount = [...originalIds].filter((id) => !selectedIds.has(id)).length;
   const dirty = selectedIds.size !== originalIds.size
     || [...selectedIds].some((id) => !originalIds.has(id));
 
@@ -98,6 +86,8 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
   }, [dirty, onDirtyChange]);
 
   const toggleStudent = (schoolId: string) => {
+    // Existing assignments are permanent.
+    if (originalIds.has(schoolId)) return;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(schoolId)) next.delete(schoolId);
@@ -111,7 +101,7 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
       const next = new Set(current);
       visibleStudents.forEach((student) => {
         if (checked) next.add(student.school_id);
-        else next.delete(student.school_id);
+        else if (!originalIds.has(student.school_id)) next.delete(student.school_id);
       });
       return next;
     });
@@ -131,7 +121,6 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
         // Older API responses may not return details.
         toast.success('Assignments saved.');
       }
-      setConfirmRemoval(false);
       await onSaved();
       await load();
       setSavedAt(Date.now());
@@ -220,11 +209,16 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
                 <div className="p-8 text-center text-gray-500">No students match the current filters.</div>
               ) : visibleStudents.map((student) => (
                 <label key={student.school_id} className="flex cursor-pointer items-start gap-3 border-b p-4 last:border-0 hover:bg-gray-50">
-                  <Checkbox checked={selectedIds.has(student.school_id)} onCheckedChange={() => toggleStudent(student.school_id)} />
+                  <Checkbox
+                    checked={selectedIds.has(student.school_id)}
+                    disabled={originalIds.has(student.school_id)}
+                    onCheckedChange={() => toggleStudent(student.school_id)}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium text-gray-800">{student.full_name}</span>
                       <Badge variant="outline">{student.school_id}</Badge>
+                      {originalIds.has(student.school_id) && <Badge variant="secondary">Assigned</Badge>}
                     </div>
                     <p className="mt-1 text-xs text-gray-500">{student.email}</p>
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -244,32 +238,15 @@ export function AssignmentTab({ examId, expectedVersion, onSaved, onDirtyChange 
               summary={
                 <span>
                   {selectedIds.size} student{selectedIds.size === 1 ? '' : 's'} selected
-                  {removedCount > 0 && ` · ${removedCount} to remove`}
+                  {' · assigned students cannot be removed'}
                 </span>
               }
-              onSave={() => removedCount > 0 ? setConfirmRemoval(true) : void save()}
+              onSave={() => void save()}
               onDiscard={() => { setSelectedIds(new Set(originalIds)); setSaveError(null); }}
             />
           </>
         )}
       </CardContent>
-
-      <AlertDialog open={confirmRemoval} onOpenChange={setConfirmRemoval}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove {removedCount} existing assignment{removedCount === 1 ? '' : 's'}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Students with an existing attempt cannot be removed; the server will reject the synchronization without partial changes.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={saving} onClick={(event) => { event.preventDefault(); void save(); }}>
-              Confirm and Save
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Card>
   );
 }

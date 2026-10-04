@@ -2,8 +2,27 @@ from fastapi import HTTPException
 from fastapi.params import Query
 from sqlalchemy.orm import Session
 
-from src.a_db_config import Attempt, AttemptStatus, Exam
+from src.a_db_config import Attempt, AttemptStatus, Exam, ExamStatus
 from src.service.teacher_subject_service import require_active_subject_assignment
+
+STARTED_EXAM_LOCK_MESSAGE = (
+    "This published exam is locked because a student has already started it."
+)
+
+
+def exam_has_started_attempts(db: Session, exam_id: int) -> bool:
+    """True when any student has an attempt of any status on the exam."""
+    return (
+        db.query(Attempt.attempt_id).filter(Attempt.exam_id == exam_id).first()
+        is not None
+    )
+
+
+def is_exam_content_locked(db: Session, exam: Exam) -> bool:
+    status = exam.status.value if hasattr(exam.status, "value") else exam.status
+    return status == ExamStatus.published.value and exam_has_started_attempts(
+        db, exam.exam_id
+    )
 
 
 def claim_exam_version(
@@ -11,6 +30,8 @@ def claim_exam_version(
     exam_id: int,
     teacher_school_id: str,
     expected_version: int | None,
+    *,
+    allow_started_exam: bool = False,
 ) -> Exam:
     """Atomically claim the next version before a Teacher Exam Manager write."""
     exam = db.get(Exam, exam_id)
@@ -40,6 +61,9 @@ def claim_exam_version(
             status_code=409,
             detail="This exam is locked while a student has an attempt in progress.",
         )
+    # Only non-content writes (assignment additions, result visibility, etc.) opt out.
+    if not allow_started_exam and is_exam_content_locked(db, exam):
+        raise HTTPException(status_code=409, detail=STARTED_EXAM_LOCK_MESSAGE)
 
     # Direct unit calls receive FastAPI's Query default object rather than None.
     expected = expected_version if isinstance(expected_version, int) else exam.version

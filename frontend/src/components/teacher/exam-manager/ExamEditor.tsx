@@ -15,7 +15,7 @@ import { QuestionsTab } from './tabs/QuestionsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { SectionSaveBar } from './SectionSaveBar';
-import { FileText, BookOpen, Clock, Hash, Settings2, Users } from 'lucide-react';
+import { FileText, BookOpen, Clock, Hash, Lock, Settings2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamStatus, ResultVisibility, TeacherSubject } from '../../../types/teacher-exam';
 
@@ -36,6 +36,7 @@ interface ExamEditorProps {
     passingScore: number;
     resultVisibility: ResultVisibility;
     version: number;
+    isLocked?: boolean;
   } | null;
   subjects: TeacherSubject[];
   initialTab?: 'general' | 'questions' | 'settings';
@@ -299,6 +300,10 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
   }
 
   const isNewExam = examId.startsWith('new-');
+  const isLocked = !isNewExam && exam?.isLocked === true;
+  const lockedClass = isLocked ? 'pointer-events-none select-none opacity-60 blur-[2px]' : '';
+  // `inert` removes the subtree from keyboard focus; React 18 typings lack the prop.
+  const lockedProps: object = isLocked ? { inert: '', 'aria-disabled': true } : {};
 
   const statusConfig = {
     draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -529,7 +534,13 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
         </TabsList>
 
         <div className={`flex-1 min-h-0 ${activeTab === 'questions' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <TabsContent value="general" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
+          {isLocked && activeTab !== 'assignment' && (
+            <div role="status" className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-800">
+              <Lock className="size-4 shrink-0" />
+              This exam is published and a student has started it, so its content and settings are locked. You can still add students in the Assignment tab.
+            </div>
+          )}
+          <TabsContent value="general" forceMount className={`m-0 p-6 data-[state=inactive]:hidden ${lockedClass}`} {...lockedProps}>
             <GeneralInfoTab
               subject={subject}
               subjectId={subjectId}
@@ -581,7 +592,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </TabsContent>
 
           {visitedTabs.includes('questions') && (
-            <TabsContent value="questions" forceMount className="m-0 h-full p-0 data-[state=inactive]:hidden">
+            <TabsContent value="questions" forceMount className={`m-0 h-full p-0 data-[state=inactive]:hidden ${lockedClass}`} {...lockedProps}>
               <QuestionsTab
                 examId={examId}
                 subjectId={subjectId}
@@ -596,7 +607,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           )}
 
           {visitedTabs.includes('settings') && (
-            <TabsContent value="settings" forceMount className="m-0 p-6 data-[state=inactive]:hidden">
+            <TabsContent value="settings" forceMount className={`m-0 p-6 data-[state=inactive]:hidden ${lockedClass}`} {...lockedProps}>
               <SettingsTab
                 examId={examId}
                 resultVisibility={resultVisibility}

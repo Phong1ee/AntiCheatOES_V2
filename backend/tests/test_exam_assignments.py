@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from database import Base
 from src.a_db_config import (
     Attempt,
+    AttemptStatus,
     CourseClass,
     Exam,
     StudentClass,
@@ -26,6 +27,11 @@ from src.route.teacherRoute.getExamsRoute import (
 )
 from src.controller.teacherController.examController import ExamController
 from src.models.teacher import examModel
+from src.service.exam_version_service import (
+    STARTED_EXAM_LOCK_MESSAGE,
+    claim_exam_version,
+    is_exam_content_locked,
+)
 
 
 class ExamAssignmentTests(unittest.TestCase):
@@ -185,6 +191,81 @@ class ExamAssignmentTests(unittest.TestCase):
         self.assertEqual(conflict.exception.status_code, 409)
         self.assertIsNotNone(self.db.query(Attempt).filter_by(student_id="S1").first())
         self.assertIsNotNone(self.db.query(StudentExam).filter_by(student_id="S1").first())
+
+    def test_assigned_students_cannot_be_removed_even_without_attempts(self):
+        exam = self.db.query(Exam).filter_by(manage_by="T1").one()
+        self.db.add_all(
+            [
+                StudentExam(exam_id=exam.exam_id, student_id="S1"),
+                StudentExam(exam_id=exam.exam_id, student_id="S2"),
+            ]
+        )
+        self.db.commit()
+        with self.assertRaises(HTTPException) as conflict:
+            sync_assignments(
+                exam.exam_id,
+                AssignmentSyncRequest(student_ids=["S1"]),
+                {"school_id": "T1"},
+                {},
+                self.db,
+            )
+        self.assertEqual(conflict.exception.status_code, 409)
+        self.assertEqual(conflict.exception.detail["student_ids"], ["S2"])
+        self.assertEqual(self.db.query(StudentExam).filter_by(exam_id=exam.exam_id).count(), 2)
+
+    def test_students_can_be_added_after_a_published_exam_has_started(self):
+        exam = self.db.query(Exam).filter_by(manage_by="T1").one()
+        exam.status = "published"
+        self.db.add(StudentExam(exam_id=exam.exam_id, student_id="S1"))
+        self.db.add(
+            Attempt(
+                exam_id=exam.exam_id, student_id="S1", attempt_no=1,
+                status=AttemptStatus.submitted, submitted_at=datetime(2026, 8, 12, 10, 0),
+            )
+        )
+        self.db.commit()
+        result = sync_assignments(
+            exam.exam_id,
+            AssignmentSyncRequest(student_ids=["S1", "S2"]),
+            {"school_id": "T1"},
+            {},
+            self.db,
+        )
+        self.assertEqual((result["added_count"], result["removed_count"]), (1, 0))
+
+    def test_started_exam_content_lock_follows_status_and_attempts(self):
+        exam = self.db.query(Exam).filter_by(manage_by="T1").one()
+        exam_id = exam.exam_id
+        self.db.add(StudentExam(exam_id=exam_id, student_id="S1"))
+        self.db.commit()
+
+        # Published, nobody started: editable.
+        exam.status = "published"
+        self.db.commit()
+        self.assertFalse(is_exam_content_locked(self.db, exam))
+        claim_exam_version(self.db, exam_id, "T1", None)
+        self.db.commit()
+
+        self.db.add(
+            Attempt(
+                exam_id=exam_id, student_id="S1", attempt_no=1,
+                status=AttemptStatus.submitted, submitted_at=datetime(2026, 8, 12, 10, 0),
+            )
+        )
+        self.db.commit()
+
+        # Published and started: locked, except for explicitly allowed writes.
+        with self.assertRaises(HTTPException) as locked:
+            claim_exam_version(self.db, exam_id, "T1", None)
+        self.assertEqual(locked.exception.status_code, 409)
+        self.assertEqual(locked.exception.detail, STARTED_EXAM_LOCK_MESSAGE)
+        claim_exam_version(self.db, exam_id, "T1", None, allow_started_exam=True)
+        self.db.commit()
+
+        # Draft with attempts is not content-locked by this rule.
+        exam.status = "draft"
+        self.db.commit()
+        claim_exam_version(self.db, exam_id, "T1", None)
 
     def test_database_composite_key_prevents_duplicate_assignment_mapping(self):
         exam = self.db.query(Exam).filter_by(manage_by="T1").one()

@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from src.a_db_config import (
-    Attempt,
     ChapterQuestion,
     CourseClass,
     Exam,
@@ -24,7 +23,7 @@ from src.a_db_config import (
     UserRole,
 )
 from src.middleware.authMiddleware import TEACHER_ONLY, verify_token
-from src.service.exam_version_service import claim_exam_version
+from src.service.exam_version_service import claim_exam_version, is_exam_content_locked
 from src.service.teacher_subject_service import active_subject_ids
 from src.service.audit_service import record_audit
 from src.service.cache_invalidation_contract import deliver_invalidation, teacher_assignment_changed
@@ -184,6 +183,7 @@ def _serialize_exam(db: Session, exam: Exam, now_time: datetime) -> dict:
             else exam.question_selection_mode
         ),
         "version": exam.version,
+        "is_locked": is_exam_content_locked(db, exam),
     }
 
 
@@ -301,7 +301,11 @@ def sync_assignments(
     teacher_school_id = current_user["school_id"]
     try:
         exam = _owned_exam(db, exam_id, teacher_school_id)
-        claim_exam_version(db, exam_id, teacher_school_id, request.expected_version)
+        # Adding students stays allowed after students start; removal is rejected below.
+        claim_exam_version(
+            db, exam_id, teacher_school_id, request.expected_version,
+            allow_started_exam=True,
+        )
         owned_classes = (
             db.query(CourseClass)
             .filter(
@@ -356,26 +360,14 @@ def sync_assignments(
         }
         added_ids = desired_ids - existing_ids
         removed_ids = existing_ids - desired_ids
-        blocked_ids = {
-            row[0]
-            for row in db.query(Attempt.student_id)
-            .filter(Attempt.exam_id == exam_id, Attempt.student_id.in_(removed_ids or [""]))
-            .distinct()
-            .all()
-        }
-        if blocked_ids:
+        if removed_ids:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "message": "Assignments with existing attempts cannot be removed",
-                    "student_ids": sorted(blocked_ids),
+                    "message": "Assigned students cannot be removed from an exam",
+                    "student_ids": sorted(removed_ids),
                 },
             )
-        if removed_ids:
-            db.query(StudentExam).filter(
-                StudentExam.exam_id == exam_id,
-                StudentExam.student_id.in_(removed_ids),
-            ).delete(synchronize_session=False)
         db.add_all(
             StudentExam(exam_id=exam_id, student_id=student_id)
             for student_id in sorted(added_ids)

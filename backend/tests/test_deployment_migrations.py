@@ -150,3 +150,15 @@ def test_multiple_repository_heads_never_connect(monkeypatch):
     with pytest.raises(runner.MigrationConfigurationError, match="exactly one"):
         runner.run()
     engine.assert_not_called()
+
+
+def test_applied_multimedia_revision_and_backfill_dependency_are_available():
+    config = Config(str(runner.BACKEND / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    revision = script.get_revision("8a21c7e5b940")
+    assert revision.down_revision == "f2a7c9e4b106"
+    assert script.get_heads() == [revision.revision]
+    from src.service.rich_content_service import sanitize_rich
+    html, plain = sanitize_rich('<p>Hello <strong>world</strong><script>alert(1)</script></p>')
+    assert html == '<p>Hello <strong>world</strong></p>'
+    assert plain == 'Hello world'

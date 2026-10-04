@@ -52,7 +52,10 @@ def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
 
 def _apply(setting: ExamSetting, payload: ExamSettingsRequest) -> None:
     for field, value in payload.model_dump(exclude_none=True).items():
-        if field not in {"expected_version", "result_visibility"}:
+        if field in {"expected_version", "result_visibility"}:
+            continue
+        # Skip request fields with no exam_setting column (setattr would silently succeed).
+        if hasattr(type(setting), field):
             setattr(setting, field, value)
 
 

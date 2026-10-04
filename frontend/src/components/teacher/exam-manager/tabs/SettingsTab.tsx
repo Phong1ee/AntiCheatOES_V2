@@ -189,7 +189,7 @@ export function SettingsTab(
       const saved = await teacherExamSettingsService.update(targetExamId, payload);
       if (currentExamId.current !== targetExamId) return;
       const persisted: TeacherExamSettingsPayload = {
-        questions_per_page: saved.questions_per_page,
+        questions_per_page: saved.questions_per_page ?? 1,
         shuffle_question: saved.shuffle_question,
         shuffle_answer_options: saved.shuffle_answer_options,
         sequential_navigation: saved.sequential_navigation,

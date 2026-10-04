@@ -30,6 +30,8 @@ class ExamSettingsRequest(BaseModel):
     # Omit this field to preserve a pre-existing policy on older clients.
     anti_cheat_measures: dict[str, AntiCheatMeasureRequest] | None = None
     auto_grade: bool = True
+    # The frontend always sends this; it is stored only once exam_setting has the column.
+    questions_per_page: Annotated[int, Field(strict=True, ge=1, le=50)] | None = None
     result_strategy: ResultStrategy = ResultStrategy.highest
     # Result visibility is saved with settings so the tab's single Save is atomic.
     result_visibility: Literal["hidden", "score-only", "full"] | None = None

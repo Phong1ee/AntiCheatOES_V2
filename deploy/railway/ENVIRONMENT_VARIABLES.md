@@ -44,3 +44,22 @@ api_replicas * uvicorn_workers * (connector_pool + sqlalchemy_pool + sqlalchemy_
 
 Keep the result materially below MySQL `max_connections`; never raise pool sizes
 independently.
+
+## MySQL variable references
+
+On the API and workers, reference the existing MySQL service variables instead
+of copying credentials. If that Railway service is named `MySQL`, use:
+
+```text
+DB_HOST=${{MySQL.MYSQLHOST}}
+DB_PORT=${{MySQL.MYSQLPORT}}
+DB_NAME=${{MySQL.MYSQLDATABASE}}
+DB_USER=${{MySQL.MYSQLUSER}}
+DB_PASSWORD=${{MySQL.MYSQLPASSWORD}}
+```
+
+Replace `MySQL` with the actual service name and confirm the references resolve
+to its private connection values. Keep `APP_ENV=staging` on staging and
+`APP_ENV=production` on production. Set the migration pre-deploy command on the
+API only; see `README.md`. This application uses `DB_*`, not `DATABASE_URL` or
+`MYSQL_URL`, as its existing database configuration contract.

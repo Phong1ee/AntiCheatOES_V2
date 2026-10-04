@@ -65,19 +65,28 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    def migrate(connection):
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+    # A deployment runner supplies the connection holding the MySQL migration
+    # lock. Never open a second connection or close the caller's connection here.
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        migrate(supplied_connection)
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
-
-        with context.begin_transaction():
-            context.run_migrations()
+    try:
+        with connectable.connect() as connection:
+            migrate(connection)
+    finally:
+        connectable.dispose()
 
 
 if context.is_offline_mode():

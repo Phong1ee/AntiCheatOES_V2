@@ -5,7 +5,7 @@
    the backend Dockerfile and commands in `SERVICES.md`.
 3. Copy the required variables from `ENVIRONMENT_VARIABLES.md` to API/workers;
    use private service networking values and set `OBJECT_STORAGE_BACKEND=s3`.
-4. Set the API pre-deploy command to `uv run alembic upgrade head`; do not set
+4. Set the API pre-deploy command to `python scripts/migrate_deployment.py`; do not set
    it on workers.
 5. Set API healthcheck path to `/health/ready`, deploy API first, and verify
    `/health/live` plus `/health/ready` through its public domain.

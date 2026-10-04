@@ -1,3 +1,4 @@
+from src.models.teacher.requestModel.RichContentRequest import RichContentRequest
 from decimal import Decimal
 from typing import Literal
 
@@ -6,9 +7,9 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from src.models.teacher.requestModel.QuestionOptionsRequest import QuestionOptionsRequest
 
 
-class QuestionAddToDBRequest(BaseModel):
+class QuestionAddToDBRequest(RichContentRequest):
     model_config = ConfigDict(populate_by_name=True)
-    question_text: str = Field(min_length=1, max_length=255)
+    question_text: str = Field(max_length=60000)
     question_difficulties: Literal["easy", "medium", "hard"]
     question_type: Literal["MCQ", "essay", "true-false"]
     subject_id: str = Field(min_length=1, max_length=20)

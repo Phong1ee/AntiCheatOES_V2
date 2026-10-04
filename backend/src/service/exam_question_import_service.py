@@ -244,6 +244,8 @@ def _apply_direct_edit(
     db: Session, question: Question, parsed: ParsedQuestion, chapter: Chapter, los: list[LO]
 ) -> None:
     """The teacher's own unapproved question is edited in place, as the editor does."""
+    if question.rich_html or question.image_media_id or question.audio_media_id or any(o.rich_html or o.image_media_id or o.audio_media_id for o in question.options):
+        raise ImportTaxonomyError("The text-only document format cannot replace a rich/media question. Edit it in the question editor.")
     question.question_text = parsed.question_text.strip()
     question.question_type = _value(parsed.question_type)
     question.question_difficulties = _value(parsed.difficulty)
@@ -309,6 +311,8 @@ def apply_document_import(db: Session, exam: Exam, teacher: User, questions: lis
         else:
             question = match.question
             if match.kind == "edit":
+                if question.rich_html or question.image_media_id or question.audio_media_id or any(o.rich_html or o.image_media_id or o.audio_media_id for o in question.options):
+                    raise ImportTaxonomyError("Text-only import cannot replace rich content or media; use the question editor.")
                 if _value(question.question_status) == "approved":
                     _propose_edit(db, question, teacher, _revision_values(parsed, exam.subject_id, chapter, los))
                     summary["proposed_edit"] += 1

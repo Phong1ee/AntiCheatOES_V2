@@ -1,3 +1,4 @@
+from src.service.question_layout_service import build_layout
 import json
 import hashlib
 import hmac
@@ -291,13 +292,14 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     SELECT
         q.question_id,
         q.question_text,
-        q.question_image_mime,
+        q.question_image_mime, q.rich_html, q.image_media_id, q.audio_media_id, q.image_alt,
         q.question_type,
         aq.question_point,
         aq.question_text_snapshot,
         aq.question_type_snapshot,
         aq.question_point_snapshot,
         aq.options_snapshot,
+        aq.content_snapshot, aq.layout_snapshot,
         ma.selected_option_id,
         ma.revision AS mcq_revision,
         ea.answer_text,
@@ -321,7 +323,7 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     SELECT
         q.question_id,
         q.question_text,
-        q.question_image_mime,
+        q.question_image_mime, q.rich_html, q.image_media_id, q.audio_media_id, q.image_alt,
         q.question_type,
         eq.question_point
     FROM exam_question eq
@@ -332,7 +334,7 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
     options_query = """
     SELECT
         options_id,
-        options_text
+        options_text, rich_html, image_media_id, audio_media_id, image_alt, semantic_value
     FROM options
     WHERE question_id = %s
     ORDER BY options_id ASC
@@ -358,24 +360,32 @@ def getExamQuestions(exam_id: int, attempt_id: int | None = None):
                     snapshot = json.loads(snapshot)
                 if snapshot is not None:
                     options = [
-                        {"id": option["id"], "text": option["text"]}
+                        {"id": option["id"], "text": option["text"], **{k: option[k] for k in ("rich_html", "image_media_id", "audio_media_id", "image_alt", "semantic_value") if k in option}}
                         for option in snapshot
                     ]
                 else:
                     cursor.execute(options_query, (row["question_id"],))
                     option_rows = cursor.fetchall()
                     options = [
-                        {"id": option["options_id"], "text": option["options_text"]}
+                        {"id": option["options_id"], "text": option["options_text"], **{k: option[k] for k in ("rich_html", "image_media_id", "audio_media_id", "image_alt", "semantic_value") if k in option}}
                         for option in option_rows
                     ]
 
+            content = row.get("content_snapshot")
+            if isinstance(content, str):
+                content = json.loads(content)
+            layout = row.get("layout_snapshot")
+            if isinstance(layout, str):
+                layout = json.loads(layout)
+            content = content if content is not None else {k: row.get(k) for k in ("rich_html", "image_media_id", "audio_media_id", "image_alt")}
             question = {
+                **content, "layout": layout,
                 "id": row["question_id"],
                 "question_id": row["question_id"],
-                "text": row.get("question_text_snapshot") or row["question_text"],
+                "text": row["question_text_snapshot"] if row.get("question_text_snapshot") is not None else row["question_text"],
                 # The bytes come from the image endpoint, so the attempt payload
                 # stays small enough to restore quickly on a flaky connection.
-                "hasImage": row.get("question_image_mime") is not None,
+                "hasImage": bool(content.get("image_media_id")) if row.get("content_snapshot") is not None else row.get("question_image_mime") is not None,
                 "type": question_type,
                 "points": row["question_point_snapshot"]
                 if row.get("question_point_snapshot") is not None
@@ -777,29 +787,44 @@ def createAttempt(
                     "question-order", exam_id, student_id, attempt_no, selection_version
                 ).shuffle(selected_ids)
 
+        cursor.execute("SELECT questions_per_page, sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
+        per_page_row = cursor.fetchone()
+        per_page = int(per_page_row[0]) if per_page_row else 1
+        cursor.execute("SELECT question_id, block_id, structure_order, pinned_position FROM exam_question WHERE exam_id = %s ORDER BY structure_order, question_id", (exam_id,))
+        structure_rows = cursor.fetchall()
+        members = {r[0]: {"block_id": r[1], "structure_order": r[2], "pinned_position": r[3]} for r in structure_rows}
+        cursor.execute("SELECT block_id, kind, title, rich_html, image_media_id, audio_media_id, image_alt, keep_order, keep_together, pinned_position, structure_order FROM exam_question_block WHERE exam_id = %s", (exam_id,))
+        block_fields = ("block_id", "kind", "title", "rich_html", "image_media_id", "audio_media_id", "image_alt", "keep_order", "keep_together", "pinned_position", "structure_order")
+        blocks = {r[0]: dict(zip(block_fields, r)) for r in cursor.fetchall()}
+        layout = build_layout(sorted(selected_ids, key=lambda q: (members.get(q, {}).get("structure_order", 0), q)), members, blocks, per_page, shuffle_questions, f"{exam_id}:{student_id}:{attempt_no}")
+        selected_ids = [r["question_id"] for r in layout]
+        layout_map = {r["question_id"]: {**r, "sequential_navigation": bool(per_page_row and len(per_page_row) > 1 and per_page_row[1])} for r in layout}
+        content_snapshot_map = {}
         question_snapshot_map: dict[int, tuple[str, str]] = {}
         options_snapshot_map: dict[int, list[dict[str, object]]] = {}
         for question_id in selected_ids:
             cursor.execute(
-                "SELECT question_text, question_type FROM question WHERE question_id = %s FOR UPDATE",
+                "SELECT question_text, question_type, rich_html, image_media_id, audio_media_id, image_alt FROM question WHERE question_id = %s FOR UPDATE",
                 (question_id,),
             )
             question_row = cursor.fetchone()
             if not question_row:
                 raise Exception(f"Question {question_id} not found")
             question_snapshot_map[question_id] = (question_row[0], question_row[1])
+            content_snapshot_map[question_id] = dict(zip(("rich_html", "image_media_id", "audio_media_id", "image_alt"), question_row[2:]))
             cursor.execute(
-                "SELECT options_id, options_text, is_correct FROM options WHERE question_id = %s ORDER BY options_id ASC FOR UPDATE",
+                "SELECT options_id, options_text, is_correct, rich_html, image_media_id, audio_media_id, image_alt, semantic_value FROM options WHERE question_id = %s ORDER BY options_id ASC FOR UPDATE",
                 (question_id,),
             )
             option_snapshot = [
                 {
-                    "id": int(option_id),
-                    "text": option_text,
-                    "isCorrect": bool(is_correct),
+                    "id": int(option_row[0]),
+                    "text": option_row[1],
+                    "isCorrect": bool(option_row[2]),
+                    **dict(zip(("rich_html", "image_media_id", "audio_media_id", "image_alt", "semantic_value"), option_row[3:])),
                     "displayOrder": index,
                 }
-                for index, (option_id, option_text, is_correct) in enumerate(cursor.fetchall(), start=1)
+                for index, option_row in enumerate(cursor.fetchall(), start=1)
             ]
             if shuffle_options:
                 seeded_random(
@@ -818,8 +843,8 @@ def createAttempt(
             INSERT INTO attempt_question
                 (attempt_id, question_id, display_order, question_point,
                  question_text_snapshot, question_type_snapshot,
-                 question_point_snapshot, options_snapshot)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 question_point_snapshot, options_snapshot, content_snapshot, layout_snapshot)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (
@@ -831,6 +856,8 @@ def createAttempt(
                     question_snapshot_map[question_id][1],
                     point_map[question_id],
                     json.dumps(options_snapshot_map[question_id]),
+                    json.dumps(content_snapshot_map[question_id]),
+                    json.dumps(layout_map[question_id]),
                 )
                 for index, question_id in enumerate(selected_ids, start=1)
             ],
@@ -887,7 +914,7 @@ def getExamSettings(exam_id: int):
         try:
             cursor.execute(
                 """
-                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit, anti_cheat_measures
+                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit, anti_cheat_measures, questions_per_page
                 FROM exam_setting WHERE exam_id = %s
                 """,
                 (exam_id,),
@@ -898,7 +925,7 @@ def getExamSettings(exam_id: int):
                 raise
             cursor.execute(
                 """
-                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit
+                SELECT auto_submit_on_expire, sequential_navigation, anti_cheat_enabled, violation_limit, questions_per_page
                 FROM exam_setting WHERE exam_id = %s
                 """,
                 (exam_id,),
@@ -906,6 +933,7 @@ def getExamSettings(exam_id: int):
         setting = cursor.fetchone() or {
             "auto_submit_on_expire": True,
             "sequential_navigation": False,
+            "questions_per_page": 1,
             "anti_cheat_enabled": False,
             "violation_limit": 5,
         }
@@ -944,7 +972,7 @@ def _load_attempt_questions(cursor, attempt_id: int, exam_id: int):
     cursor.execute(
         """
         SELECT aq.question_id, aq.display_order, aq.question_point, aq.question_type_snapshot,
-               aq.question_point_snapshot, aq.options_snapshot, q.question_type
+               aq.question_point_snapshot, aq.options_snapshot, aq.layout_snapshot, q.question_type
         FROM attempt_question aq
         JOIN attempt a ON a.attempt_id = aq.attempt_id
         JOIN question q ON q.question_id = aq.question_id
@@ -1073,11 +1101,28 @@ def _ordered_attempt_questions(questions: dict[int, dict]) -> list[dict]:
     return sorted(questions.values(), key=lambda question: int(question.get("display_order") or 0))
 
 
+def _attempt_sequential(questions, settings):
+    for question in questions.values():
+        layout = question.get("layout_snapshot")
+        if isinstance(layout, str):
+            layout = json.loads(layout)
+        if layout and "sequential_navigation" in layout:
+            return layout["sequential_navigation"]
+    return bool(settings and settings.get("sequential_navigation"))
+
+
+def _snapshot_page(question):
+    layout = question.get("layout_snapshot")
+    if isinstance(layout, str):
+        layout = json.loads(layout)
+    return (layout or {}).get("page", question.get("display_order", 1))
+
+
 def _validate_sequential_save(questions: dict[int, dict], answered_ids: set[int], question_id: int) -> None:
     ordered = _ordered_attempt_questions(questions)
     current = next((question for question in ordered if question["question_id"] not in answered_ids), None)
     target = questions[question_id]
-    if current and target["display_order"] > current["display_order"] and question_id not in answered_ids:
+    if current and _snapshot_page(target) > _snapshot_page(current) and question_id not in answered_ids:
         raise Exception("Complete the current question before moving to the next question")
 
 
@@ -1094,7 +1139,7 @@ def _validate_sequential_submit(questions: dict[int, dict], persisted_answered_i
             answered_ids.discard(question_id)
     ordered = _ordered_attempt_questions(questions)
     current = next((question for question in ordered if question["question_id"] not in answered_ids), None)
-    if current and any(question["question_id"] in answered_ids for question in ordered if question["display_order"] > current["display_order"]):
+    if current and any(question["question_id"] in answered_ids for question in ordered if _snapshot_page(question) > _snapshot_page(current)):
         raise Exception("Complete the current question before moving to the next question")
 
 
@@ -1259,7 +1304,7 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
             raise Exception("Question does not belong to this attempt")
         cursor.execute("SELECT sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
         settings = cursor.fetchone()
-        if settings and settings["sequential_navigation"]:
+        if _attempt_sequential(questions, settings):
             _validate_sequential_save(questions, _answered_question_ids(cursor, attempt_id), question_id)
         revision = answer.get("revision")
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
@@ -1324,7 +1369,7 @@ def finalizeAttempt(
         questions = _load_attempt_questions(cursor, attempt_id, exam_id)
         cursor.execute("SELECT sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
         settings = cursor.fetchone()
-        if status == "submitted" and settings and settings["sequential_navigation"]:
+        if status == "submitted" and _attempt_sequential(questions, settings):
             _validate_sequential_submit(questions, _answered_question_ids(cursor, attempt_id), answers)
         for answer in answers:
             question_id = int(answer["questionId"])

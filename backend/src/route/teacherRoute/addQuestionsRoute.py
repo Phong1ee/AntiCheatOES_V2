@@ -1,3 +1,5 @@
+from src.service.question_content_service import content_dict, apply_content, validate_media, require_body, normalize_existing_content
+from src.service.rich_content_service import has_content
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -136,7 +138,7 @@ def _import_candidate_query(db: Session, teacher: User):
 
 
 def _validate_options(question_type: str, options: list[QuestionOptionsRequest]) -> None:
-    non_empty = [option for option in options if option.options_text.strip()]
+    non_empty = [option for option in options if has_content(option)]
     if len(non_empty) != len(options):
         raise HTTPException(status_code=400, detail="Option text cannot be empty")
     correct_count = sum(option.is_correct for option in options)
@@ -146,7 +148,7 @@ def _validate_options(question_type: str, options: list[QuestionOptionsRequest])
         if correct_count < 1:
             raise HTTPException(status_code=400, detail="MCQ questions require at least one correct option")
     elif question_type == "true-false":
-        normalized = {option.options_text.strip().lower() for option in options}
+        normalized = {(getattr(option, "semantic_value", None) or option.options_text.strip().lower()) for option in options}
         if len(options) != 2 or normalized != {"true", "false"}:
             raise HTTPException(status_code=400, detail="True/false questions require exactly True and False options")
         if correct_count != 1:
@@ -203,13 +205,18 @@ def _replace_options(db: Session, question: Question, requested: list[QuestionOp
             db.delete(option)
     for item in requested:
         if item.options_id is None:
-            db.add(Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct))
+            option = Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct)
+            apply_content(option, item)
+            db.add(option)
         else:
             existing[item.options_id].options_text = item.options_text.strip()
             existing[item.options_id].is_correct = item.is_correct
+            apply_content(existing[item.options_id], item)
 
 
 def _has_content_changes(question: Question, request: QuestionUpdateRequest) -> bool:
+    if any(key in request.model_fields_set and getattr(request, key) != getattr(question, key) for key in ("rich_html", "image_media_id", "audio_media_id", "image_alt")):
+        return True
     if request.question_text is not None and request.question_text.strip() != question.question_text:
         return True
     if request.question_difficulties is not None:
@@ -231,6 +238,8 @@ def _has_content_changes(question: Question, request: QuestionUpdateRequest) -> 
             (option.options_text, bool(option.is_correct))
             for option in sorted(question.options, key=lambda item: item.options_id)
         ]
+        if [content_dict(item) for item in question.options] != [content_dict(item) for item in request.options]:
+            return True
         requested_options = [(item.options_text.strip(), bool(item.is_correct)) for item in request.options]
         if current_options != requested_options:
             return True
@@ -290,8 +299,9 @@ def _clone_question(
     chapters: list[Chapter],
     los: list[LO],
 ) -> Question:
+    request = normalize_existing_content(request, source)
     clone = Question(
-        question_text=(request.question_text or source.question_text).strip(),
+        question_text=(request.question_text if request.question_text is not None else source.question_text).strip(),
         question_difficulties=request.question_difficulties or source.question_difficulties,
         question_type=request.question_type or source.question_type,
         subject_id=request.subject_id or source.subject_id,
@@ -299,6 +309,10 @@ def _clone_question(
         question_status=QuestionStatus.draft,
         source_question_id=source.question_id,
     )
+    for key, value in content_dict(source).items():
+        setattr(clone, key, value)
+    apply_content(clone, request, partial=True)
+    require_body(clone)
     db.add(clone)
     db.flush()
     db.add_all(
@@ -316,6 +330,8 @@ def _clone_question(
             QuestionOptionsRequest(
                 options_text=option.options_text,
                 is_correct=option.is_correct,
+                semantic_value=option.semantic_value,
+                **content_dict(option),
             )
             for option in sorted(source.options, key=lambda item: item.options_id)
         ]
@@ -329,6 +345,8 @@ def _clone_question(
             question_id=clone.question_id,
             options_text=option.options_text.strip(),
             is_correct=option.is_correct,
+            semantic_value=option.semantic_value,
+            **content_dict(option),
         )
         for option in source_options
     )
@@ -494,6 +512,8 @@ def add_question_to_database(
         require_active_subject_assignment(
             db, creator.school_id, request.subject_id
         )
+        require_body(request)
+        validate_media(db, request, creator.school_id, request.subject_id)
         _validate_options(request.question_type, request.options)
         if request.exam_id is not None:
             exam = _owned_exam(db, request.exam_id, creator.school_id)
@@ -509,12 +529,13 @@ def add_question_to_database(
             created_by=creator.school_id,
             question_status="draft",
         )
+        apply_content(question, request)
         db.add(question)
         db.flush()
         db.add_all(ChapterQuestion(chapter_id=chapter.chapter_id, question_id=question.question_id) for chapter in chapters)
         db.add_all(LOQuestion(lo_id=lo.lo_id, question_id=question.question_id) for lo in los)
         db.add_all(
-            Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct)
+            Option(question_id=question.question_id, options_text=item.options_text.strip(), is_correct=item.is_correct, semantic_value=item.semantic_value, **content_dict(item))
             for item in request.options
         )
         if request.exam_id is not None:
@@ -561,7 +582,8 @@ def add_question_to_exam(
             if question.options:
                 raise HTTPException(status_code=409, detail="Question already has options")
             _validate_options(question.question_type.value, request.options)
-            db.add_all(Option(question_id=question.question_id, options_text=o.options_text.strip(), is_correct=o.is_correct) for o in request.options)
+            validate_media(db, request, current_user["school_id"], question.subject_id)
+            db.add_all(Option(question_id=question.question_id, options_text=o.options_text.strip(), is_correct=o.is_correct, semantic_value=o.semantic_value, **content_dict(o)) for o in request.options)
         elif question.question_type.value != "essay":
             _validate_options(question.question_type.value, list(question.options))
         link = ExamQuestion(exam_id=exam_id, question_id=question.question_id, question_point=request.question_point)
@@ -594,6 +616,8 @@ def update_question_in_exam(
         if not link:
             raise HTTPException(status_code=404, detail="Question not found in the exam")
         question = db.query(Question).filter(Question.question_id == question_id).first()
+        request = normalize_existing_content(request, question)
+        validate_media(db, request, teacher.school_id, request.subject_id or question.subject_id)
         content_changed = _has_content_changes(question, request)
         if not content_changed:
             link.question_point = request.question_point
@@ -618,12 +642,14 @@ def update_question_in_exam(
             db, question, exam_id, teacher.school_id
         )
         if can_edit_in_place:
+            apply_content(question, request, partial=True)
             if request.question_text is not None:
                 question.question_text = request.question_text.strip()
             if request.question_difficulties is not None:
                 question.question_difficulties = request.question_difficulties
             if request.question_type is not None:
                 question.question_type = request.question_type
+            require_body(question)
             question.subject_id = target_subject
             _replace_taxonomy_rows(
                 db,
@@ -647,6 +673,7 @@ def update_question_in_exam(
                     exam_id=exam_id,
                     question_id=effective_question.question_id,
                     question_point=preserved_point,
+                    block_id=link.block_id, structure_order=link.structure_order, pinned_position=link.pinned_position,
                 )
             )
         db.commit()

@@ -1,3 +1,4 @@
+from src.service.question_content_service import content_dict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -210,8 +211,9 @@ def _serialize_question(
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
+        **content_dict(question),
         # The bytes are fetched from the image endpoint, never inlined here.
-        "has_image": question.question_image_mime is not None,
+        "has_image": question.image_media_id is not None or question.question_image_mime is not None,
         "question_difficulties": question_difficulty,
         "question_type": question_type,
         "subject_id": question.subject_id,
@@ -240,7 +242,7 @@ def _serialize_question(
             if item.lo
         ],
         "options": [
-            {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct}
+            {"options_id": option.options_id, "options_text": option.options_text, "is_correct": option.is_correct, "semantic_value": option.semantic_value, **content_dict(option)}
             for option in sorted(question.options, key=lambda item: item.options_id)
         ],
     }

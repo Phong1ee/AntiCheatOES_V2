@@ -413,7 +413,7 @@ def _get_attempt_questions(cursor, attempt_id: int):
         aq.question_text_snapshot,
         aq.question_type_snapshot,
         aq.question_point_snapshot,
-        aq.options_snapshot,
+        aq.options_snapshot, aq.content_snapshot, aq.layout_snapshot,
         ma.selected_option_id,
         ea.answer_text AS essay_answer,
         ea.score AS essay_score
@@ -454,8 +454,12 @@ def _get_attempt_questions(cursor, attempt_id: int):
     questions = []
 
     for row in rows:
+        content = row.get("content_snapshot") or {}
+        if isinstance(content, str): content = json.loads(content)
+        layout = row.get("layout_snapshot") or {}
+        if isinstance(layout, str): layout = json.loads(layout)
         question_type = row["question_type_snapshot"] or row["question_type"]
-        question_text = row["question_text_snapshot"] or row["question_text"]
+        question_text = row["question_text_snapshot"] if row["question_text_snapshot"] is not None else row["question_text"]
         points = row["question_point_snapshot"]
         if points is None:
             points = row["question_point"]
@@ -481,6 +485,7 @@ def _get_attempt_questions(cursor, attempt_id: int):
                 # above already separates them, so mirror that here.
                 "isCorrect": None if grading_status != "graded" else int(row["essay_score"] or 0) > 0,
                 "question": question_text,
+                **content, "layout": layout, "attemptId": attempt_id,
                 "studentAnswer": essay_answer,
                 "correctAnswer": None,
                 "maxPoints": max_points,
@@ -523,7 +528,11 @@ def _get_attempt_questions(cursor, attempt_id: int):
             "topic": row["subject_id"],
             "isCorrect": selected_is_correct,
             "question": question_text,
+                **content, "layout": layout, "attemptId": attempt_id,
             "options": options,
+            "optionContents": [{**o, "text": o.get("text", o.get("options_text", ""))} for o in option_rows],
+            "selectedOptionId": row["selected_option_id"],
+            "correctOptionIds": [o.get("id", o.get("options_id")) for o in option_rows if o.get("isCorrect", o.get("is_correct"))],
             "studentAnswer": student_answer,
             "correctAnswer": correct_answer,
             "correctAnswers": correct_answers,

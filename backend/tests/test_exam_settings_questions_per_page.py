@@ -17,10 +17,15 @@ def test_questions_per_page_is_range_and_type_checked(value):
         ExamSettingsRequest(questions_per_page=value)
 
 
-def test_apply_ignores_fields_without_a_column_and_keeps_the_rest():
+def test_apply_persists_page_size_and_other_settings():
     setting = ExamSetting(exam_id=1)
     _apply(setting, ExamSettingsRequest(questions_per_page=5, shuffle_question=True, grace_period=3))
     assert setting.shuffle_question is True
     assert setting.grace_period == 3
-    assert not hasattr(type(setting), "questions_per_page")
-    assert "questions_per_page" not in setting.__dict__
+    assert setting.questions_per_page == 5
+
+
+def test_omitted_page_size_preserves_existing_value():
+    setting = ExamSetting(exam_id=1, questions_per_page=7)
+    _apply(setting, ExamSettingsRequest(shuffle_question=True))
+    assert setting.questions_per_page == 7

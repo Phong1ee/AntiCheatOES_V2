@@ -70,6 +70,16 @@ class TeacherExamSubjectPermissionTests(unittest.TestCase):
         cls.Session = sessionmaker(bind=cls.engine, expire_on_commit=False)
 
     def setUp(self):
+        # These SQLite fixtures toggle assignments directly. An external Redis
+        # cache can belong to another test run and has no fixture invalidation.
+        # Cache behaviour is covered separately; authorization here must use
+        # this test's actual database rather than a process-external cache.
+        subject_cache = patch(
+            "src.service.teacher_subject_service.cache_aside",
+            side_effect=lambda key, ttl, loader: loader(),
+        )
+        subject_cache.start()
+        self.addCleanup(subject_cache.stop)
         Base.metadata.drop_all(self.engine)
         Base.metadata.create_all(self.engine)
         self.db = self.Session()

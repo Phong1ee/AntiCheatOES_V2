@@ -92,12 +92,30 @@ class AttemptSessionTests(unittest.TestCase):
                 examModel.resumeAttempt(1, 2, "STU001", "browser-b")
 
     def test_heartbeat_requires_session_and_only_updates_heartbeat(self):
-        connection = _Connection({"last_heartbeat_at": "now", "violation_count": 4, "status": "in_progress"})
-        with patch.object(examModel, "assertAttemptSession") as validate, patch.object(examModel, "get_db_connection", return_value=connection):
+        device_id, token = "browser-a", "token"
+        connection = _Connection({
+            "last_heartbeat_at": "now", "violation_count": 4, "status": "in_progress",
+            "submitted_at": None, "end_time": None, "is_locked": False,
+            "device_id_hash": examModel._sha256(device_id), "session_token_hash": examModel._sha256(token),
+        })
+        with patch.object(examModel, "get_db_connection", return_value=connection):
             state = examModel.heartbeatAttempt(1, 2, "STU001", "browser-a", "token")
-        validate.assert_called_once_with(1, 2, "STU001", "browser-a", "token")
         self.assertEqual(state["violation_count"], 4)
         self.assertIn("last_heartbeat_at", connection.cursor_instance.calls[0][0])
+
+    def test_heartbeat_reports_teacher_termination_to_the_bound_session(self):
+        device_id, token = "browser-a", "token"
+        connection = _Connection({
+            "last_heartbeat_at": "now", "violation_count": 4, "status": "terminated",
+            "submitted_at": "now", "end_time": "now", "is_locked": False,
+            "termination_reason": "teacher_terminated: Suspected misconduct",
+            "device_id_hash": examModel._sha256(device_id), "session_token_hash": examModel._sha256(token),
+        })
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            state = examModel.heartbeatAttempt(1, 2, "STU001", device_id, token)
+        self.assertTrue(state["terminated"])
+        self.assertEqual(state["termination_source"], "teacher")
+        self.assertNotIn("UPDATE attempt", "\n".join(query for query, _ in connection.cursor_instance.calls))
 
     def test_page_refresh_uses_event_engine_response_without_resetting_count(self):
         attempt = {"attempt_id": 2, "status": "in_progress", "violation_count": 4}

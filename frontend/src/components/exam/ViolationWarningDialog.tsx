@@ -3,15 +3,20 @@ import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescript
 import { AlertTriangle, XCircle } from "lucide-react";
 import { Button } from "../ui/button";
 
-export function ViolationWarningDialog({ open, onOpenChange, eventType, measureViolationCount, measureThreshold, remainingViolations, terminated, onReturnToFullscreen, onTerminatedExit, error }: {
+export function ViolationWarningDialog({ open, onOpenChange, eventType, measureViolationCount, measureThreshold, remainingViolations, terminated, teacherTerminationReason, onReturnToFullscreen, onTerminatedExit, error }: {
   open: boolean; onOpenChange: (open: boolean) => void; eventType?: string; measureViolationCount: number; measureThreshold: number; remainingViolations: number | null; terminated: boolean; onReturnToFullscreen?: () => void; onTerminatedExit?: () => void;
+  /** A teacher action is not an anti-cheat threshold violation. */
+  teacherTerminationReason?: string | null;
   /** Why the last "Return to Fullscreen" attempt failed; this dialog is the only surface left for it. */
   error?: string | null;
 }) {
   const labels: Record<string, string> = { MULTIPLE_VOICES_DETECTED: "Multiple voices were detected." };
   const label = labels[eventType ?? ""] || eventType?.replaceAll("_", " ").toLowerCase() || "Anti-cheat event";
   const finalWarning = !terminated && measureViolationCount === measureThreshold - 1;
-  const message = terminated
+  const teacherTerminated = Boolean(teacherTerminationReason);
+  const message = teacherTerminated
+    ? `Your teacher ended this attempt. It has been scored 0.${teacherTerminationReason ? ` Reason: ${teacherTerminationReason}` : ""}`
+    : terminated
     ? `${label.charAt(0).toUpperCase()}${label.slice(1)} Limit reached (${measureViolationCount}/${measureThreshold}). This attempt was ended and scored 0.`
     : `${label.charAt(0).toUpperCase()}${label.slice(1)}${label.endsWith(".") ? "" : " recorded."} This rule: ${measureViolationCount}/${measureThreshold}.${finalWarning ? " The next violation of this same rule will end the attempt." : remainingViolations !== null ? ` ${remainingViolations} remaining for this rule.` : ""}`;
   // Safety net for a Radix cleanup raced by the fullscreen transition this dialog
@@ -31,5 +36,5 @@ export function ViolationWarningDialog({ open, onOpenChange, eventType, measureV
   // Escape is also what exits browser fullscreen; letting Radix's default Escape
   // handler close this dialog too races that fullscreen transition and can leave
   // the page's overlay lock (pointer-events/aria-hidden) stuck after repeated exits.
-  return <AlertDialog open={open} onOpenChange={onOpenChange}><AlertDialogContent onEscapeKeyDown={(event) => event.preventDefault()}><AlertDialogHeader><AlertDialogTitle className="flex items-center gap-2">{terminated ? <XCircle className="text-red-600" /> : <AlertTriangle className="text-amber-600" />}{terminated ? "Attempt Terminated" : finalWarning ? "Final Warning" : "Violation Recorded"}</AlertDialogTitle><AlertDialogDescription>{message}</AlertDialogDescription></AlertDialogHeader>{error && <p className="text-sm text-red-600">{error}</p>}<AlertDialogFooter>{onReturnToFullscreen && !terminated ? <Button onClick={onReturnToFullscreen}>Return to Fullscreen</Button> : <AlertDialogAction onClick={() => { onOpenChange(false); if (terminated) onTerminatedExit?.(); }}>{terminated ? "Back to Dashboard" : "Continue"}</AlertDialogAction>}</AlertDialogFooter></AlertDialogContent></AlertDialog>;
+  return <AlertDialog open={open} onOpenChange={onOpenChange}><AlertDialogContent onEscapeKeyDown={(event) => event.preventDefault()}><AlertDialogHeader><AlertDialogTitle className="flex items-center gap-2">{terminated ? <XCircle className="text-red-600" /> : <AlertTriangle className="text-amber-600" />}{teacherTerminated ? "Attempt terminated by teacher" : terminated ? "Attempt Terminated" : finalWarning ? "Final Warning" : "Violation Recorded"}</AlertDialogTitle><AlertDialogDescription>{message}</AlertDialogDescription></AlertDialogHeader>{error && <p className="text-sm text-red-600">{error}</p>}<AlertDialogFooter>{onReturnToFullscreen && !terminated ? <Button onClick={onReturnToFullscreen}>Return to Fullscreen</Button> : <AlertDialogAction onClick={() => { onOpenChange(false); if (terminated) onTerminatedExit?.(); }}>{teacherTerminated ? "Back to My Exams" : terminated ? "Back to Dashboard" : "Continue"}</AlertDialogAction>}</AlertDialogFooter></AlertDialogContent></AlertDialog>;
 }

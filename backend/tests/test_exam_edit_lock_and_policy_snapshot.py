@@ -5,7 +5,10 @@ import pytest
 from fastapi import HTTPException
 
 from src.models.teacher import examModel
-from src.models.teacher.antiCheatPolicy import make_anti_cheat_policy_snapshot
+from src.models.teacher.antiCheatPolicy import (
+    default_anti_cheat_measures,
+    make_anti_cheat_policy_snapshot,
+)
 from src.service.exam_version_service import claim_exam_version
 
 
@@ -38,3 +41,16 @@ def test_attempt_policy_snapshot_does_not_read_later_exam_settings():
     assert policy["anti_cheat_enabled"] is True
     assert policy["anti_cheat_measures"]["COPY_ATTEMPT"]["threshold"] == 3
     get_settings.assert_not_called()
+
+
+def test_attempt_policy_is_inactive_when_every_measure_is_disabled():
+    measures = default_anti_cheat_measures()
+    for measure in measures.values():
+        measure["enabled"] = False
+    snapshot = make_anti_cheat_policy_snapshot(
+        True,
+        5,
+        measures,
+    )
+
+    assert snapshot["anti_cheat_enabled"] is False

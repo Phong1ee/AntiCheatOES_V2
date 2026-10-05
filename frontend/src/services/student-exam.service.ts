@@ -148,6 +148,17 @@ export interface RestoreAttemptResult {
   antiCheatMeasures: AntiCheatMeasures;
 }
 
+export interface AttemptHeartbeatResult {
+  success: boolean;
+  attemptId: number;
+  attemptStatus: string;
+  violationCount: number;
+  lastHeartbeatAt?: string | null;
+  terminated: boolean;
+  terminationReason?: string | null;
+  terminationSource?: string | null;
+}
+
 const normalizeQuestion = (question: RawQuestion): StudentQuestion => ({
   id: question.id ?? question.question_id ?? 0,
   text: question.text,
@@ -295,8 +306,8 @@ export const studentExamService = {
     return data;
   },
 
-  async heartbeat(examId: string | number, attemptId: number) {
-    const { data } = await apiClient.post(`/api/exams/${examId}/attempts/${attemptId}/heartbeat`, undefined, { headers: attemptSessionStorage.headers(attemptId) });
+  async heartbeat(examId: string | number, attemptId: number): Promise<AttemptHeartbeatResult> {
+    const { data } = await apiClient.post<AttemptHeartbeatResult>(`/api/exams/${examId}/attempts/${attemptId}/heartbeat`, undefined, { headers: attemptSessionStorage.headers(attemptId) });
     return data;
   },
 };

@@ -301,7 +301,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
 
   const isNewExam = examId.startsWith('new-');
   const isLocked = !isNewExam && exam?.isLocked === true;
-  const lockedClass = isLocked ? 'pointer-events-none select-none opacity-60 blur-[2px]' : '';
+  // Locked tabs remain fully legible for review; `inert` below and these
+  // pointer guards still prevent every edit or keyboard interaction.
+  const lockedClass = isLocked ? 'pointer-events-none select-none' : '';
   // `inert` removes the subtree from keyboard focus; React 18 typings lack the prop.
   const lockedProps: object = isLocked ? { inert: '', 'aria-disabled': true } : {};
 

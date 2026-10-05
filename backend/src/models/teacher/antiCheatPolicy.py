@@ -73,6 +73,14 @@ def normalize_anti_cheat_measures(value: Any, legacy_threshold: int = 5) -> dict
     return normalized
 
 
+def has_enabled_anti_cheat_measure(value: Any, legacy_threshold: int = 5) -> bool:
+    """Whether at least one Teacher-visible anti-cheat rule is enabled."""
+    return any(
+        bool(measure["enabled"])
+        for measure in normalize_anti_cheat_measures(value, legacy_threshold).values()
+    )
+
+
 def make_anti_cheat_policy_snapshot(
     anti_cheat_enabled: Any,
     violation_limit: Any,
@@ -80,10 +88,13 @@ def make_anti_cheat_policy_snapshot(
 ) -> dict[str, Any]:
     """Freeze the complete, server-normalized policy for one Attempt."""
     limit = min(max(int(violation_limit or 5), 1), 100)
+    measures = normalize_anti_cheat_measures(anti_cheat_measures, limit)
     return {
-        "anti_cheat_enabled": bool(anti_cheat_enabled),
+        # A stale configuration must not claim that anti-cheat is active when
+        # every Teacher-visible rule has been disabled.
+        "anti_cheat_enabled": bool(anti_cheat_enabled) and has_enabled_anti_cheat_measure(measures, limit),
         "violation_limit": limit,
-        "anti_cheat_measures": normalize_anti_cheat_measures(anti_cheat_measures, limit),
+        "anti_cheat_measures": measures,
     }
 
 

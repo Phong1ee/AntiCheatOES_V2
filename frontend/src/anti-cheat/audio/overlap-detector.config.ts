@@ -3,6 +3,7 @@ export interface OverlapDetectorConfig {
   modelName: string;
   sampleRate: number;
   windowSamples: number;
+  resumeWarmupMs: number;
   recentSpeechGraceMs: number;
   speechActivityProbabilityThreshold: number;
   inferenceIntervalMs: number;
@@ -21,6 +22,10 @@ export const OVERLAP_DETECTOR_CONFIG: OverlapDetectorConfig = {
   modelName: 'pyannote-segmentation-3.0-int8',
   sampleRate: 16_000,
   windowSamples: 160_000,
+  // A resumed microphone must build evidence from the new live session only.
+  // This prevents speech that was already in progress during a refresh from
+  // being interpreted as a second speaker after the runtime is rebuilt.
+  resumeWarmupMs: 2_000,
   recentSpeechGraceMs: 2_000,
   // Final exam profile: prioritize short verbal exchanges without recording raw audio.
   inferenceIntervalMs: 125,

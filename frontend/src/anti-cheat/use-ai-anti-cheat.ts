@@ -25,6 +25,16 @@ export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime
     runtimeRef.current = null;
   }, []);
 
+  // React cleanup is not guaranteed to complete during a hard page reload.
+  // Stop the worker/VAD synchronously on pagehide so the next Resume cannot
+  // receive a late incident from the old microphone session.
+  useEffect(() => {
+    if (!active) return;
+    const stopForPageExit = () => stop();
+    window.addEventListener('pagehide', stopForPageExit);
+    return () => window.removeEventListener('pagehide', stopForPageExit);
+  }, [active, stop]);
+
   const fail = useCallback((message: string) => {
     stop();
     setReadiness('error');
@@ -55,6 +65,9 @@ export function useAIAntiCheat({ active, mediaStream, reporter, preloadedRuntime
       ? preloadedRuntime
       : new AntiCheatRuntime(mediaStream, undefined, undefined, { camera: requiresCamera, microphone: requiresMicrophone });
     runtimeRef.current = runtime;
+    // A newly constructed runtime and a transferred preflight runtime both
+    // begin this mounted exam session from a clean microphone evidence window.
+    runtime.resetForAttemptStart();
     runtime.setIncidentHandler((incident) => void report(incident));
     runtime.setRuntimeErrorHandler((cause) => {
       if (!disposed) {

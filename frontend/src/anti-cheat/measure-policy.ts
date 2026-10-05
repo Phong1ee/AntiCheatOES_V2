@@ -47,6 +47,9 @@ export type MonitoringGroupId = typeof monitoringGroups[number]['id'];
 export const isMonitoringGroupEnabled = (measures: AntiCheatMeasures, groupId: MonitoringGroupId): boolean =>
   monitoringGroups.find((group) => group.id === groupId)?.eventTypes.some((eventType) => measures[eventType]?.enabled) ?? false;
 
+export const hasEnabledMonitoringGroup = (measures: AntiCheatMeasures): boolean =>
+  monitoringGroups.some((group) => isMonitoringGroupEnabled(measures, group.id));
+
 export const setMonitoringGroupEnabled = (
   measures: AntiCheatMeasures,
   groupId: MonitoringGroupId,

@@ -439,7 +439,16 @@ class ExamController:
         if role != "student":
             raise Exception("Only students can manage exam attempts")
         state = examModel.heartbeatAttempt(exam_id, attempt_id, school_id, device_id, session_token)
-        return {"success": True, "attemptId": attempt_id, "attemptStatus": state["status"], "violationCount": int(state["violation_count"] or 0), "lastHeartbeatAt": state["last_heartbeat_at"]}
+        return {
+            "success": True,
+            "attemptId": attempt_id,
+            "attemptStatus": state["status"],
+            "violationCount": int(state["violation_count"] or 0),
+            "lastHeartbeatAt": state.get("last_heartbeat_at"),
+            "terminated": bool(state.get("terminated", False)),
+            "terminationReason": state.get("termination_reason"),
+            "terminationSource": state.get("termination_source"),
+        }
 
     @staticmethod
     def getStudentExam(school_id: str):

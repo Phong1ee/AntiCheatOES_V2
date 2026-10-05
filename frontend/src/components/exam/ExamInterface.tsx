@@ -54,6 +54,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const [timerReady, setTimerReady] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
   const [isTeacherLocked, setIsTeacherLocked] = useState(false);
+  const [teacherTerminationReason, setTeacherTerminationReason] = useState<string | null>(null);
   const [violationType, setViolationType] = useState<string>("");
   // The aggregate count is useful telemetry, but only the event-type count is
   // compared with a measure's threshold and can end an attempt.
@@ -134,13 +135,53 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   }, []);
 
   const handleTeacherLock = useCallback((message = "This attempt was locked by your teacher.") => {
+    // Keep the secure session alive. The same heartbeat that reported the lock
+    // keeps polling, allowing an unlock to resume this exact attempt.
     examEndingRef.current = true;
     setIsTeacherLocked(true);
     setShowSubmitDialog(false);
     stopAutoSave(message);
+  }, [stopAutoSave]);
+
+  const handleTeacherUnlock = useCallback(() => {
+    examEndingRef.current = false;
+    setIsTeacherLocked(false);
+    setSubmitError(null);
+    setSaveStatus("Ready");
+    setTimerReady(true);
+  }, []);
+
+  const handleTeacherTermination = useCallback((reason?: string | null) => {
+    examEndingRef.current = true;
+    setAttemptStatus("terminated");
+    setIsTerminated(true);
+    setIsTeacherLocked(false);
+    setTeacherTerminationReason((reason ?? "").replace(/^teacher_terminated:\s*/i, "") || null);
+    setShowSubmitDialog(false);
+    setSubmitError(null);
+    stopAutoSave();
+    localStorage.removeItem(attemptKey);
+    if (attemptId) {
+      localStorage.removeItem(draftKey(attemptId));
+      localStorage.removeItem(markedQuestionsKey(attemptId));
+    }
     mediaStream?.getTracks().forEach((track) => track.stop());
     void exitFullscreenIntentionally();
-  }, [exitFullscreenIntentionally, mediaStream, stopAutoSave]);
+    setShowViolationWarning(true);
+  }, [attemptId, exitFullscreenIntentionally, mediaStream, stopAutoSave]);
+
+  const checkForTeacherTermination = useCallback(async () => {
+    if (!attemptId) return false;
+    const state = await studentExamService.heartbeat(examId, attemptId);
+    if (state.attemptStatus === "terminated" && state.terminationSource === "teacher") {
+      handleTeacherTermination(state.terminationReason);
+      return true;
+    }
+    // A locked attempt receives a 403 heartbeat response. Therefore a later
+    // successful in-progress heartbeat is authoritative proof it was unlocked.
+    if (isTeacherLocked && state.attemptStatus === "in_progress") handleTeacherUnlock();
+    return false;
+  }, [attemptId, examId, handleTeacherTermination, handleTeacherUnlock, isTeacherLocked]);
 
   const saveQuestion = useCallback(async (questionId: number, force = false): Promise<boolean> => {
     if (!attemptId || attemptStatus !== "in_progress" || !navigator.onLine) return false;
@@ -175,15 +216,17 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         if (message === "Attempt is locked by teacher") {
           handleTeacherLock(message);
         } else if (message === "Attempt has expired" || message === "Attempt is no longer in progress") {
-          setAttemptStatus("expired");
-          stopAutoSave(message);
+          void checkForTeacherTermination().catch(() => {
+            setAttemptStatus("expired");
+            stopAutoSave(message);
+          });
         } else {
           setSubmitError(message);
         }
       }
       return false;
     }
-  }, [attemptId, attemptStatus, examId, handleTeacherLock, stopAutoSave]);
+  }, [attemptId, attemptStatus, checkForTeacherTermination, examId, handleTeacherLock, stopAutoSave]);
 
   const flushDirty = useCallback(async () => {
     await Promise.all([...dirtyRef.current].map(id => saveQuestion(id)));
@@ -192,7 +235,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   useEffect(() => {
     if (!attemptId || attemptStatus !== "in_progress") return undefined;
     const heartbeat = () => {
-      void studentExamService.heartbeat(examId, attemptId).catch((error: unknown) => {
+      void checkForTeacherTermination().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Attempt session is invalid. Resume from My Exams.";
         if (message === "Attempt is locked by teacher") handleTeacherLock(message);
         else stopAutoSave(message);
@@ -201,7 +244,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     heartbeat();
     const interval = window.setInterval(heartbeat, 10_000);
     return () => window.clearInterval(interval);
-  }, [attemptId, attemptStatus, examId, handleTeacherLock, stopAutoSave]);
+  }, [attemptId, attemptStatus, checkForTeacherTermination, handleTeacherLock, stopAutoSave]);
 
   const submit = useCallback(async (automatic = false) => {
     if (!attemptId || attemptStatus !== "in_progress" || isSubmitted) return;
@@ -468,6 +511,6 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
     {/* This dialog is the whole fullscreen gate: while locked it stays open, its
         only button is Return to Fullscreen, and answering is blocked underneath. */}
-    <ViolationWarningDialog open={showViolationWarning || fullscreenGateOpen} onOpenChange={setShowViolationWarning} eventType={violationType} measureViolationCount={measureViolationCount} measureThreshold={measureThreshold} remainingViolations={remainingViolations} terminated={isTerminated} onReturnToFullscreen={(violationType === "FULLSCREEN_EXIT" || fullscreenGateOpen) && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} error={fullscreenGateOpen ? submitError : null} />
+    <ViolationWarningDialog open={showViolationWarning || fullscreenGateOpen} onOpenChange={setShowViolationWarning} eventType={violationType} measureViolationCount={measureViolationCount} measureThreshold={measureThreshold} remainingViolations={remainingViolations} terminated={isTerminated} teacherTerminationReason={teacherTerminationReason} onReturnToFullscreen={(violationType === "FULLSCREEN_EXIT" || fullscreenGateOpen) && !isTerminated ? () => void returnToFullscreen() : undefined} onTerminatedExit={exitAfterTermination} error={fullscreenGateOpen ? submitError : null} />
   </div>;
 }

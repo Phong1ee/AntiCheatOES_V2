@@ -45,6 +45,7 @@ export class OverlapDetector {
   private skippedInferences = 0;
   private lastDiagnosticsAt = 0;
   private generation = 0;
+  private ignoreFramesUntil = 0;
 
   constructor(
     private readonly onIncident: (incident: OverlapIncident) => void,
@@ -76,11 +77,17 @@ export class OverlapDetector {
   }
 
   observeVadFrame(probability: number, frame: Float32Array): void {
+    // Do not combine audio collected before and after a Resume into one
+    // speaker-evidence window. The resumed runtime starts from fresh frames.
+    if (performance.now() < this.ignoreFramesUntil) return;
     this.append(frame);
     if (probability >= this.config.speechActivityProbabilityThreshold) this.lastSpeechAt = performance.now();
   }
 
-  analyzeNow(): void { this.analyzeLatest(); }
+  analyzeNow(): void {
+    if (performance.now() < this.ignoreFramesUntil) return;
+    this.analyzeLatest();
+  }
 
   private append(samples: Float32Array): void {
     for (const sample of samples) {
@@ -158,6 +165,7 @@ export class OverlapDetector {
     this.sampleCount = 0;
     this.lastSpeechAt = 0;
     this.inFlight = false;
+    this.ignoreFramesUntil = performance.now() + this.config.resumeWarmupMs;
   }
 
   stop(): void {
@@ -165,6 +173,7 @@ export class OverlapDetector {
     this.cancelInitialization?.(new Error('Overlap detector stopped.'));
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = null;
+    this.ignoreFramesUntil = Number.POSITIVE_INFINITY;
     this.worker.terminate(); this.ring = new Float32Array(0);
   }
 

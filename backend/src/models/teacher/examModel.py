@@ -46,27 +46,36 @@ def create_attempt_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _get_attempt_for_bound_session(cursor, exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> dict:
+    """Load an owned attempt after validating its bound browser session."""
+    cursor.execute(
+        """
+        SELECT device_id_hash, session_token_hash, status, submitted_at, end_time,
+               is_locked, termination_reason, violation_count, last_heartbeat_at
+        FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
+        """,
+        (attempt_id, exam_id, student_id),
+    )
+    attempt = cursor.fetchone()
+    if not attempt:
+        raise Exception("Attempt is no longer in progress")
+    if not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id)):
+        raise Exception("Attempt device does not match")
+    if not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token)):
+        raise Exception("Attempt session is invalid")
+    return attempt
+
+
 def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> None:
     """Validate an active attempt session without exposing stored hashes."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
-        cursor.execute(
-            """
-            SELECT device_id_hash, session_token_hash, status, submitted_at, end_time, is_locked
-            FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
-            """,
-            (attempt_id, exam_id, student_id),
-        )
-        attempt = cursor.fetchone()
-        if not attempt or attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+        attempt = _get_attempt_for_bound_session(cursor, exam_id, attempt_id, student_id, device_id, session_token)
+        if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         if attempt.get("is_locked", False):
             raise Exception("Attempt is locked by teacher")
-        if not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id)):
-            raise Exception("Attempt device does not match")
-        if not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token)):
-            raise Exception("Attempt session is invalid")
     finally:
         cursor.close()
         cnx.close()
@@ -1510,10 +1519,25 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
 
 
 def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> dict:
-    assertAttemptSession(exam_id, attempt_id, student_id, device_id, session_token)
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
     try:
+        # A terminated attempt is revealed only after the same device/session
+        # validation as an active heartbeat, so another browser cannot probe it.
+        attempt = _get_attempt_for_bound_session(cursor, exam_id, attempt_id, student_id, device_id, session_token)
+        if attempt["status"] == "terminated" and str(attempt.get("termination_reason") or "").startswith("teacher_terminated:"):
+            return {
+                "last_heartbeat_at": attempt.get("last_heartbeat_at"),
+                "violation_count": attempt.get("violation_count") or 0,
+                "status": "terminated",
+                "terminated": True,
+                "termination_reason": attempt.get("termination_reason"),
+                "termination_source": "teacher",
+            }
+        if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
+            raise Exception("Attempt is no longer in progress")
+        if attempt.get("is_locked", False):
+            raise Exception("Attempt is locked by teacher")
         cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s AND is_locked = 0", (attempt_id,))
         if getattr(cursor, "rowcount", 1) != 1:
             raise Exception("Attempt is locked by teacher")

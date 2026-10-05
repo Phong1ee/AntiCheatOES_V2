@@ -9,7 +9,10 @@ from src.models.teacher.requestModel.ExamSettingsRequest import (
     ExamSettingsRequest,
     ExamSettingsResponse,
 )
-from src.models.teacher.antiCheatPolicy import normalize_anti_cheat_measures
+from src.models.teacher.antiCheatPolicy import (
+    has_enabled_anti_cheat_measure,
+    normalize_anti_cheat_measures,
+)
 from src.service.result_strategy_service import set_result_strategy, sync_final_scores
 from src.service.exam_version_service import claim_exam_version
 from src.service.teacher_subject_service import require_active_subject_assignment
@@ -31,6 +34,17 @@ def _owned_exam(db: Session, exam_id: int, school_id: str) -> Exam:
 
 
 def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
+    measures = normalize_anti_cheat_measures(
+        setting.anti_cheat_measures, setting.violation_limit,
+    )
+    anti_cheat_enabled = bool(setting.anti_cheat_enabled) and has_enabled_anti_cheat_measure(
+        measures, setting.violation_limit,
+    )
+    if not anti_cheat_enabled:
+        measures = {
+            event_type: {**measure, "enabled": False}
+            for event_type, measure in measures.items()
+        }
     return ExamSettingsResponse(
         exam_id=setting.exam_id,
         questions_per_page=setting.questions_per_page,
@@ -39,11 +53,9 @@ def _serialize(setting: ExamSetting, exam: Exam) -> ExamSettingsResponse:
         sequential_navigation=setting.sequential_navigation,
         auto_submit_on_expire=setting.auto_submit_on_expire,
         grace_period=setting.grace_period,
-        anti_cheat_enabled=setting.anti_cheat_enabled,
+        anti_cheat_enabled=anti_cheat_enabled,
         violation_limit=setting.violation_limit,
-        anti_cheat_measures=normalize_anti_cheat_measures(
-            setting.anti_cheat_measures, setting.violation_limit,
-        ),
+        anti_cheat_measures=measures,
         auto_grade=setting.auto_grade,
         result_strategy=setting.result_strategy,
         result_visibility=exam.result_visibility.value if exam.result_visibility else None,
@@ -58,6 +70,16 @@ def _apply(setting: ExamSetting, payload: ExamSettingsRequest) -> None:
         # Skip request fields with no exam_setting column (setattr would silently succeed).
         if hasattr(type(setting), field):
             setattr(setting, field, value)
+    if payload.anti_cheat_measures is not None:
+        measures = normalize_anti_cheat_measures(
+            setting.anti_cheat_measures, setting.violation_limit,
+        )
+        setting.anti_cheat_measures = measures
+        # The master switch is derived from the three monitoring groups when
+        # the complete per-measure policy is supplied by the current Teacher UI.
+        setting.anti_cheat_enabled = has_enabled_anti_cheat_measure(
+            measures, setting.violation_limit,
+        )
 
 
 @router.get("/exams/{exam_id}/settings", response_model=ExamSettingsResponse)

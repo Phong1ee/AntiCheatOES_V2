@@ -790,11 +790,11 @@ def createAttempt(
         cursor.execute("SELECT questions_per_page, sequential_navigation FROM exam_setting WHERE exam_id = %s", (exam_id,))
         per_page_row = cursor.fetchone()
         per_page = int(per_page_row[0]) if per_page_row else 1
-        cursor.execute("SELECT question_id, block_id, structure_order, pinned_position FROM exam_question WHERE exam_id = %s ORDER BY structure_order, question_id", (exam_id,))
+        cursor.execute("SELECT question_id, block_id, structure_order, pinned_position, pinned_page FROM exam_question WHERE exam_id = %s ORDER BY structure_order, question_id", (exam_id,))
         structure_rows = cursor.fetchall()
-        members = {r[0]: {"block_id": r[1], "structure_order": r[2], "pinned_position": r[3]} for r in structure_rows}
-        cursor.execute("SELECT block_id, kind, title, rich_html, image_media_id, audio_media_id, image_alt, keep_order, keep_together, pinned_position, structure_order FROM exam_question_block WHERE exam_id = %s", (exam_id,))
-        block_fields = ("block_id", "kind", "title", "rich_html", "image_media_id", "audio_media_id", "image_alt", "keep_order", "keep_together", "pinned_position", "structure_order")
+        members = {r[0]: {"block_id": r[1], "structure_order": r[2], "pinned_position": r[3], "pinned_page": r[4] if len(r) > 4 else None} for r in structure_rows}
+        cursor.execute("SELECT block_id, kind, title, rich_html, image_media_id, audio_media_id, image_alt, keep_order, keep_together, pinned_position, structure_order, pinned_page FROM exam_question_block WHERE exam_id = %s", (exam_id,))
+        block_fields = ("block_id", "kind", "title", "rich_html", "image_media_id", "audio_media_id", "image_alt", "keep_order", "keep_together", "pinned_position", "structure_order", "pinned_page")
         blocks = {r[0]: dict(zip(block_fields, r)) for r in cursor.fetchall()}
         layout = build_layout(sorted(selected_ids, key=lambda q: (members.get(q, {}).get("structure_order", 0), q)), members, blocks, per_page, shuffle_questions, f"{exam_id}:{student_id}:{attempt_no}")
         selected_ids = [r["question_id"] for r in layout]

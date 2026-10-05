@@ -652,6 +652,7 @@ class ExamQuestion(Base):
     block_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("exam_question_block.block_id", ondelete="SET NULL"), nullable=True)
     structure_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     pinned_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pinned_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     question_point: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
 
     exam: Mapped["Exam"] = relationship(back_populates="exam_questions")
@@ -1485,4 +1486,5 @@ class ExamQuestionBlock(Base):
     keep_order: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     keep_together: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     pinned_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pinned_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     structure_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)

@@ -157,7 +157,8 @@ def test_applied_multimedia_revision_and_backfill_dependency_are_available():
     script = ScriptDirectory.from_config(config)
     revision = script.get_revision("8a21c7e5b940")
     assert revision.down_revision == "f2a7c9e4b106"
-    assert script.get_heads() == [revision.revision]
+    assert revision.revision in {r.revision for r in script.walk_revisions()}
+    assert len(script.get_heads()) == 1
     from src.service.rich_content_service import sanitize_rich
     html, plain = sanitize_rich('<p>Hello <strong>world</strong><script>alert(1)</script></p>')
     assert html == '<p>Hello <strong>world</strong></p>'

@@ -14,6 +14,7 @@ export interface QuestionBlock extends RichContent {
   keep_order: boolean;
   keep_together: boolean;
   pinned_position: number | null;
+  pinned_page?: number | null;
 }
 
 export interface QuestionLayout {

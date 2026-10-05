@@ -169,3 +169,23 @@ it('keeps true/false semantics when media-only options are reversed', async () =
   expect(radios[1].getAttribute('aria-label')).toContain('True');
   expect(radios[1].checked).toBe(true);
 });
+
+it('honors two page pins even when the default is one question per page', async () => {
+  const { StudentQuestionPreview } = await import('../teacher/exam-manager/StudentQuestionPreview');
+  const questions: StudentQuestion[] = [1, 2, 3].map(id => ({ id, text: `Pinned question ${id}`, type: 'essay', points: 1, options: [], layout: { page: id < 3 ? 1 : 2, slot: id < 3 ? id : 1, position: id, questions_per_page: 1 } }));
+  expect(questionPages(questions, 1).map(page => page.length)).toEqual([2, 1]);
+  await render(<StudentQuestionPreview questions={questions} />);
+  expect(container.textContent).toContain('Pinned question 1');
+  expect(container.textContent).toContain('Pinned question 2');
+  expect(container.textContent).not.toContain('Pinned question 3');
+  await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Next')!.click());
+  expect(container.textContent).toContain('Pinned question 3');
+  expect(container.textContent).toContain('Page 2 / 2');
+});
+
+it('paginates legacy questions without snapshot layout by the exam page size', () => {
+  const questions: StudentQuestion[] = [1, 2, 3, 4, 5].map(id => ({ id, text: 'Question', type: 'essay', points: 1, options: [] }));
+  const pages = questionPages(questions, 2);
+  expect(pages.map(page => page.map(q => q.id))).toEqual([[1, 2], [3, 4], [5]]);
+  expect(pageIndexForQuestion(pages, 4)).toBe(1);
+});

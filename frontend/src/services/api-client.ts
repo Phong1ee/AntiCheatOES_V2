@@ -12,6 +12,10 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  // Let the browser attach the multipart boundary; JSON defaults corrupt uploads.
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    config.headers.delete("Content-Type");
+  }
   const token = authStorage.getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;

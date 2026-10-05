@@ -428,6 +428,28 @@ class StudentExamFlowTests(unittest.TestCase):
         self.assertEqual(restored["options"][0]["image_media_id"], "a" * 64)
         self.assertNotIn("isCorrect", restored["options"][0])
 
+    def test_attempt_snapshots_shared_page_pins_with_default_size_one(self):
+        import json
+        class PageCursor(_CreateCursor):
+            def fetchone(self):
+                if "SELECT questions_per_page" in self.last_query:
+                    return (1, True)
+                return super().fetchone()
+            def fetchall(self):
+                if "SELECT question_id, block_id" in self.last_query:
+                    return [(11, None, 0, None, 1), (12, None, 1, None, 1), (13, None, 2, None, None)]
+                if "FROM exam_question" in self.last_query and "FROM exam_question_block" not in self.last_query:
+                    return [(11, 3), (12, 3), (13, 3)]
+                return super().fetchall()
+        connection = _CreateConnection()
+        connection.cursor_instance = PageCursor()
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            examModel.createAttempt(5, "S1", 1)
+        snapshots = connection.cursor_instance.inserted_rows
+        pages = {row[1]: json.loads(row[9])["page"] for row in snapshots}
+        self.assertEqual(pages, {11: 1, 12: 1, 13: 2})
+        self.assertTrue(all(json.loads(row[9])["questions_per_page"] == 1 for row in snapshots))
+
     def _snapshot_rows(self, mode: str, student_id: str, shuffle_questions: bool, shuffle_options: bool):
         connection = _SelectionConnection(mode, shuffle_questions, shuffle_options)
         with patch.object(examModel, "get_db_connection", return_value=connection):

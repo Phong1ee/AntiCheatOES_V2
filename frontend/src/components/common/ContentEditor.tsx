@@ -12,7 +12,7 @@ export function ContentEditor({ content, text, subjectId, label, disabled, onCha
     void apiClient.post('/api/teacher/question-media/cleanup-staged').catch(() => undefined);
     const form = new FormData(); form.append('file', file);
     try {
-      const { data } = await apiClient.post<{ media_id: string; kind: string; mime_type: string }>(`/api/teacher/question-media?subject_id=${encodeURIComponent(subjectId)}`, form, { onUploadProgress: e => setProgress(e.total ? Math.round(e.loaded / e.total * 100) : 0) });
+      const { data } = await apiClient.post<{ media_id: string; kind: string; mime_type: string }>(`/api/teacher/question-media?subject_id=${encodeURIComponent(subjectId)}`, form, { timeout: 60_000, headers: { "Content-Type": undefined }, onUploadProgress: e => setProgress(e.total ? Math.round(e.loaded / e.total * 100) : 0) });
       if (data.kind !== kind) throw new Error(`Choose a valid ${kind} file.`);
       if (kind === 'audio' && !document.createElement('audio').canPlayType(data.mime_type)) throw new Error('This browser cannot play this audio format. Use MP3 or WAV.');
       onChange({ ...content, [`${kind}_media_id`]: data.media_id }, text);

@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { apiClient } from '../../../services/api-client';
 import { QuestionStructurePanel } from './QuestionStructurePanel';
 
 vi.mock('../../../services/api-client', () => ({ apiClient: { get: vi.fn(() => Promise.resolve({ data: { version: 1, blocks: [], standalone: [{ question_id: 1, pinned_position: null }, { question_id: 2, pinned_position: null }], layout: [{ question_id: 1, position: 1, page: 1, slot: 1 }] } })), put: vi.fn() } }));
@@ -45,4 +46,24 @@ it('opens preview separately and explains why unsaved questions block preview', 
   expect(dialog.textContent).toContain('Save question and pool changes');
   expect(button(dialog, 'Preview saved exam').disabled).toBe(true);
   expect(dialog.textContent).not.toContain('Standalone questions');
+});
+
+it('saves multiple questions pinned to the same page and the page-size setting', async () => {
+  vi.mocked(apiClient.put).mockResolvedValue({ data: { version: 2, layout: [] } });
+  await act(async () => root.render(<QuestionStructurePanel examId={1} subjectId="SUB" onSaved={async () => {}} />));
+  await act(async () => button(container, 'Manage question groups').click());
+  const dialog = document.querySelector('[role=dialog]') as HTMLElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  for (const [label, value] of [['Question 1 pin', '1'], ['Question 2 pin', '1'], ['Questions per page', '2']]) {
+    const input = dialog.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
+    await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  }
+  await act(async () => button(dialog, 'Save structure').click());
+  expect(apiClient.put).toHaveBeenLastCalledWith('/api/teacher/exams/1/question-structure', expect.objectContaining({
+    questions_per_page: 2,
+    standalone: [
+      { question_id: 1, pinned_position: null, pinned_page: 1 },
+      { question_id: 2, pinned_position: null, pinned_page: 1 },
+    ],
+  }));
 });

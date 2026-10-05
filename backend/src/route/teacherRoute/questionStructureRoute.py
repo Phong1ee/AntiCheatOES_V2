@@ -25,14 +25,17 @@ class BlockPayload(RichContentRequest):
     keep_order: bool = True
     keep_together: bool = True
     pinned_position: int | None = Field(default=None, ge=1, le=50000)
+    pinned_page: int | None = Field(default=None, ge=1, le=50000, strict=True)
 
 
 class Placement(BaseModel):
     question_id: int
     pinned_position: int | None = Field(default=None, ge=1, le=50000)
+    pinned_page: int | None = Field(default=None, ge=1, le=50000, strict=True)
 
 
 class StructurePayload(BaseModel):
+    questions_per_page: int | None = Field(default=None, ge=1, le=50, strict=True)
     expected_version: int = Field(ge=1)
     blocks: list[BlockPayload] = Field(default_factory=list, max_length=1000)
     standalone: list[Placement] = Field(default_factory=list, max_length=1000)
@@ -41,8 +44,8 @@ class StructurePayload(BaseModel):
 def structure_data(db, exam_id):
     links = db.query(ExamQuestion).filter_by(exam_id=exam_id).order_by(ExamQuestion.structure_order, ExamQuestion.question_id).all()
     blocks = db.query(ExamQuestionBlock).filter_by(exam_id=exam_id).order_by(ExamQuestionBlock.structure_order).all()
-    members = {r.question_id: {"block_id": r.block_id, "structure_order": r.structure_order, "pinned_position": r.pinned_position} for r in links}
-    block_map = {r.block_id: {"block_id": r.block_id, "kind": r.kind, "title": r.title, **content_dict(r), "keep_order": r.keep_order, "keep_together": r.keep_together, "pinned_position": r.pinned_position, "structure_order": r.structure_order} for r in blocks}
+    members = {r.question_id: {"block_id": r.block_id, "structure_order": r.structure_order, "pinned_position": r.pinned_position, "pinned_page": r.pinned_page} for r in links}
+    block_map = {r.block_id: {"block_id": r.block_id, "kind": r.kind, "title": r.title, **content_dict(r), "keep_order": r.keep_order, "keep_together": r.keep_together, "pinned_position": r.pinned_position, "pinned_page": r.pinned_page, "structure_order": r.structure_order} for r in blocks}
     return links, members, block_map
 
 
@@ -56,7 +59,7 @@ def validate_structure(db, exam_id, questions_per_page=None):
 def get_structure(exam_id: int, current_user=Depends(verify_token), role_check=Depends(TEACHER_ONLY), db: Session = Depends(get_db)):
     exam = _owned_exam(db, exam_id, current_user["school_id"])
     links, members, blocks = structure_data(db, exam_id)
-    return {"version": exam.version, "blocks": [{**b, "question_ids": [r.question_id for r in links if r.block_id == bid]} for bid, b in blocks.items()], "standalone": [{"question_id": r.question_id, "pinned_position": r.pinned_position} for r in links if r.block_id is None], "layout": validate_structure(db, exam_id)}
+    return {"version": exam.version, "questions_per_page": (db.get(ExamSetting, exam_id).questions_per_page if db.get(ExamSetting, exam_id) else 1), "blocks": [{**b, "question_ids": [r.question_id for r in links if r.block_id == bid]} for bid, b in blocks.items()], "standalone": [{"question_id": r.question_id, "pinned_position": r.pinned_position, "pinned_page": r.pinned_page} for r in links if r.block_id is None], "layout": validate_structure(db, exam_id)}
 
 
 @router.put("/exams/{exam_id}/question-structure")
@@ -78,6 +81,7 @@ def put_structure(exam_id: int, payload: StructurePayload, current_user=Depends(
         for r in links:
             r.block_id = None
             r.pinned_position = None
+            r.pinned_page = None
         db.flush()
         keep = set()
         for index, item in enumerate(payload.blocks):
@@ -85,7 +89,7 @@ def put_structure(exam_id: int, payload: StructurePayload, current_user=Depends(
                 raise HTTPException(422, "Parent stimulus requires rich text, an image or audio")
             validate_media(db, item, current_user["school_id"], exam.subject_id)
             block = db.get(ExamQuestionBlock, item.block_id) if item.block_id else ExamQuestionBlock(exam_id=exam_id)
-            for key in ("kind", "title", "keep_order", "keep_together", "pinned_position", "rich_html", "image_media_id", "audio_media_id", "image_alt"):
+            for key in ("kind", "title", "keep_order", "keep_together", "pinned_position", "pinned_page", "rich_html", "image_media_id", "audio_media_id", "image_alt"):
                 setattr(block, key, getattr(item, key))
             block.structure_order = index
             db.add(block)
@@ -97,8 +101,15 @@ def put_structure(exam_id: int, payload: StructurePayload, current_user=Depends(
         for index, item in enumerate(payload.standalone, len(payload.blocks)):
             by_id[item.question_id].structure_order = index
             by_id[item.question_id].pinned_position = item.pinned_position
+            by_id[item.question_id].pinned_page = item.pinned_page
         for bid in set(existing) - keep:
             db.delete(db.get(ExamQuestionBlock, bid))  # only the container; answers/questions survive
+        if payload.questions_per_page is not None:
+            setting = db.get(ExamSetting, exam_id)
+            if setting is None:
+                setting = ExamSetting(exam_id=exam_id)
+                db.add(setting)
+            setting.questions_per_page = payload.questions_per_page
         db.flush()
         layout = validate_structure(db, exam_id)
         db.commit()

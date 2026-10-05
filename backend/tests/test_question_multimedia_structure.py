@@ -335,3 +335,94 @@ def test_omitted_page_size_in_settings_update_preserves_pinned_layout(db):
     result = update_exam_settings(1, ExamSettingsRequest(shuffle_question=True, expected_version=1), {"school_id": "T"}, {}, db)
     assert result.questions_per_page == 2
     assert db.get(ExamQuestion, (1, 3)).pinned_position == 3
+
+
+@pytest.mark.parametrize("per_page", [1, 2, 3])
+def test_same_page_pins_do_not_conflict(per_page):
+    rows = build_layout([1, 2, 3, 4], {1: {"pinned_page": 1}, 2: {"pinned_page": 1}}, questions_per_page=per_page, shuffle=True, seed="same-page")
+    mapped = {row["question_id"]: row for row in rows}
+    assert mapped[1]["page"] == mapped[2]["page"] == 1
+    assert mapped[1]["slot"] != mapped[2]["slot"]
+    assert sorted(mapped) == [1, 2, 3, 4]
+    assert rows == build_layout([1, 2, 3, 4], {1: {"pinned_page": 1}, 2: {"pinned_page": 1}}, questions_per_page=per_page, shuffle=True, seed="same-page")
+
+
+def test_page_pins_keep_block_and_other_question_together():
+    rows = build_layout([1, 2, 3, 4], {1: {"block_id": 1}, 2: {"block_id": 1}, 3: {"pinned_page": 1}}, {1: {"block_id": 1, "pinned_page": 1, "keep_order": True, "keep_together": True}}, questions_per_page=1)
+    assert [r["page"] for r in rows[:3]] == [1, 1, 1]
+    assert [r["question_id"] for r in rows[:3]] == [1, 2, 3]
+    assert rows[-1]["page"] == 2
+
+
+def test_page_pin_bound_and_empty_pages():
+    with pytest.raises(ValueError, match="50"):
+        build_layout(list(range(51)), {q: {"pinned_page": 1} for q in range(51)})
+    with pytest.raises(ValueError, match="empty"):
+        build_layout([1, 2], {1: {"pinned_page": 2}, 2: {"pinned_page": 2}})
+
+
+def test_page_pinned_large_block_has_continuation():
+    ids = list(range(55))
+    rows = build_layout(ids, {q: {"block_id": 1} for q in ids}, {1: {"pinned_page": 1, "keep_order": True}}, questions_per_page=2)
+    assert len(rows) == 55
+    assert sum(row["page"] == 1 for row in rows) == 50
+    assert rows[50]["continuation"]
+
+
+def test_structure_saves_page_size_and_shared_page_pins(db):
+    for qid in (1, 2, 3):
+        db.add(Question(question_id=qid, question_text="Q", question_type="essay", subject_id="SUB", created_by="T"))
+        db.add(ExamQuestion(exam_id=1, question_id=qid, question_point=1))
+    db.commit()
+    payload = StructurePayload(expected_version=1, questions_per_page=1, standalone=[{"question_id": 1, "pinned_page": 1}, {"question_id": 2, "pinned_page": 1}, {"question_id": 3}])
+    saved = put_structure(1, payload, {"school_id": "T"}, {}, db)
+    assert [r["page"] for r in saved["layout"]] == [1, 1, 2]
+    assert db.get(ExamSetting, 1).questions_per_page == 1
+    assert db.get(ExamQuestion, (1, 2)).pinned_page == 1
+    shown = preview(1, "seed", True, False, {"school_id": "T"}, {}, db)
+    assert {q["id"]: q["layout"]["page"] for q in shown["questions"]} == {1: 1, 2: 1, 3: 2}
+    assert db.query(Attempt).count() == 0
+
+
+@pytest.mark.parametrize("kind", ["image", "audio"])
+def test_real_multipart_upload_request(db, kind):
+    import base64
+    import wave
+    from fastapi import FastAPI
+    from database import get_db
+    from src.middleware.authMiddleware import verify_token, TEACHER_ONLY
+    from src.route.teacherRoute.questionMediaRoute import router
+    app = FastAPI()
+    app.include_router(router, prefix="/api/teacher")
+    app.dependency_overrides[verify_token] = lambda: {"school_id": "T"}
+    app.dependency_overrides[TEACHER_ONLY] = lambda: {}
+    app.dependency_overrides[get_db] = lambda: db
+    if kind == "image":
+        content = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=")
+        mime, filename = "image/png", "image.png"
+    else:
+        output = io.BytesIO()
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(8000); wav.writeframes(b"\x00" * 1600)
+        content = output.getvalue()
+        mime, filename = "audio/wav", "audio.wav"
+    boundary = "oes-upload-test"
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n'.encode() + content + f'\r\n--{boundary}--\r\n'.encode())
+    messages = []
+    async def call():
+        sent = False
+        async def receive():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+        async def send(message):
+            messages.append(message)
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http", "path": "/api/teacher/question-media", "raw_path": b"/api/teacher/question-media", "query_string": b"subject_id=SUB", "root_path": "", "headers": [(b"content-type", f"multipart/form-data; boundary={boundary}".encode())], "client": ("127.0.0.1", 1234), "server": ("test", 80)}
+        await app(scope, receive, send)
+    asyncio.run(call())
+    assert next(m["status"] for m in messages if m["type"] == "http.response.start") == 200
+    result = json.loads(b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body"))
+    assert result["kind"] == kind
+    assert db.get(QuestionMedia, result["media_id"]).content == content

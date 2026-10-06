@@ -17,8 +17,12 @@ export function sanitizeHTML(html: string): string {
     const tag = node.tagName.toLowerCase();
     const result = document.createElement(tags.has(tag) ? tag : 'span');
     if (['div', 'span'].includes(tag) && node.hasAttribute('data-math')) {
-      result.setAttribute('data-math', (node.getAttribute('data-math') ?? '').slice(0, 4000));
+      const source = (node.getAttribute('data-math') ?? '').slice(0, 4000);
+      result.setAttribute('data-math', source);
       result.setAttribute('data-display', node.getAttribute('data-display') === 'block' ? 'block' : 'inline');
+      // Rendered KaTeX markup inside the editor must not be persisted.
+      result.textContent = source;
+      return result;
     }
     for (const child of node.childNodes) { const safe = clean(child, depth + 1); if (safe) result.appendChild(safe); }
     return result;
@@ -32,6 +36,22 @@ export function richPlain(html: string): string {
   const document = new DOMParser().parseFromString(sanitizeHTML(html), 'text/html');
   document.querySelectorAll('[data-math]').forEach(node => { node.textContent = node.getAttribute('data-math'); });
   return document.body.textContent?.trim() ?? '';
+}
+
+/** Show formulas as typeset, atomic (non-editable) chips inside the editing surface. */
+export function renderEditorMath(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>('[data-math]').forEach(el => {
+    const source = el.getAttribute('data-math') ?? '';
+    const block = el.getAttribute('data-display') === 'block';
+    const key = `${block}:${source}`;
+    if (el.dataset.rendered === key) return;
+    el.contentEditable = 'false';
+    try {
+      katex.render(source, el, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
+      el.classList.remove('rich-math-error');
+    } catch { el.textContent = source; el.classList.add('rich-math-error'); }
+    el.dataset.rendered = key;
+  });
 }
 
 export function MathFormula({ source, block }: { source: string; block: boolean }) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bold, Eye, Italic, List, ListOrdered, Pencil, Redo2, RemoveFormatting, Sigma, Strikethrough, Subscript, Superscript, Underline, Undo2 } from 'lucide-react';
-import { RichText, sanitizeHTML } from './RichContent';
+import { RichText, renderEditorMath, sanitizeHTML } from './RichContent';
 import './content-editor.css';
 
 const icon = { size: 16, strokeWidth: 2, 'aria-hidden': true };
@@ -24,8 +24,9 @@ export function RichEditor({ value, onChange, label, disabled = false, compact =
   const selection = useRef<Range | undefined>(undefined);
   useEffect(() => {
     if (ref.current && (value !== last.current || ref.current.innerHTML === '')) { ref.current.innerHTML = sanitizeHTML(value); last.current = value; }
+    if (ref.current) renderEditorMath(ref.current);
   }, [value, preview]);
-  const publish = () => { const html = sanitizeHTML(ref.current?.innerHTML ?? ''); last.current = html; onChange(html); };
+  const publish = () => { if (ref.current) renderEditorMath(ref.current); const html = sanitizeHTML(ref.current?.innerHTML ?? ''); last.current = html; onChange(html); };
   const command = (name: string, arg?: string) => { ref.current?.focus(); document.execCommand(name, false, arg); publish(); };
   return <div className={`rich-editor w-full bg-white${compact ? ' rich-editor-compact' : ''}`}>
     <div className="rich-editor-toolbar" role="toolbar" aria-label={`${label} formatting`}>

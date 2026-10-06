@@ -66,6 +66,10 @@ export interface ExamQuestionDetail extends RichContent {
 }
 
 export interface QuestionImportCandidate {
+  rich_html?: string | null;
+  image_media_id?: string | null;
+  audio_media_id?: string | null;
+  image_alt?: string;
   question_id: number;
   question_text: string;
   question_type: QuestionType;

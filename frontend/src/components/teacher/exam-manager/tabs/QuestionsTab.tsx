@@ -131,7 +131,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(questions[0]?.id || null);
   const structureItems = useMemo(() => questions.flatMap((question, index) => (
-    /^\d+$/.test(question.id) ? [{ id: Number(question.id), number: index + 1, text: question.question.replace(/\s+/g, ' ').trim().slice(0, 120) }] : []
+    /^\d+$/.test(question.id) ? [{ id: Number(question.id), number: index + 1, text: question.question.replace(/\s+/g, ' ').trim().slice(0, 120), rich_html: question.rich_html }] : []
   )), [questions]);
   const [showQuestionPool, setShowQuestionPool] = useState(false);
   const [templateDownloading, setTemplateDownloading] = useState<'template' | 'guideline' | null>(null);

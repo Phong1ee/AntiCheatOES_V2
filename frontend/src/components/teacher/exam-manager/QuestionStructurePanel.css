@@ -56,7 +56,10 @@
 .structure-position-page { margin-left:auto; flex-shrink:0; border-radius:999px; background:#e2e8f0; color:#475569; padding:2px 10px; font-size:12px; }
 .structure-qref { display:flex; align-items:baseline; gap:10px; min-width:0; flex:1; }
 .structure-qref strong { flex-shrink:0; color:#0f172a; font-size:14px; }
-.structure-qtext { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#64748b; font-size:13px; }
+.structure-qtext { display:block; min-width:0; max-height:2.8em; overflow:hidden; color:#64748b; font-size:13px; line-height:1.4; }
+.structure-qtext .rich-content { min-width:0; }
+.structure-qtext .katex-display { margin:0; overflow:hidden; text-align:left; }
+.structure-qtext .katex-display > .katex { white-space:normal; }
 .structure-perpage { width:200px; }
 .structure-preview-controls { display:flex; flex-wrap:wrap; align-items:center; gap:16px 24px; }
 .structure-preview-controls .structure-field { width:200px; }

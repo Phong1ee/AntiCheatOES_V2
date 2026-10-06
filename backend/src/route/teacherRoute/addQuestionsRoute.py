@@ -79,6 +79,10 @@ def _serialize_import_candidate(question: Question, already_added: bool = False)
     return {
         "question_id": question.question_id,
         "question_text": question.question_text,
+        "rich_html": question.rich_html,
+        "image_media_id": question.image_media_id,
+        "audio_media_id": question.audio_media_id,
+        "image_alt": question.image_alt,
         "question_type": question.question_type.value if hasattr(question.question_type, "value") else question.question_type,
         "question_difficulties": (
             question.question_difficulties.value

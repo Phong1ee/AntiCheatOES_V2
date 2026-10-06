@@ -680,6 +680,7 @@ class TeacherExamIntegrationTests(unittest.TestCase):
     def test_import_candidates_apply_visibility_rules(self):
         approved_own = self._bank_question("T1", QuestionStatus.approved, "Approved own")
         approved_other = self._bank_question("T2", QuestionStatus.approved, "Approved other")
+        approved_own.rich_html = '<p><span data-math="x^2" data-display="inline"></span></p>'
         draft_own = self._bank_question("T1", QuestionStatus.draft, "Draft own")
         pending_own = self._bank_question("T1", QuestionStatus.pending, "Pending own")
         self._bank_question("T2", QuestionStatus.draft, "Draft other")
@@ -692,6 +693,8 @@ class TeacherExamIntegrationTests(unittest.TestCase):
         self.assertEqual(ids, {approved_own.question_id, approved_other.question_id, draft_own.question_id, pending_own.question_id})
         self.assertEqual(result["page_size"], 50)
         self.assertTrue(all("creator" in item for item in result["items"]))
+        candidate = next(item for item in result["items"] if item["question_id"] == approved_own.question_id)
+        self.assertEqual(candidate["rich_html"], approved_own.rich_html)
 
     def test_import_candidate_filters_and_pagination(self):
         teacher_two = self.db.query(User).filter_by(school_id="T2").one()

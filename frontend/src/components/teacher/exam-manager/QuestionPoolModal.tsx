@@ -16,6 +16,7 @@ import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { PoolConfigurationBuilder, type PoolDraft } from './PoolConfigurationBuilder';
+import { RichContent as ContentRenderer } from '../../common/RichContent';
 
 interface QuestionPoolModalProps {
   examId: number;
@@ -260,7 +261,7 @@ export function QuestionPoolModal({ examId, existingQuestionIds, subjectId: exam
                       {alreadyAdded && <Badge variant="secondary">Already added</Badge>}
                     </div>
                   </div>
-                  <p className="w-full whitespace-normal break-words text-sm text-gray-800">{question.question_text}</p>
+                  <div className="w-full min-w-0 break-words text-sm text-gray-800"><ContentRenderer content={question} text={question.question_text} /></div>
                   {question.question_type === 'MCQ' && <p className="mt-1 text-xs text-gray-500">{question.option_count} options</p>}
                 </div>
               </CardContent></Card>;

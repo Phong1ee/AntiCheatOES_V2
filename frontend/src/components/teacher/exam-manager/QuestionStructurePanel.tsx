@@ -3,6 +3,7 @@ import { apiClient } from '../../../services/api-client';
 import type { QuestionBlock } from '../../../types/rich-content';
 import type { StudentQuestion } from '../../../types/student-exam';
 import { ContentEditor } from '../../common/ContentEditor';
+import { RichText } from '../../common/RichContent';
 import { ConfirmDialog } from '../../common/ConfirmDialog';
 import { StudentQuestionPreview } from './StudentQuestionPreview';
 import { ArrowDown, ArrowUp, Eye, GripVertical, Layers3, Plus, RotateCcw, Save } from 'lucide-react';
@@ -13,7 +14,7 @@ import './QuestionStructurePanel.css';
 interface Placement { question_id: number; pinned_position: number | null; pinned_page?: number | null }
 interface Structure { version: number; questions_per_page?: number; blocks: QuestionBlock[]; standalone: Placement[]; layout: Array<{ question_id: number; position: number; page: number; slot: number }> }
 /** `number` is the question's order in the exam's question list (Q1, Q2, ...). */
-export interface StructureQuestionItem { id: number; number: number; text: string }
+export interface StructureQuestionItem { id: number; number: number; text: string; rich_html?: string | null }
 
 export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, questionDirty = false, onDirtyChange, questionItems = [] }: { examId: number; subjectId: string; revision?: number; questionDirty?: boolean; onDirtyChange?: (dirty: boolean) => void; onSaved: () => Promise<void>; questionItems?: StructureQuestionItem[] }) {
   const [open, setOpen] = useState(false);
@@ -33,7 +34,7 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
   const numberOf = (qid: number) => itemById.get(qid)?.number ?? qid;
   const qref = (qid: number) => {
     const item = itemById.get(qid);
-    return <span className="structure-qref"><strong>{item ? `Q${item.number}` : `Question #${qid}`}</strong>{item?.text && <span className="structure-qtext">{item.text}</span>}</span>;
+    return <span className="structure-qref"><strong>{item ? `Q${item.number}` : `Question #${qid}`}</strong>{item && (item.text || item.rich_html) && <span className="structure-qtext"><RichText html={item.rich_html} text={item.text} /></span>}</span>;
   };
   useEffect(() => { if (dirty) return; apiClient.get<Structure>(`/api/teacher/exams/${examId}/question-structure`).then(({ data }) => setStructure(data)).catch(e => setError(String(e))); }, [examId, revision]);
   useEffect(() => { const handler = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', handler); return () => window.removeEventListener('beforeunload', handler); }, [dirty]);

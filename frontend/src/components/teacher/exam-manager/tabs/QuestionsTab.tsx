@@ -1,7 +1,7 @@
 import { trueFalseSemantic } from '../../../common/content-utils';
 import { QuestionStructurePanel } from "../QuestionStructurePanel";
 import { ContentEditor } from "../../../common/ContentEditor";
-import { RichContent as ContentRenderer } from "../../../common/RichContent";
+import { RichContent as ContentRenderer, RichText } from "../../../common/RichContent";
 import type { RichContent } from "../../../../types/rich-content";
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import './QuestionsTab.css';
@@ -1431,9 +1431,15 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       )}
                       <span className="text-xs text-gray-500 ml-auto">Max {question.maxScore}</span>
                     </div>
+                    {question.rich_html?.includes('data-math') ? (
+                      <div className="max-h-16 overflow-hidden text-xs text-gray-600 [&_.katex-display]:my-0 [&_.katex-display]:overflow-hidden [&_.katex]:text-[0.9em] [&_p]:mb-0">
+                        <RichText html={question.rich_html} />
+                      </div>
+                    ) : (
                     <p className="text-xs text-gray-600 line-clamp-2">
                       {question.question || (question.image_media_id ? '[Image question]' : question.audio_media_id ? '[Audio question]' : 'Untitled question')}
                     </p>
+                    )}
                     <p className="text-xs text-teal-600 mt-1 uppercase">{question.type}</p>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {(question.chapterIds ?? []).slice(0, 2).map((chapterId) => (

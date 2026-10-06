@@ -38,8 +38,14 @@ export function richPlain(html: string): string {
   return document.body.textContent?.trim() ?? '';
 }
 
-/** KaTeX rejects bare `&` / `\\` outside an environment; wrap them so alignment-style input renders. */
-const typeset = (source: string) => /(^|[^\\])&|\\\\/.test(source) && !source.includes('\\begin{') ? `\\begin{aligned}${source}\\end{aligned}` : source;
+/** Accept pasted `\[..\]`, `$$..$$` and `\(..\)` wrappers (several stack as lines), and wrap bare `&` / `\\` in `aligned`, which KaTeX otherwise rejects. */
+const typeset = (source: string) => {
+  const wrapped = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$|\\\(([\s\S]*?)\\\)/g;
+  const bodies = [...source.matchAll(wrapped)].map(match => (match[1] ?? match[2] ?? match[3]).trim());
+  let body = source;
+  if (bodies.length && !source.replace(wrapped, '').trim()) body = bodies.length === 1 ? bodies[0] : `\\begin{gathered}${bodies.join(' \\\\ ')}\\end{gathered}`;
+  return /(^|[^\\])&|\\\\/.test(body) && !body.includes('\\begin{') ? `\\begin{aligned}${body}\\end{aligned}` : body;
+};
 
 /** Show formulas as typeset, atomic (non-editable) chips inside the editing surface. */
 export function renderEditorMath(root: HTMLElement) {

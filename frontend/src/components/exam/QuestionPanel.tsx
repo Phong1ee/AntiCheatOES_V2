@@ -3,6 +3,7 @@ import { Badge } from '../ui/badge';
 import { CheckCircle2, Wifi, WifiOff, AlertCircle, LoaderCircle, Lock, Flag } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { StudentAnswers, StudentQuestion } from '../../types/student-exam';
+import { questionDisplayNumbers } from './question-pages';
 
 interface QuestionPanelProps {
   currentPageQuestionIds?: number[];
@@ -31,6 +32,15 @@ export function QuestionPanel({
   sequentialNavigation,
   markedQuestionIds,
 }: QuestionPanelProps) {
+  const displayNumbers = questionDisplayNumbers(questions);
+  const groupAnswered = new Map<number, boolean>();
+  questions.forEach((question, index) => {
+    const groupId = displayNumbers[index].groupId;
+    if (groupId == null) return;
+    const answer = answers[question.id];
+    const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
+    groupAnswered.set(groupId, (groupAnswered.get(groupId) ?? true) && isAnswered);
+  });
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
       <div className="sticky top-0 bg-white border-b border-gray-200 p-4 z-10">
@@ -85,6 +95,8 @@ export function QuestionPanel({
           {questions.map((question, index) => {
             const answer = answers[question.id];
             const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
+            const display = displayNumbers[index];
+            const isGroupAnswered = display.groupId != null ? groupAnswered.get(display.groupId) === true : isAnswered;
             const isCurrent = currentPageQuestionIds ? currentPageQuestionIds.includes(question.id) : index === currentQuestion;
             const isLocked = sequentialNavigation && !isCurrent;
             const isMarked = markedQuestionIds.includes(question.id);
@@ -92,6 +104,7 @@ export function QuestionPanel({
             return (
               <button
                 key={question.id}
+                aria-label={`Question ${display.label}`}
                 onClick={() => {
                   if (!isLocked) onQuestionSelect(index);
                 }}
@@ -103,14 +116,14 @@ export function QuestionPanel({
                       : 'bg-teal-600 text-white ring-2 ring-teal-300'
                     : isMarked
                     ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-400 hover:bg-amber-200'
-                    : isAnswered
+                    : isGroupAnswered
                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
                     : isLocked
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {isLocked ? <Lock className="size-3.5" /> : index + 1}
+                {isLocked ? <Lock className="size-3.5" /> : display.label}
                 {isMarked && <Flag className={`absolute right-1 top-1 size-3 ${isCurrent ? 'fill-amber-300 text-amber-200' : 'fill-amber-500 text-amber-600'}`} />}
               </button>
             );

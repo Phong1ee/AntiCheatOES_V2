@@ -12,6 +12,7 @@ interface QuestionAreaProps {
   hideNavigation?: boolean;
   question: StudentQuestion;
   currentQuestion: number;
+  displayNumber?: string;
   totalQuestions: number;
   answer?: StudentAnswer;
   onAnswerChange: (questionId: number, answer: StudentAnswer) => void;
@@ -28,6 +29,7 @@ export function QuestionArea({
   hideNavigation = false,
   question,
   currentQuestion,
+  displayNumber,
   totalQuestions,
   answer,
   onAnswerChange,
@@ -44,7 +46,7 @@ export function QuestionArea({
       <Card className="shadow-xl rounded-2xl border-0">
         <CardHeader className="flex-row items-center justify-between border-b bg-gradient-to-r from-teal-50 to-blue-50">
           <CardTitle className="text-lg text-gray-700">
-            Question {currentQuestion + 1} of {totalQuestions}
+            Question {displayNumber ?? currentQuestion + 1} of {totalQuestions}
           </CardTitle>
           <Button
             type="button"
@@ -85,7 +87,7 @@ export function QuestionArea({
                     }`}
                   >
                     <input
-                      aria-label={`Option ${optionLabel} for question ${currentQuestion + 1}`}
+                      aria-label={`Option ${optionLabel} for question ${displayNumber ?? currentQuestion + 1}`}
                       type="radio"
                       name={`question-${question.id}`}
                       value={option.id}
@@ -108,7 +110,7 @@ export function QuestionArea({
           {question.type === 'essay' && (
             <div>
               <Textarea
-                aria-label={`Answer for question ${currentQuestion + 1}`}
+                aria-label={`Answer for question ${displayNumber ?? currentQuestion + 1}`}
                 value={answer && 'answerText' in answer ? answer.answerText : ''}
                 onChange={(e) => onAnswerChange(question.id, { answerText: e.target.value })}
                 placeholder="Type your answer here..."

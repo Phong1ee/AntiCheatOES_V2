@@ -6,7 +6,7 @@ import { RichContent, RichText, sanitizeHTML, richPlain } from './RichContent';
 import { RichEditor } from './RichEditor';
 import { ContentEditor } from './ContentEditor';
 import { QuestionPage } from '../exam/QuestionPage';
-import { questionPages, pageIndexForQuestion } from '../exam/question-pages';
+import { questionPages, pageIndexForQuestion, questionDisplayNumbers } from '../exam/question-pages';
 import type { StudentQuestion } from '../../types/student-exam';
 
 vi.mock('../../services/api-client', () => ({ apiClient: { get: vi.fn(() => Promise.resolve({ data: new Blob(['test']) })), post: vi.fn(() => Promise.resolve({ data: { media_id: 'a'.repeat(64), kind: 'image' } })) } }));
@@ -86,6 +86,31 @@ it('uses snapshotted pages and repeated parent continuation headers', async () =
   expect(container.textContent).toContain('(continued)');
   expect(container.querySelector('textarea')?.value).toBe('saved');
   expect(container.textContent).toContain('Marked for review');
+});
+
+it('numbers grouped questions hierarchically and marks a group answered only when all children are answered', async () => {
+  const firstBlock = { block_id: 10, kind: 'group' as const, title: 'Algebra', question_ids: [1, 2], keep_order: true, keep_together: true, pinned_position: null };
+  const secondBlock = { block_id: 20, kind: 'group' as const, title: 'Geometry', question_ids: [3, 4], keep_order: true, keep_together: true, pinned_position: null };
+  const questions: StudentQuestion[] = [firstBlock, firstBlock, secondBlock, secondBlock].map((block, index) => ({
+    id: index + 1, text: `Question ${index + 1}`, type: 'essay', points: 1, options: [],
+    layout: { page: block.block_id === 10 ? 1 : 2, slot: index % 2 + 1, position: index + 1, questions_per_page: 1, block },
+  }));
+  expect(questionDisplayNumbers(questions).map(item => item.label)).toEqual(['1.1', '1.2', '2.1', '2.2']);
+  const panel = await import('../exam/QuestionPanel');
+  const panelProps = { questions, currentQuestion: 3, answers: { 1: { answerText: 'done' } }, markedQuestionIds: [], answeredCount: 1, unansweredQuestions: [2, 3, 4], onQuestionSelect: () => {}, isOnline: true, saveStatus: 'Saved', sequentialNavigation: false };
+  await render(<QuestionPage questions={questions.slice(0, 2)} allQuestions={questions} answers={{}} onAnswerChange={() => {}} onToggleMark={() => {}} />);
+  expect(container.textContent).toContain('Question group 1: Algebra');
+  expect(container.textContent).toContain('Question 1.1 of 4');
+
+  await render(<panel.QuestionPanel {...panelProps} />);
+  const tile = (label: string) => container.querySelector(`button[aria-label="Question ${label}"]`)!;
+  expect(tile('1.1').className).not.toContain('bg-green-100');
+  expect(tile('1.2').className).not.toContain('bg-green-100');
+
+  await render(<panel.QuestionPanel {...panelProps} answers={{ 1: { answerText: 'done' }, 2: { answerText: 'done' } }} answeredCount={2} unansweredQuestions={[3, 4]} />);
+  expect(tile('1.1').className).toContain('bg-green-100');
+  expect(tile('1.2').className).toContain('bg-green-100');
+  expect(tile('2.1').className).not.toContain('bg-green-100');
 });
 
 

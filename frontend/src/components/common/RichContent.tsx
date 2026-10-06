@@ -38,6 +38,9 @@ export function richPlain(html: string): string {
   return document.body.textContent?.trim() ?? '';
 }
 
+/** KaTeX rejects bare `&` / `\\` outside an environment; wrap them so alignment-style input renders. */
+const typeset = (source: string) => /(^|[^\\])&|\\\\/.test(source) && !source.includes('\\begin{') ? `\\begin{aligned}${source}\\end{aligned}` : source;
+
 /** Show formulas as typeset, atomic (non-editable) chips inside the editing surface. */
 export function renderEditorMath(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>('[data-math]').forEach(el => {
@@ -47,7 +50,7 @@ export function renderEditorMath(root: HTMLElement) {
     if (el.dataset.rendered === key) return;
     el.contentEditable = 'false';
     try {
-      katex.render(source, el, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
+      katex.render(typeset(source), el, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
       el.classList.remove('rich-math-error');
     } catch { el.textContent = source; el.classList.add('rich-math-error'); }
     el.dataset.rendered = key;
@@ -60,7 +63,7 @@ export function MathFormula({ source, block }: { source: string; block: boolean 
   useEffect(() => {
     setError(false);
     try {
-      if (ref.current) katex.render(source, ref.current, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
+      if (ref.current) katex.render(typeset(source), ref.current, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
     } catch { setError(true); }
   }, [source, block]);
   return <span className={block ? 'block overflow-x-auto' : ''}><span ref={ref} aria-label={source} hidden={error} />{error && <span role="status" className="text-red-700">Invalid formula: {source}</span>}</span>;

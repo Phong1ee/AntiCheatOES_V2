@@ -1,4 +1,5 @@
 import { ContentEditor } from "../../common/ContentEditor";
+import { ConfirmDialog } from "../../common/ConfirmDialog";
 import type { RichContent } from "../../../types/rich-content";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -127,6 +128,7 @@ export function QuestionEditor({
     useState<QuestionOptionPayload[]>(defaultOptions);
 
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [activeSourceQuestionId, setActiveSourceQuestionId] = useState<number | null>(null);
 
   const isApprovedEdit = detail?.question_status === "approved";
@@ -571,8 +573,8 @@ export function QuestionEditor({
     document.body.style.overflow = "hidden";
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose();
+      if (event.key === "Escape" && !document.querySelector('[data-slot="alert-dialog-content"]')) {
+        setConfirmClose(true);
       }
     };
 
@@ -590,13 +592,14 @@ export function QuestionEditor({
   }
 
   return createPortal(
+    <>
     <div
       className="oes-dialog-overlay flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
-          if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose();
+          setConfirmClose(true);
         }
       }}
     >
@@ -619,7 +622,7 @@ export function QuestionEditor({
 
           <button
             type="button"
-            onClick={() => { if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose(); }}
+            onClick={() => setConfirmClose(true)}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
             aria-label="Close question editor"
           >
@@ -1067,7 +1070,7 @@ export function QuestionEditor({
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <Button
             variant="outline"
-            onClick={() => { if (window.confirm("Close editor? Unsaved changes will be lost.")) onClose(); }}
+            onClick={() => setConfirmClose(true)}
             className="h-10 rounded-full border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancel
@@ -1114,7 +1117,9 @@ export function QuestionEditor({
           </div>
         </div>
       </div>
-    </div>,
+    </div>
+    <ConfirmDialog open={confirmClose} title="Close editor?" description="Unsaved changes will be lost." confirmLabel="Close editor" cancelLabel="Keep editing" destructive onCancel={() => setConfirmClose(false)} onConfirm={() => { setConfirmClose(false); onClose(); }} />
+    </>,
     document.body,
   );
 }

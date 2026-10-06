@@ -12,7 +12,7 @@ export function StudentQuestionPreview({ questions, mobile = false }: { question
   useEffect(() => { setPage(0); setAnswers({}); setMarked([]); }, [questions]);
   const pages = questionPages(questions);
   if (!pages.length) return <p>No questions selected for this preview.</p>;
-  return <div style={{ maxWidth: mobile ? 390 : 1100 }} className="mx-auto w-full border bg-slate-50 p-2">
+  return <div style={{ maxWidth: mobile ? 390 : 1280 }} className="student-preview-frame mx-auto w-full border bg-slate-50 p-2">
     <QuestionPage questions={pages[page] ?? []} allQuestions={questions} answers={answers} marked={marked}
       onAnswerChange={(id, answer) => setAnswers(a => ({ ...a, [id]: answer }))}
       onToggleMark={id => setMarked(m => m.includes(id) ? m.filter(q => q !== id) : [...m, id])} />

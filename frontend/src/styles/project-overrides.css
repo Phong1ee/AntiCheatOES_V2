@@ -1,4 +1,7 @@
 /* Dialog and portal layering */
+body [data-slot="alert-dialog-overlay"] { z-index: 10000; }
+body [data-slot="alert-dialog-content"] { z-index: 10001; }
+
 .oes-dialog-overlay {
   position: fixed;
   inset: 0;

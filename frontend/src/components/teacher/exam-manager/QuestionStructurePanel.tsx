@@ -3,6 +3,7 @@ import { apiClient } from '../../../services/api-client';
 import type { QuestionBlock } from '../../../types/rich-content';
 import type { StudentQuestion } from '../../../types/student-exam';
 import { ContentEditor } from '../../common/ContentEditor';
+import { ConfirmDialog } from '../../common/ConfirmDialog';
 import { StudentQuestionPreview } from './StudentQuestionPreview';
 import { ArrowDown, ArrowUp, Eye, GripVertical, Layers3, Plus, RotateCcw, Save } from 'lucide-react';
 import { Button } from '../../ui/button';
@@ -16,7 +17,7 @@ export interface StructureQuestionItem { id: number; number: number; text: strin
 
 export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, questionDirty = false, onDirtyChange, questionItems = [] }: { examId: number; subjectId: string; revision?: number; questionDirty?: boolean; onDirtyChange?: (dirty: boolean) => void; onSaved: () => Promise<void>; questionItems?: StructureQuestionItem[] }) {
   const [open, setOpen] = useState(false);
-  const [section, setSection] = useState<'structure' | 'preview'>('structure');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [structure, setStructure] = useState<Structure>();
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
@@ -27,6 +28,7 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
   const [shuffle, setShuffle] = useState(false);
   const [optionShuffle, setOptionShuffle] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [pending, setPending] = useState<{ title: string; description: string; label: string; run: () => void } | null>(null);
   const itemById = new Map(questionItems.map(item => [item.id, item]));
   const numberOf = (qid: number) => itemById.get(qid)?.number ?? qid;
   const qref = (qid: number) => {
@@ -49,12 +51,12 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
   const loadPreview = async () => {
     if (dirty || questionDirty) { setError('Save structure and question content before previewing.'); return; }
     setBusy(true); setError('');
-    try { const { data } = await apiClient.get<{ questions: StudentQuestion[] }>(`/api/teacher/exams/${examId}/question-preview`, { params: { seed, shuffle, shuffle_options: optionShuffle } }); setPreview(data.questions); }
+    try { const { data } = await apiClient.get<{ questions: StudentQuestion[] }>(`/api/teacher/exams/${examId}/question-preview`, { params: { seed, shuffle, shuffle_options: optionShuffle } }); setPreview(data.questions ?? []); }
     catch (e) { setError(e instanceof Error ? e.message : 'Preview failed'); }
     finally { setBusy(false); }
   };
-  const reload = async () => {
-    if (dirty && !window.confirm('Reload structure? Unsaved structure changes will be discarded.')) return;
+  const reload = async (force = false) => {
+    if (dirty && !force) { setPending({ title: 'Reload structure?', description: 'Unsaved structure changes will be discarded.', label: 'Reload', run: () => void reload(true) }); return; }
     setBusy(true); setError('');
     try {
       const { data } = await apiClient.get<Structure>(`/api/teacher/exams/${examId}/question-structure`);
@@ -70,12 +72,15 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
   const moveButton = (label: string, disabled: boolean, onClick: () => void, direction: 'up' | 'down') =>
     <Button type="button" variant="outline" size="icon" className="structure-action structure-move" aria-label={label} title={label} disabled={disabled || busy} onClick={onClick}>{direction === 'up' ? <ArrowUp /> : <ArrowDown />}</Button>;
 
-  return <Dialog open={open} onOpenChange={next => { if (!busy) setOpen(next); }}>
+  useEffect(() => { if (previewOpen && !dirty && !questionDirty && !preview.length) void loadPreview(); }, [previewOpen]);
+
+  return <>
+  <Dialog open={open} onOpenChange={next => { if (!busy) setOpen(next); }}>
     <div className="question-structure-launcher">
-      <Button type="button" variant="outline" className="structure-action" onClick={() => { setSection('structure'); setOpen(true); }}><Layers3 />Manage question groups</Button>
+      <Button type="button" variant="outline" className="structure-action" onClick={() => setOpen(true)}><Layers3 />Manage question groups</Button>
       <span className="structure-summary">{structure ? `${structure.blocks.length} group${structure.blocks.length === 1 ? '' : 's'} · ${structure.standalone.length} ungrouped question${structure.standalone.length === 1 ? '' : 's'}` : 'Groups, reading passages & page order'}</span>
       {dirty && <span className="structure-draft" role="status">Unsaved structure · draft retained</span>}
-      <Button type="button" variant="link" className="structure-preview-link" onClick={() => { setSection('preview'); setOpen(true); }}><Eye />Student preview</Button>
+      <Button type="button" variant="link" className="structure-preview-link" onClick={() => setPreviewOpen(true)}><Eye />Student preview</Button>
     </div>
     <DialogContent className="question-structure-dialog oes-dialog-rounded" onInteractOutside={e => { if (busy) e.preventDefault(); }} onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}>
       <DialogHeader className="structure-modal-header">
@@ -83,18 +88,18 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
         <DialogDescription>Keep related questions together, add a shared reading passage, and choose which page each question appears on. Closing this window keeps your unsaved changes.</DialogDescription>
       </DialogHeader>
       <nav className="structure-tabs" aria-label="Question group tools">
-        <button type="button" aria-pressed={section === 'structure'} onClick={() => setSection('structure')}><Layers3 size={16} />Groups & page order</button>
-        <button type="button" aria-pressed={section === 'preview'} onClick={() => setSection('preview')}><Eye size={16} />Student preview</button>
+        <button type="button" aria-pressed="true"><Layers3 size={16} />Groups & page order</button>
+        <button type="button" aria-pressed="false" onClick={() => { setOpen(false); setPreviewOpen(true); }}><Eye size={16} />Student preview (opens a larger window)</button>
       </nav>
       <div className="structure-modal-body">
         {questionDirty && <p className="structure-notice" role="status">Save question and pool changes before saving structure or previewing.</p>}
         {error && <p role="alert" className="structure-error">{error}</p>}
-        {!structure ? <div role="status">{error ? <Button type="button" variant="outline" className="structure-action" onClick={() => void reload()}>Retry loading</Button> : 'Loading question structure…'}</div> : section === 'structure' ? <>
+        {!structure ? <div role="status">{error ? <Button type="button" variant="outline" className="structure-action" onClick={() => void reload()}>Retry loading</Button> : 'Loading question structure…'}</div> : <>
           <div className="structure-section-heading"><div><h3>Groups</h3><p>A group keeps questions together. A parent passage adds shared text (for example a reading) above its sub-questions; the passage itself is not scored.</p></div><Button type="button" variant="outline" size="sm" className="structure-action" disabled={busy} onClick={() => void reload()}><RotateCcw />Reload structure</Button></div>
           {!structure.blocks.length && <div className="structure-empty"><Layers3 size={24} /><div><strong>No groups yet</strong><p>Tick questions under "Ungrouped questions" below, then create a group or a parent passage.</p></div></div>}
           {structure.blocks.map((block, index) => <fieldset key={block.block_id ?? `new-${index}`} className="structure-block">
             <legend>{block.kind === 'parent' ? 'Parent / sub-question block' : 'Question group'} {index + 1}</legend>
-            <div className="structure-block-heading"><label className="structure-field">Title<input placeholder={block.kind === 'parent' ? 'Parent passage title' : 'Group title'} value={block.title} onChange={e => update(index, { title: e.target.value })} /></label><div className="structure-row-actions">{moveButton('Move block up', index === 0, () => change({ ...structure, blocks: reorder(structure.blocks, index, -1) }), 'up')}{moveButton('Move block down', index === structure.blocks.length - 1, () => change({ ...structure, blocks: reorder(structure.blocks, index, 1) }), 'down')}<Button type="button" variant="link" className="structure-remove" onClick={() => { if (window.confirm('Remove this container and detach its children? The questions remain in the exam.')) change({ ...structure, blocks: structure.blocks.filter((_, i) => i !== index), standalone: [...structure.standalone, ...block.question_ids.map(question_id => ({ question_id, pinned_position: null }))] }); }}>Remove container</Button></div></div>
+            <div className="structure-block-heading"><label className="structure-field">Title<input placeholder={block.kind === 'parent' ? 'Parent passage title' : 'Group title'} value={block.title} onChange={e => update(index, { title: e.target.value })} /></label><div className="structure-row-actions">{moveButton('Move block up', index === 0, () => change({ ...structure, blocks: reorder(structure.blocks, index, -1) }), 'up')}{moveButton('Move block down', index === structure.blocks.length - 1, () => change({ ...structure, blocks: reorder(structure.blocks, index, 1) }), 'down')}<Button type="button" variant="link" className="structure-remove" onClick={() => setPending({ title: 'Remove this container?', description: 'Its questions are detached and stay in the exam as ungrouped questions.', label: 'Remove container', run: () => change({ ...structure, blocks: structure.blocks.filter((_, i) => i !== index), standalone: [...structure.standalone, ...block.question_ids.map(question_id => ({ question_id, pinned_position: null }))] }) })}>Remove container</Button></div></div>
             <ContentEditor label={`${block.kind} instructions`} content={block} text="" subjectId={subjectId} disabled={busy} onChange={content => update(index, content)} />
             <div className="structure-block-settings"><label className="structure-check"><input type="checkbox" checked={block.keep_order} onChange={e => update(index, { keep_order: e.target.checked })} />Keep question order</label><label className="structure-check"><input type="checkbox" checked={block.keep_together} onChange={e => update(index, { keep_together: e.target.checked })} />Keep together when it fits a page</label><label className="structure-field structure-pin">Show on page<input aria-label={`Block ${index + 1} pin`} type="number" min={1} placeholder="Automatic" value={block.pinned_page ?? ''} onChange={e => update(index, { pinned_page: e.target.value ? Number(e.target.value) : null, pinned_position: null })} /></label></div>
             <div className="structure-question-list">{block.question_ids.map((qid, child) => <div key={qid} draggable onDragStart={e => e.dataTransfer.setData('text/plain', String(child))} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const from = Number(e.dataTransfer.getData('text/plain')); const next = [...block.question_ids]; if (Number.isInteger(from) && from >= 0 && from < next.length) { const [id] = next.splice(from, 1); next.splice(child, 0, id); update(index, { question_ids: next }); } }} className="structure-question-row">
@@ -109,9 +114,26 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
             <div className="structure-create-actions"><Button type="button" variant="outline" className="structure-action" disabled={!selected.length || busy} onClick={() => createBlock('group')}><Plus />Create group from selected</Button><Button type="button" variant="outline" className="structure-action" disabled={!selected.length || busy} onClick={() => createBlock('parent')}><Plus />Create parent passage from selected</Button></div>
           </section>
           <section className="structure-positions"><h3>Order students will see</h3><p>Updated after you save. Page and position start at 1.</p><div className="structure-position-grid">{[...structure.layout].sort((a, b) => a.position - b.position).map(l => <div key={l.question_id}><span className="structure-position-badge">{l.position}</span>{qref(l.question_id)}<span className="structure-position-page">Page {l.page}</span></div>)}</div></section>
-        </> : <section className="structure-preview-section"><div className="structure-section-heading"><div><h3>Student preview</h3><p>See the saved exam as a student would. The random seed makes shuffled results repeatable.</p></div></div><div className="structure-preview-controls"><label className="structure-field">Random seed<input value={seed} onChange={e => setSeed(e.target.value)} /></label><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label><label className="structure-check"><input type="checkbox" checked={mobile} onChange={e => setMobile(e.target.checked)} />Phone width</label></div><Button type="button" className="structure-primary" disabled={busy || dirty || questionDirty} onClick={() => void loadPreview()}><Eye />Preview saved exam</Button>{preview.length > 0 ? <StudentQuestionPreview questions={preview} mobile={mobile} /> : <div className="structure-empty"><Eye size={24} /><p>Save your changes, then load the student preview.</p></div>}</section>}
+        </>}
       </div>
       <div className="structure-modal-footer"><span role="status">{dirty ? 'Unsaved structure changes are kept when you close.' : 'Structure is up to date.'}</span><div className="structure-row-actions"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Close</Button><Button type="button" className="structure-primary" disabled={!structure || !dirty || busy || questionDirty} onClick={() => void save()}><Save />{busy ? 'Please wait…' : 'Save structure'}</Button></div></div>
     </DialogContent>
-  </Dialog>;
+    <ConfirmDialog open={pending !== null} title={pending?.title ?? ''} description={pending?.description ?? ''} confirmLabel={pending?.label} destructive onCancel={() => setPending(null)} onConfirm={() => { pending?.run(); setPending(null); }} />
+  </Dialog>
+  <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+    <DialogContent className="student-preview-dialog oes-dialog-rounded">
+      <DialogHeader className="structure-modal-header">
+        <DialogTitle>Student preview</DialogTitle>
+        <DialogDescription>The saved exam as students will see it. The random seed makes shuffled results repeatable.</DialogDescription>
+      </DialogHeader>
+      <div className="structure-preview-controls structure-preview-bar"><label className="structure-field">Random seed<input value={seed} onChange={e => setSeed(e.target.value)} /></label><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label><label className="structure-check"><input type="checkbox" checked={mobile} onChange={e => setMobile(e.target.checked)} />Phone width</label><Button type="button" className="structure-primary structure-preview-load" disabled={busy || dirty || questionDirty} onClick={() => void loadPreview()}><Eye />Preview saved exam</Button></div>
+      <div className="structure-modal-body">
+        {(questionDirty || dirty) && <p className="structure-notice" role="status">{questionDirty ? 'Save question and pool changes before saving structure or previewing.' : 'Save your structure changes before previewing.'}</p>}
+        {error && <p role="alert" className="structure-error">{error}</p>}
+        {preview.length > 0 ? <StudentQuestionPreview questions={preview} mobile={mobile} /> : <div className="structure-empty"><Eye size={24} /><p>{busy ? 'Loading preview…' : 'Save your changes, then load the student preview.'}</p></div>}
+      </div>
+      <div className="structure-modal-footer"><span /><Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button></div>
+    </DialogContent>
+  </Dialog>
+  </>;
 }

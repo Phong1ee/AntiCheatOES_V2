@@ -539,7 +539,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           {isLocked && activeTab !== 'assignment' && (
             <div role="status" className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-800">
               <Lock className="size-4 shrink-0" />
-              This exam is published and a student has started it, so its content and settings are locked. You can still add students in the Assignment tab.
+              This exam is published and a student has started it, so its content and settings are locked. You can still browse the questions and add students in the Assignment tab.
             </div>
           )}
           <TabsContent value="general" forceMount className={`m-0 p-6 data-[state=inactive]:hidden ${lockedClass}`} {...lockedProps}>
@@ -594,7 +594,9 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
           </TabsContent>
 
           {visitedTabs.includes('questions') && (
-            <TabsContent value="questions" forceMount className={`m-0 h-full p-0 data-[state=inactive]:hidden ${lockedClass}`} {...lockedProps}>
+            <TabsContent value="questions" forceMount className="m-0 h-full p-0 data-[state=inactive]:hidden">
+              {/* A disabled fieldset blocks every control but keeps lists scrollable and rows selectable. */}
+              <fieldset disabled={isLocked} className="contents border-0 p-0">
               <QuestionsTab
                 examId={examId}
                 subjectId={subjectId}
@@ -605,6 +607,7 @@ export function ExamEditor({ examId, exam, subjects, initialTab, onClose, onSave
                 onViewInQuestionBank={onViewInQuestionBank}
                 onDirtyChange={handleQuestionsDirty}
               />
+              </fieldset>
             </TabsContent>
           )}
 

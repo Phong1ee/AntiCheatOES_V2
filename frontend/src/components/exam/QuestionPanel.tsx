@@ -33,13 +33,21 @@ export function QuestionPanel({
   markedQuestionIds,
 }: QuestionPanelProps) {
   const displayNumbers = questionDisplayNumbers(questions);
-  const groupAnswered = new Map<number, boolean>();
+  const navigationEntries: Array<{ key: string; label: string; groupId?: number; questionIndices: number[] }> = [];
+  const groupEntries = new Map<number, (typeof navigationEntries)[number]>();
   questions.forEach((question, index) => {
-    const groupId = displayNumbers[index].groupId;
-    if (groupId == null) return;
-    const answer = answers[question.id];
-    const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
-    groupAnswered.set(groupId, (groupAnswered.get(groupId) ?? true) && isAnswered);
+    const display = displayNumbers[index];
+    if (display.groupId == null || display.groupNumber == null) {
+      navigationEntries.push({ key: `question-${question.id}`, label: display.label, questionIndices: [index] });
+      return;
+    }
+    let entry = groupEntries.get(display.groupId);
+    if (!entry) {
+      entry = { key: `group-${display.groupId}`, label: String(display.groupNumber), groupId: display.groupId, questionIndices: [] };
+      groupEntries.set(display.groupId, entry);
+      navigationEntries.push(entry);
+    }
+    entry.questionIndices.push(index);
   });
   return (
     <div className="w-80 bg-white shadow-2xl border-l border-gray-200 overflow-y-auto">
@@ -92,21 +100,27 @@ export function QuestionPanel({
       {/* Question Grid */}
       <div className="p-4">
         <div className="grid grid-cols-5 gap-2 mb-4">
-          {questions.map((question, index) => {
-            const answer = answers[question.id];
-            const isAnswered = Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim()));
-            const display = displayNumbers[index];
-            const isGroupAnswered = display.groupId != null ? groupAnswered.get(display.groupId) === true : isAnswered;
-            const isCurrent = currentPageQuestionIds ? currentPageQuestionIds.includes(question.id) : index === currentQuestion;
+          {navigationEntries.map((entry) => {
+            const entryQuestions = entry.questionIndices.map(index => questions[index]);
+            const entryAnswers = entryQuestions.map(question => answers[question.id]);
+            const isAnswered = entryAnswers.every(answer => Boolean(answer && ('selectedOptionId' in answer || answer.answerText.trim())));
+            const isCurrent = currentPageQuestionIds
+              ? entryQuestions.some(question => currentPageQuestionIds.includes(question.id))
+              : entry.questionIndices.includes(currentQuestion);
             const isLocked = sequentialNavigation && !isCurrent;
-            const isMarked = markedQuestionIds.includes(question.id);
+            const isMarked = entryQuestions.some(question => markedQuestionIds.includes(question.id));
+            const firstUnansweredIndex = entry.questionIndices.find(index => {
+              const answer = answers[questions[index].id];
+              return !answer || !('selectedOptionId' in answer || answer.answerText.trim());
+            });
+            const targetIndex = firstUnansweredIndex ?? entry.questionIndices[0];
 
             return (
               <button
-                key={question.id}
-                aria-label={`Question ${display.label}`}
+                key={entry.key}
+                aria-label={entry.groupId == null ? `Question ${entry.label}` : `Question group ${entry.label}`}
                 onClick={() => {
-                  if (!isLocked) onQuestionSelect(index);
+                  if (!isLocked) onQuestionSelect(targetIndex);
                 }}
                 disabled={isLocked}
                 className={`relative aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${
@@ -123,7 +137,7 @@ export function QuestionPanel({
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {isLocked ? <Lock className="size-3.5" /> : display.label}
+                {isLocked ? <Lock className="size-3.5" /> : entry.label}
                 {isMarked && <Flag className={`absolute right-1 top-1 size-3 ${isCurrent ? 'fill-amber-300 text-amber-200' : 'fill-amber-500 text-amber-600'}`} />}
               </button>
             );

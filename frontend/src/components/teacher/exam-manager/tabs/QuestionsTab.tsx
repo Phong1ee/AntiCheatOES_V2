@@ -1682,10 +1682,13 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                       const isChecked = correctAnswers.includes(index);
 
                       return (
-                        <div key={index} className="flex items-center gap-2">
+                        <div key={index} className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${isChecked ? 'border-green-400 bg-green-50/60' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                          <div className="flex w-10 shrink-0 flex-col items-center gap-1.5 pt-1">
+                            <span className={`flex size-7 items-center justify-center rounded-full text-xs font-semibold ${isChecked ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{String.fromCharCode(65 + (index % 26))}</span>
                           {selectedQ.hasMultipleCorrect ? (
                             <input
                               type="checkbox"
+                              aria-label={`Mark option ${index + 1} correct`}
                               checked={isChecked}
                               disabled={!selectedQ.canEditContent}
                               onChange={() => {
@@ -1704,6 +1707,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                           ) : (
                             <input
                               type="radio"
+                              aria-label={`Mark option ${index + 1} correct`}
                               name={`correct-${selectedQ.id}`}
                               checked={isChecked}
                               disabled={!selectedQ.canEditContent}
@@ -1713,11 +1717,14 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
                               className="size-4 text-teal-600 cursor-pointer"
                             />
                           )}
-                          <ContentEditor label={`Option ${index + 1}`} content={selectedQ.optionContent?.[index] ?? {}} text={option} subjectId={subjectId} disabled={!selectedQ.canEditContent} onChange={(next, text) => { const options = [...selectedQ.options!]; options[index] = text; const optionContent = [...(selectedQ.optionContent ?? [])]; optionContent[index] = next; updateQuestion(selectedQ.id, { options, optionContent }); }} />
+                            {isChecked && <span className="text-[10px] font-medium uppercase tracking-wide text-green-700">Correct</span>}
+                          </div>
+                          <div className="min-w-0 flex-1"><ContentEditor compact label={`Option ${index + 1}`} content={selectedQ.optionContent?.[index] ?? {}} text={option} subjectId={subjectId} disabled={!selectedQ.canEditContent} onChange={(next, text) => { const options = [...selectedQ.options!]; options[index] = text; const optionContent = [...(selectedQ.optionContent ?? [])]; optionContent[index] = next; updateQuestion(selectedQ.id, { options, optionContent }); }} /></div>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
+                            className="shrink-0 hover:bg-red-50"
                             disabled={!selectedQ.canEditContent || selectedQ.options!.length <= 2}
                             onClick={() => removeOption(index)}
                             aria-label={`Remove option ${index + 1}`}

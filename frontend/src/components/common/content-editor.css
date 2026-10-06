@@ -7,21 +7,40 @@
 .rich-editor-actions { margin-left:auto; gap:6px; }
 .rich-editor-group button { display:inline-flex; align-items:center; justify-content:center; gap:6px; width:32px; height:32px; border:0; border-radius:6px; color:#475569; background:transparent; font-size:13px; font-weight:500; cursor:pointer; transition:background .12s,color .12s; }
 .rich-editor-group button.with-label { width:auto; padding:0 10px; border:1px solid #e2e8f0; background:white; }
+.rich-editor-group button[aria-label=Formula] { width:32px; padding:0; }
 .rich-editor-group button:hover:not(:disabled) { background:#e2e8f0; color:#0f172a; }
 .rich-editor-group button.with-label:hover:not(:disabled) { background:#f0fdfa; border-color:#99f6e4; color:#0f766e; }
 .rich-editor-group button:disabled { opacity:.4; cursor:not-allowed; }
-.rich-editor > div:not([role=textbox]):not(.rich-editor-toolbar) > button { min-height:32px; border:1px solid #bfdbfe; border-radius:6px; padding:5px 10px; color:#1d4ed8; background:#eff6ff; font-size:12px; font-weight:500; }
-.rich-editor > div:not([role=textbox]):not(.rich-editor-toolbar) { margin:8px 10px 0; border-radius:8px; background:#f8fafc; }
+.rich-formula-panel { margin:10px; padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+.rich-formula-field { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:500; color:#334155; }
+.rich-formula-field input { height:36px; padding:0 10px; border:1px solid #cbd5e1; border-radius:6px; background:white; font:13px ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:400; }
+.rich-formula-field input:focus { outline:2px solid #14b8a6; outline-offset:0; border-color:transparent; }
+.rich-formula-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; }
+.rich-formula-check { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#475569; cursor:pointer; }
+.rich-formula-buttons { display:inline-flex; gap:8px; }
+.rich-formula-buttons button { height:32px; padding:0 14px; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; }
+.rich-formula-cancel { border:1px solid #e2e8f0; background:white; color:#475569; }
+.rich-formula-cancel:hover { background:#f1f5f9; }
+.rich-formula-insert { border:1px solid #0d9488; background:#0d9488; color:white; }
+.rich-formula-insert:hover:not(:disabled) { background:#0f766e; }
+.rich-formula-insert:disabled { opacity:.45; cursor:not-allowed; }
 .rich-editor-toolbar select { height:32px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-right:2px; color:#334155; font-size:13px; background:white; cursor:pointer; }
 .rich-editor-toolbar select:disabled { opacity:.4; cursor:not-allowed; }
 .rich-editor [role=textbox] { min-height:110px; margin-top:0; padding:12px 14px; border-radius:0; line-height:1.6; }
 .rich-editor button:focus-visible,.rich-editor select:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
-.content-media-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:10px; }
-.content-media-action { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
-.content-media-upload { position:relative; display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:8px 14px; border:1px solid #bfdbfe; border-radius:7px; color:#1d4ed8; background:#eff6ff; font-size:13px; font-weight:500; cursor:pointer; }
-.content-media-upload:hover { background:#dbeafe; }
+.rich-editor-compact .rich-editor-toolbar { padding:4px 8px; }
+.rich-editor-compact .rich-editor-group button { width:28px; height:28px; }
+.rich-editor-compact .rich-editor-actions { margin-left:auto; }
+.rich-editor-compact [role=textbox] { min-height:44px; padding:8px 12px; }
+.content-editor-compact .content-media-actions { margin-top:6px; gap:6px 10px; }
+.content-editor-compact .content-media-upload,.content-editor-compact .content-media-remove { height:28px; padding:0 10px; font-size:12px; }
+.content-media-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-top:12px; }
+.content-media-action { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.content-media-upload { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:6px; height:34px; padding:0 14px; border:1px solid #cbd5e1; border-radius:8px; color:#334155; background:white; font-size:13px; font-weight:500; cursor:pointer; transition:background .12s,border-color .12s,color .12s; }
+.content-media-upload:hover { background:#f0fdfa; border-color:#5eead4; color:#0f766e; }
 .content-media-upload[aria-disabled=true] { opacity:.45; cursor:not-allowed; }
 .content-media-upload:focus-within { outline:2px solid #2563eb; outline-offset:3px; }
 .content-media-file { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
-.content-media-remove { color:#b91c1c; font-size:13px; text-decoration:underline; text-underline-offset:4px; padding:6px; }
+.content-media-remove { display:inline-flex; align-items:center; gap:4px; height:34px; padding:0 10px; border-radius:8px; color:#b91c1c; font-size:13px; }
+.content-media-remove:hover:not(:disabled) { background:#fef2f2; }
 .content-media-remove:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }

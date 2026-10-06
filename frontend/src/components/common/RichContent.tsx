@@ -47,6 +47,16 @@ const typeset = (source: string) => {
   return /(^|[^\\])&|\\\\/.test(body) && !body.includes('\\begin{') ? `\\begin{aligned}${body}\\end{aligned}` : body;
 };
 
+/** KaTeX cannot wrap display math, so shrink a too-wide formula to fit (never below 50%; scrolls beyond that). */
+function fitToWidth(host: HTMLElement) {
+  const math = host.querySelector<HTMLElement>('.katex-display > .katex');
+  if (!math) return;
+  math.style.zoom = '';
+  const available = host.clientWidth;
+  const needed = math.scrollWidth;
+  if (available > 0 && needed > available) math.style.zoom = String(Math.max(0.5, available / needed));
+}
+
 /** Show formulas as typeset, atomic (non-editable) chips inside the editing surface. */
 export function renderEditorMath(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>('[data-math]').forEach(el => {
@@ -58,6 +68,7 @@ export function renderEditorMath(root: HTMLElement) {
     try {
       katex.render(typeset(source), el, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
       el.classList.remove('rich-math-error');
+      if (block) fitToWidth(el);
     } catch { el.textContent = source; el.classList.add('rich-math-error'); }
     el.dataset.rendered = key;
   });
@@ -65,14 +76,23 @@ export function renderEditorMath(root: HTMLElement) {
 
 export function MathFormula({ source, block }: { source: string; block: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
     setError(false);
     try {
       if (ref.current) katex.render(typeset(source), ref.current, { displayMode: block, trust: false, strict: 'error', throwOnError: true, maxExpand: 200, maxSize: 20 });
+      if (block && wrapRef.current) fitToWidth(wrapRef.current);
     } catch { setError(true); }
   }, [source, block]);
-  return <span className={block ? 'block overflow-x-auto' : ''}><span ref={ref} aria-label={source} hidden={error} />{error && <span role="status" className="text-red-700">Invalid formula: {source}</span>}</span>;
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!block || !wrap || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => fitToWidth(wrap));
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [block]);
+  return <span ref={wrapRef} className={block ? 'block max-w-full overflow-x-auto' : ''}><span ref={ref} aria-label={source} hidden={error} />{error && <span role="status" className="text-red-700">Invalid formula: {source}</span>}</span>;
 }
 
 export function RichText({ html, text = '' }: { html?: string | null; text?: string }) {

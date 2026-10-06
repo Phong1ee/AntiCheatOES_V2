@@ -40,7 +40,7 @@ export function QuestionArea({
   onToggleMark,
 }: QuestionAreaProps) {
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="mx-auto w-full min-w-0 max-w-7xl space-y-6">
       <Card className="shadow-xl rounded-2xl border-0">
         <CardHeader className="flex-row items-center justify-between border-b bg-gradient-to-r from-teal-50 to-blue-50">
           <CardTitle className="text-lg text-gray-700">

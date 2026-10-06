@@ -7,7 +7,7 @@ export function QuestionPage({ questions, allQuestions, answers, marked = [], on
     const block = question.layout?.block;
     const first = block && (index === 0 || questions[index - 1].layout?.block?.block_id !== block.block_id);
     return <section key={question.id} aria-label={`Question ${allQuestions.findIndex(q => q.id === question.id) + 1}`}>
-      {first && <div className="mx-auto max-w-4xl rounded-lg border border-teal-200 bg-white p-5 mb-4"><h2 className="font-semibold">{block.kind === 'parent' ? 'Passage / parent stimulus' : 'Question group'}: {block.title}{question.layout?.continuation ? ' (continued)' : ''}</h2><RichContent content={block} attemptId={question.attemptId} /></div>}
+      {first && <div className="mx-auto mb-4 w-full min-w-0 max-w-7xl rounded-lg border border-teal-200 bg-white p-5"><h2 className="font-semibold">{block.kind === 'parent' ? 'Passage / parent stimulus' : 'Question group'}: {block.title}{question.layout?.continuation ? ' (continued)' : ''}</h2><RichContent content={block} attemptId={question.attemptId} /></div>}
       <QuestionArea hideNavigation question={question} currentQuestion={allQuestions.findIndex(q => q.id === question.id)} totalQuestions={allQuestions.length} answer={answers[question.id]} onAnswerChange={onAnswerChange} onPrevious={() => {}} onNext={() => {}} sequentialNavigation={false} currentAnswerIsValid isSavingNext={false} isMarked={marked.includes(question.id)} onToggleMark={() => onToggleMark(question.id)} />
     </section>;
   })}</div>;

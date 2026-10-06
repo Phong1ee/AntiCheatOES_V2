@@ -26,13 +26,16 @@
 .rich-formula-insert:disabled { opacity:.45; cursor:not-allowed; }
 .rich-editor-toolbar select { height:32px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-right:2px; color:#334155; font-size:13px; background:white; cursor:pointer; }
 .rich-editor-toolbar select:disabled { opacity:.4; cursor:not-allowed; }
-.rich-editor [role=textbox] { min-height:110px; margin-top:0; padding:12px 14px; border-radius:0; line-height:1.6; }
+.rich-editor [role=textbox] { min-height:110px; margin-top:0; padding:12px 14px; border-radius:0; line-height:1.6; overflow-x:auto; }
 .rich-editor button:focus-visible,.rich-editor select:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
 .rich-editor [data-math] { display:inline-block; vertical-align:middle; margin:0 2px; padding:0 4px; border-radius:4px; cursor:default; }
 .rich-editor [data-math]:hover { background:#f0fdfa; }
 .rich-editor div[data-math] { display:block; text-align:center; margin:6px 0; overflow-x:auto; }
 .rich-editor .rich-math-error { color:#b91c1c; background:#fef2f2; font-family:ui-monospace,monospace; font-size:13px; }
 .rich-editor-compact .rich-editor-toolbar { padding:4px 8px; }
+.rich-preview-dialog.oes-dialog-content { display:flex; flex-direction:column; width:min(760px,calc(100vw - 32px)); max-width:760px; max-height:calc(100dvh - 48px); gap:12px; border-radius:14px; }
+.rich-preview-body { min-height:0; overflow:auto; padding:12px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; line-height:1.7; }
+.rich-preview-body .katex-display { overflow-x:auto; overflow-y:hidden; padding:4px 0; }
 .rich-editor-compact .rich-editor-group button { width:28px; height:28px; }
 .rich-editor-compact .rich-editor-actions { margin-left:auto; }
 .rich-editor-compact [role=textbox] { min-height:44px; padding:8px 12px; }

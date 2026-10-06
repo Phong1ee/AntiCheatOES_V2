@@ -63,9 +63,8 @@ it('serializes rich editor changes and strips pasted payloads', async () => {
   expect(richPlain(change.mock.calls[0][0])).toBe('New');
   const preview = [...container.querySelectorAll('button')].find(b => b.textContent === 'Preview')!;
   await act(async () => preview.click());
-  expect(container.querySelector('[role=textbox]')).toBeNull();
-  await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Edit')!.click());
-  expect(container.querySelector('[role=textbox]')?.textContent).toContain('Old');
+  expect(document.body.querySelector('[role=dialog]')?.textContent).toContain('Old');
+  expect(container.querySelector('[role=textbox]')).not.toBeNull();
 });
 
 it('shows accessible media failure and retry', async () => {
@@ -145,14 +144,13 @@ it('does not enable dangerous links inside mathematical notation', async () => {
 });
 
 
-it('restores controlled edited content after preview without dropping formatting', async () => {
+it('shows preview in a dialog without replacing the edited content', async () => {
   function Harness() { const [value, setValue] = useState('<p>Old</p>'); return <RichEditor label="Body" value={value} onChange={setValue} />; }
   await render(<Harness />);
   const textbox = container.querySelector('[role=textbox]')!;
   await act(async () => { textbox.innerHTML = '<p><b>Saved draft</b><sub>2</sub></p>'; textbox.dispatchEvent(new Event('input', { bubbles: true })); });
   await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Preview')!.click());
-  expect(container.querySelector('b')?.textContent).toBe('Saved draft');
-  await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Edit')!.click());
+  expect(document.body.querySelector('[role=dialog] b')?.textContent).toBe('Saved draft');
   expect(container.querySelector('[role=textbox] b')?.textContent).toBe('Saved draft');
   expect(container.querySelector('[role=textbox] sub')?.textContent).toBe('2');
 });

@@ -42,6 +42,31 @@ def build_layout(question_ids, members=None, blocks=None, questions_per_page=1, 
     free = [b for b in logical if b["pin"] is None]
     if shuffle:
         rng.shuffle(free)
+    if not pinned:
+        result = []
+        page = slot = position = 1
+        for block in free:
+            children = block["children"]
+            keep_together = bool(block["block"] and block["block"].get("keep_together", True))
+            first_page = page
+            if keep_together and slot > 1 and (len(children) > questions_per_page or slot + len(children) - 1 > questions_per_page):
+                page += 1
+                slot = 1
+                first_page = page
+            for qid in children:
+                if not keep_together and slot > questions_per_page:
+                    page += 1
+                    slot = 1
+                result.append({"question_id": qid, "display_order": position,
+                               "position": position, "page": page, "slot": slot,
+                               "questions_per_page": questions_per_page, "block": block["block"],
+                               "continuation": page > first_page})
+                position += 1
+                slot += 1
+            if keep_together and len(children) > questions_per_page:
+                page += 1
+                slot = 1
+        return result
     occupied = {}
 
     def fits(block, start):

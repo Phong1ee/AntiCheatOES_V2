@@ -87,13 +87,24 @@ def test_layout_determinism_pins_keep_order_and_no_loss():
     assert children[0]["page"] == children[1]["page"]
 
 
-def test_conflicting_pin_and_large_block_continuation():
+def test_conflicting_pin_and_large_block_stays_on_scrollable_page():
     with pytest.raises(ValueError, match="conflicts"):
         build_layout([1, 2], {1: {"pinned_position": 1}, 2: {"pinned_position": 1}}, questions_per_page=2)
     rows = build_layout([1, 2, 3, 4, 5], {q: {"block_id": 1} for q in range(1, 6)}, {1: {"keep_together": True, "keep_order": True}}, 2)
-    assert [r["page"] for r in rows] == [1, 1, 2, 2, 3]
-    assert rows[-1]["continuation"]
+    assert [r["page"] for r in rows] == [1, 1, 1, 1, 1]
+    assert not any(r["continuation"] for r in rows)
     with pytest.raises(ValueError): build_layout([1], questions_per_page=0)
+
+
+def test_keep_together_group_larger_than_page_size_moves_next_question_to_next_page():
+    rows = build_layout(
+        [1, 2, 3],
+        {1: {"block_id": 7}, 2: {"block_id": 7}},
+        {7: {"keep_together": True, "keep_order": True}},
+        questions_per_page=1,
+    )
+    assert [row["page"] for row in rows] == [1, 1, 2]
+    assert [row["slot"] for row in rows] == [1, 2, 1]
 
 
 def test_settings_range():

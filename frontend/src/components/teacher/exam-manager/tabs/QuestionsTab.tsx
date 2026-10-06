@@ -130,6 +130,9 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(questions[0]?.id || null);
+  const structureItems = useMemo(() => questions.flatMap((question, index) => (
+    /^\d+$/.test(question.id) ? [{ id: Number(question.id), number: index + 1, text: question.question.replace(/\s+/g, ' ').trim().slice(0, 120) }] : []
+  )), [questions]);
   const [showQuestionPool, setShowQuestionPool] = useState(false);
   const [templateDownloading, setTemplateDownloading] = useState<'template' | 'guideline' | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState(false);
@@ -884,7 +887,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
   if (isPoolMode && poolConfig) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
+      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionItems={structureItems} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-r bg-gray-50">
           <div className="space-y-3 border-b p-4">
@@ -1137,7 +1140,7 @@ export function QuestionsTab({ examId, subjectId, expectedVersion, canCreateCont
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
+      {examId && !examId.startsWith('new-') && <QuestionStructurePanel key={examId} examId={Number(examId)} subjectId={subjectId} revision={expectedVersion} questionItems={structureItems} questionDirty={questionsDirty || poolDirty} onDirtyChange={setStructureDirty} onSaved={onSaved} />}
     {poolDraft && (
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-purple-200 bg-purple-50 px-4 py-3">
         <div className="min-w-0 text-sm text-purple-900">

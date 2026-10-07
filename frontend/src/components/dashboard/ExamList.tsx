@@ -19,7 +19,7 @@ import {
 import { ExamDetailsDialog } from "./ExamDetailsDialog";
 import { ExamCodeDialog } from "./ExamCodeDialog";
 import { PreExamSecurityDialog } from "./PreExamSecurityDialog";
-import { studentExamService, type StudentExamListItem } from "../../services/student-exam.service";
+import { studentExamService, type RefreshViolationWarning, type StudentExamListItem } from "../../services/student-exam.service";
 import type { AntiCheatRuntime } from "../../anti-cheat/anti-cheat-runtime";
 import { formatVietnamDate, formatVietnamTime, vietnamTimestamp } from '../../utils/vietnam-time';
 
@@ -53,7 +53,7 @@ const statusConfig = {
 };
 
 interface ExamListProps {
-  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolationRecorded?: boolean, runtime?: AntiCheatRuntime) => void;
+  onEnterExam?: (examId: string, stream?: MediaStream, refreshViolation?: RefreshViolationWarning, runtime?: AntiCheatRuntime) => void;
   onViewResults?: (examId: string) => void;
   exams?: StudentExamListItem[];
   loading?: boolean;
@@ -163,7 +163,7 @@ export function ExamList({
         })
       );
       resetExamFlow();
-      onEnterExam?.(exam.id, stream, false, runtime);
+      onEnterExam?.(exam.id, stream, undefined, runtime);
     } catch (error) {
       onStartError?.(displayAttemptAccessError(error, "Unable to start the exam."));
       throw error;
@@ -253,7 +253,7 @@ export function ExamList({
         if (Boolean(resumed.terminated)) throw new Error("This attempt has already ended and received 0 points.");
         localStorage.setItem("current_exam_attempt", JSON.stringify({ examId: selectedExam.id, attemptId: selectedExam.openAttemptId }));
         resetExamFlow();
-        onEnterExam?.(selectedExam.id, stream, resumed.refreshViolationRecorded, runtime);
+        onEnterExam?.(selectedExam.id, stream, resumed.refreshViolation, runtime);
         return;
       }
       await startExam(selectedExam, securityCode, stream, runtime);

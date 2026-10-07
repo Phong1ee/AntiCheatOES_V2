@@ -47,4 +47,6 @@ export interface StudentExamAttempt {
   startTime?: string;
   lastSavedAt?: string | null;
   violationCount?: number;
+  isLocked?: boolean;
+  lockReason?: string | null;
 }

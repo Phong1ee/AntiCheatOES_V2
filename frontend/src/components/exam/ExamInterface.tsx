@@ -9,7 +9,7 @@ import { SubmitConfirmDialog } from "./SubmitConfirmDialog";
 import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
 import { WebcamMonitor } from "./WebcamMonitor";
-import { studentExamService } from "../../services/student-exam.service";
+import { studentExamService, type RefreshViolationWarning } from "../../services/student-exam.service";
 import { attemptSessionStorage } from "../../services/attempt-session.storage";
 import { useAntiCheatMonitoring } from "../../hooks/useAntiCheatMonitoring";
 import { useIncidentReporter } from "../../anti-cheat/incident-reporter";
@@ -25,7 +25,7 @@ interface ExamInterfaceProps {
   onExit: () => void;
   mediaStream?: MediaStream;
   preloadedAntiCheatRuntime?: AntiCheatRuntime;
-  refreshViolationRecorded?: boolean;
+  refreshViolation?: RefreshViolationWarning;
 }
 
 const attemptKey = "current_exam_attempt";
@@ -35,7 +35,7 @@ const markedQuestionsKey = (attemptId: number) => `exam_attempt_marked_questions
 const isAnswered = (answer: StudentAnswer | undefined) =>
   Boolean(answer && ("selectedOptionId" in answer || answer.answerText.trim()));
 
-export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatRuntime, refreshViolationRecorded = false }: ExamInterfaceProps) {
+export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatRuntime, refreshViolation }: ExamInterfaceProps) {
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [answers, setAnswers] = useState<StudentAnswers>({});
   const [attemptId, setAttemptId] = useState<number | null>(null);
@@ -54,6 +54,8 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const [timerReady, setTimerReady] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
   const [isTeacherLocked, setIsTeacherLocked] = useState(false);
+  const [teacherUnlockReady, setTeacherUnlockReady] = useState(false);
+  const [isResumingAfterTeacherUnlock, setIsResumingAfterTeacherUnlock] = useState(false);
   const [teacherTerminationReason, setTeacherTerminationReason] = useState<string | null>(null);
   const [violationType, setViolationType] = useState<string>("");
   // The aggregate count is useful telemetry, but only the event-type count is
@@ -86,11 +88,14 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const terminatedRedirectRef = useRef<number | null>(null);
   const refreshWarningShownRef = useRef(false);
   const examEndingRef = useRef(false);
+  const unlockSettlingUntilRef = useRef(0);
+  const heartbeatInFlightRef = useRef(false);
+  const heartbeatRequestRef = useRef(0);
 
   // Both flags matter: examEnding covers submit/termination, and the exit ref
   // covers a deliberate exit, which is cleared a tick after fullscreenchange.
   const shouldIgnoreAntiCheatEvents = useCallback(
-    () => examEndingRef.current || intentionalFullscreenExitRef.current,
+    () => examEndingRef.current || intentionalFullscreenExitRef.current || Date.now() < unlockSettlingUntilRef.current,
     [],
   );
 
@@ -139,17 +144,48 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     // keeps polling, allowing an unlock to resume this exact attempt.
     examEndingRef.current = true;
     setIsTeacherLocked(true);
+    setTeacherUnlockReady(false);
     setShowSubmitDialog(false);
     stopAutoSave(message);
   }, [stopAutoSave]);
 
   const handleTeacherUnlock = useCallback(() => {
+    // Unlocking can restore focus and repaint fullscreen UI. Ignore only that
+    // short transition so it cannot become a false WINDOW_BLUR violation.
+    unlockSettlingUntilRef.current = Date.now() + 800;
     examEndingRef.current = false;
     setIsTeacherLocked(false);
+    setTeacherUnlockReady(false);
     setSubmitError(null);
     setSaveStatus("Ready");
     setTimerReady(true);
   }, []);
+
+  const resumeAfterTeacherUnlock = useCallback(async () => {
+    if (!attemptId || isResumingAfterTeacherUnlock) return;
+    setIsResumingAfterTeacherUnlock(true);
+    try {
+      const resumed = await studentExamService.resume(examId, attemptId, "teacher_unlock");
+      const serverTime = Date.parse(resumed.serverTime);
+      const expiresAt = Date.parse(resumed.expiresAt);
+      if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt)) {
+        throw new Error("Invalid server timer response");
+      }
+      serverOffsetRef.current = serverTime - Date.now();
+      serverOffsetInitializedRef.current = true;
+      expiresAtRef.current = expiresAt;
+      setTimeRemaining(resumed.remainingSeconds);
+      hadPositiveTimerRef.current = resumed.remainingSeconds > 0;
+      autoSubmitRef.current = false;
+      handleTeacherUnlock();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resume this attempt.";
+      if (message === "Attempt is locked by teacher") handleTeacherLock(message);
+      else setSubmitError(message);
+    } finally {
+      setIsResumingAfterTeacherUnlock(false);
+    }
+  }, [attemptId, examId, handleTeacherLock, handleTeacherUnlock, isResumingAfterTeacherUnlock]);
 
   const handleTeacherTermination = useCallback((reason?: string | null) => {
     examEndingRef.current = true;
@@ -172,16 +208,34 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
 
   const checkForTeacherTermination = useCallback(async () => {
     if (!attemptId) return false;
-    const state = await studentExamService.heartbeat(examId, attemptId);
+    // Never let an older locked response overwrite a newer unlocked response.
+    // A slow network response was making the two screens visibly alternate.
+    if (heartbeatInFlightRef.current) return false;
+    heartbeatInFlightRef.current = true;
+    const requestId = ++heartbeatRequestRef.current;
+    let state: Awaited<ReturnType<typeof studentExamService.heartbeat>>;
+    try {
+      state = await studentExamService.heartbeat(examId, attemptId);
+    } catch (error) {
+      if (requestId !== heartbeatRequestRef.current) return false;
+      throw error;
+    } finally {
+      if (requestId === heartbeatRequestRef.current) heartbeatInFlightRef.current = false;
+    }
+    if (requestId !== heartbeatRequestRef.current) return false;
     if (state.attemptStatus === "terminated" && state.terminationSource === "teacher") {
       handleTeacherTermination(state.terminationReason);
       return true;
     }
-    // A locked attempt receives a 403 heartbeat response. Therefore a later
-    // successful in-progress heartbeat is authoritative proof it was unlocked.
-    if (isTeacherLocked && state.attemptStatus === "in_progress") handleTeacherUnlock();
+    if (state.isLocked) {
+      handleTeacherLock(state.lockReason || "This attempt was locked by your teacher.");
+      return false;
+    }
+    // Keep the lock screen stable after the teacher unlocks. The student must
+    // explicitly return to the exam instead of being switched mid-render.
+    if (isTeacherLocked && state.attemptStatus === "in_progress") setTeacherUnlockReady(true);
     return false;
-  }, [attemptId, examId, handleTeacherTermination, handleTeacherUnlock, isTeacherLocked]);
+  }, [attemptId, examId, handleTeacherLock, handleTeacherTermination, isTeacherLocked]);
 
   const saveQuestion = useCallback(async (questionId: number, force = false): Promise<boolean> => {
     if (!attemptId || attemptStatus !== "in_progress" || !navigator.onLine) return false;
@@ -242,9 +296,11 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       });
     };
     heartbeat();
-    const interval = window.setInterval(heartbeat, 10_000);
+    // A locked student needs a quick path back into the same exam after the
+    // teacher unlocks them, while an active attempt can use a lighter poll.
+    const interval = window.setInterval(heartbeat, isTeacherLocked ? 3_000 : 10_000);
     return () => window.clearInterval(interval);
-  }, [attemptId, attemptStatus, checkForTeacherTermination, handleTeacherLock, stopAutoSave]);
+  }, [attemptId, attemptStatus, checkForTeacherTermination, handleTeacherLock, isTeacherLocked, stopAutoSave]);
 
   const submit = useCallback(async (automatic = false) => {
     if (!attemptId || attemptStatus !== "in_progress" || isSubmitted) return;
@@ -281,6 +337,10 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         // explicit Resume flow may turn a pending page refresh into a violation.
         const restored = await studentExamService.restore(examId, hint.attemptId!);
         setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
+        const restoredLocked = Boolean(restored.attempt.isLocked);
+        setIsTeacherLocked(restoredLocked);
+        setTeacherUnlockReady(false);
+        examEndingRef.current = restoredLocked;
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
         persistedAnsweredRef.current = new Set(
           restored.questions.filter((question) => isAnswered(saved[question.id])).map((question) => question.id),
@@ -327,7 +387,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         setTimeRemaining(restored.remainingSeconds);
         autoSubmitRef.current = false;
         hadPositiveTimerRef.current = restored.remainingSeconds > 0;
-        setTimerReady(restored.attempt.status === "in_progress");
+        setTimerReady(restored.attempt.status === "in_progress" && !restoredLocked);
         if (restored.attempt.status !== "in_progress") stopAutoSave("Attempt is no longer in progress");
       };
       load().catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Failed to restore attempt")).finally(() => setLoading(false));
@@ -335,11 +395,15 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   }, [examId, stopAutoSave]);
 
   useEffect(() => {
-    if (!refreshViolationRecorded || refreshWarningShownRef.current || loading || !antiCheatEnabled) return;
+    if (!refreshViolation || refreshWarningShownRef.current || loading || !antiCheatEnabled) return;
     refreshWarningShownRef.current = true;
     setViolationType("PAGE_REFRESH");
+    setViolationCount(refreshViolation.violationCount);
+    setMeasureViolationCount(refreshViolation.measureViolationCount);
+    setMeasureThreshold(refreshViolation.measureThreshold);
+    setRemainingViolations(refreshViolation.remainingViolations);
     setShowViolationWarning(true);
-  }, [antiCheatEnabled, loading, refreshViolationRecorded]);
+  }, [antiCheatEnabled, loading, refreshViolation]);
 
   useEffect(() => {
     if (!timerReady || loading || attemptId === null || attemptStatus !== "in_progress" || !serverOffsetInitializedRef.current || !Number.isFinite(expiresAtRef.current) || expiresAtRef.current <= 0) return;
@@ -487,7 +551,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading exam...</div>;
   if (loadError || !questions.length) return <div className="min-h-screen flex flex-col gap-4 items-center justify-center"><p className="text-red-600">{loadError ?? "No questions found."}</p><button onClick={handleNormalExit}>Back</button></div>;
   if (isSubmitted) return <ExamSubmitted onExit={handleNormalExit} showEssayGradingNote={showEssayGradingNote} />;
-  if (isTeacherLocked) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-slate-100 p-6"><div className="max-w-md rounded-2xl border border-amber-200 bg-white p-8 text-center shadow-xl"><Lock className="mx-auto size-10 text-amber-600" /><h1 className="mt-4 text-xl font-semibold text-slate-900">Attempt locked by teacher</h1><p className="mt-3 text-sm leading-6 text-slate-600">Your teacher has temporarily paused this attempt. You cannot save answers or submit until it is unlocked.</p><button className="mt-6 rounded-lg bg-slate-800 px-5 py-3 text-sm font-medium text-white hover:bg-slate-700" onClick={handleNormalExit}>Return to Dashboard</button></div></div>;
+  if (isTeacherLocked) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-slate-100 p-6"><div className="max-w-md rounded-2xl border border-amber-200 bg-white p-8 text-center shadow-xl"><Lock className={`mx-auto size-10 ${teacherUnlockReady ? "text-teal-600" : "text-amber-600"}`} /><h1 className="mt-4 text-xl font-semibold text-slate-900">{teacherUnlockReady ? "Attempt unlocked" : "Attempt locked by teacher"}</h1><p className="mt-3 text-sm leading-6 text-slate-600">{teacherUnlockReady ? "Your teacher has allowed you to continue. Return to the exam when you are ready." : "Your teacher has temporarily paused this attempt. You cannot save answers or submit until it is unlocked."}</p>{teacherUnlockReady ? <button disabled={isResumingAfterTeacherUnlock} className="mt-6 rounded-lg bg-teal-600 px-5 py-3 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-70" onClick={() => void resumeAfterTeacherUnlock()}>{isResumingAfterTeacherUnlock ? "Resuming..." : "Return to Exam"}</button> : <><div className="mt-4 flex items-center justify-center gap-2 text-sm text-amber-700"><span className="size-2 animate-pulse rounded-full bg-amber-500" aria-hidden="true" />Checking for an unlock every 3 seconds...</div><button className="mt-6 rounded-lg bg-slate-800 px-5 py-3 text-sm font-medium text-white hover:bg-slate-700" onClick={handleNormalExit}>Return to Dashboard</button></>}</div></div>;
 
   if (aiRuntimeActive && aiRuntime.readiness === "error") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Security runtime error</h1><p className="mt-3 text-sm leading-6 text-slate-600">Anti-cheat monitoring was interrupted. Restore camera and audio monitoring to continue the exam.</p><div className="mt-6 flex gap-3"><button className="flex-1 rounded-lg border border-slate-300 px-5 py-3 font-medium text-slate-700 hover:bg-slate-50" onClick={handleNormalExit}>Return to Dashboard</button><button className="flex-1 rounded-lg bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700" onClick={aiRuntime.retry}>Retry</button></div></div></div>;
   if (aiRuntimeActive && aiRuntime.readiness === "loading") return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900 p-6"><div className="max-w-md rounded-2xl border border-teal-300/30 bg-white p-8 text-center shadow-2xl"><h1 className="text-xl font-semibold text-slate-900">Preparing secure exam</h1><p className="mt-3 text-sm leading-6 text-slate-600">Camera and microphone monitoring are being initialized. Please wait.</p></div></div>;

@@ -218,12 +218,19 @@ def lock_attempt(attempt_id: int, payload: LockAttemptRequest, user=Depends(teac
         if attempt.is_locked:
             raise HTTPException(409, "Attempt is already locked")
         reason = (payload.reason or "Teacher temporarily locked this attempt").strip()
+        now = datetime.now()
         attempt.is_locked = True
-        attempt.locked_at = datetime.now()
+        attempt.locked_at = now
         attempt.locked_by = user["school_id"]
         attempt.lock_reason = reason
+        # A teacher can lock again while the student is still on the
+        # post-unlock confirmation screen.  Preserve the original pause start
+        # so that entire interval stays excluded from the duration timer.
+        if getattr(attempt, "paused_at", None) is None:
+            attempt.paused_at = now
+        attempt.awaiting_student_resume = False
         db.add(ExamEvent(
-            attempt_id=attempt_id, event_type="ATTEMPT_LOCKED", event_timestamp=datetime.now(),
+            attempt_id=attempt_id, event_type="ATTEMPT_LOCKED", event_timestamp=now,
             details=reason, source="system", is_violation=False,
             metadata_={"actorSchoolId": user["school_id"]},
         ))
@@ -253,6 +260,8 @@ def unlock_attempt(attempt_id: int, user=Depends(teacher), db: Session = Depends
         attempt.locked_at = None
         attempt.locked_by = None
         attempt.lock_reason = None
+        # Keep paused_at until the student explicitly confirms continuation.
+        attempt.awaiting_student_resume = True
         db.add(ExamEvent(
             attempt_id=attempt_id, event_type="ATTEMPT_UNLOCKED", event_timestamp=datetime.now(),
             details=previous_reason, source="system", is_violation=False,
@@ -293,6 +302,8 @@ def terminate_attempt(attempt_id: int, payload: TerminateAttemptRequest, user=De
         attempt.locked_at = None
         attempt.locked_by = None
         attempt.lock_reason = None
+        attempt.paused_at = None
+        attempt.awaiting_student_resume = False
         attempt.score_scale_version = 3
         db.add(ExamEvent(
             attempt_id=attempt_id, event_type="ATTEMPT_TERMINATED", event_timestamp=datetime.now(),

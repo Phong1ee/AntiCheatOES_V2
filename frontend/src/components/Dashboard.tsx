@@ -11,7 +11,7 @@ import { ProfileSettings } from './ProfileSettings';
 import { Preferences } from './Preferences';
 import { useStudentDashboardData } from '../hooks/useStudentDashboardData';
 import { useStudentNotifications } from '../hooks/useStudentNotifications';
-import type { StudentExamListItem } from '../services/student-exam.service';
+import type { RefreshViolationWarning, StudentExamListItem } from '../services/student-exam.service';
 import type { AntiCheatRuntime } from '../anti-cheat/anti-cheat-runtime';
 
 interface DashboardProps {
@@ -23,7 +23,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [currentExamId, setCurrentExamId] = useState<string | null>(null);
   const [examMediaStream, setExamMediaStream] = useState<MediaStream | null>(null);
   const [examAntiCheatRuntime, setExamAntiCheatRuntime] = useState<AntiCheatRuntime | null>(null);
-  const [refreshViolationRecorded, setRefreshViolationRecorded] = useState(false);
+  const [refreshViolation, setRefreshViolation] = useState<RefreshViolationWarning | null>(null);
   const [viewingAttemptId, setViewingAttemptId] = useState<number | null>(null);
   const [selectedResultExamId, setSelectedResultExamId] = useState<string | null>(null);
   const [myExamsAccessExamId, setMyExamsAccessExamId] = useState<string | null>(null);
@@ -33,12 +33,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const dashboardData = useStudentDashboardData();
   const notificationData = useStudentNotifications();
 
-  const handleEnterExam = (examId: string, stream?: MediaStream, didRecordRefreshViolation = false, runtime?: AntiCheatRuntime) => {
+  const handleEnterExam = (examId: string, stream?: MediaStream, refreshWarning?: RefreshViolationWarning, runtime?: AntiCheatRuntime) => {
     setCalendarLaunchExam(null);
     setCalendarLaunchError(null);
     setExamMediaStream(stream ?? null);
     setExamAntiCheatRuntime(runtime ?? null);
-    setRefreshViolationRecorded(didRecordRefreshViolation);
+    setRefreshViolation(refreshWarning ?? null);
     setCurrentExamId(examId);
   };
 
@@ -47,7 +47,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     examMediaStream?.getTracks().forEach((track) => track.stop());
     setExamMediaStream(null);
     setExamAntiCheatRuntime(null);
-    setRefreshViolationRecorded(false);
+    setRefreshViolation(null);
     setCurrentExamId(null);
     setActiveTab('my-exams');
     setCalendarLaunchExam(null);
@@ -85,7 +85,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       onExit={handleExitExam}
       mediaStream={examMediaStream ?? undefined}
       preloadedAntiCheatRuntime={examAntiCheatRuntime ?? undefined}
-      refreshViolationRecorded={refreshViolationRecorded}
+      refreshViolation={refreshViolation ?? undefined}
     />;
   }
 

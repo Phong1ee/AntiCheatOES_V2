@@ -23,7 +23,7 @@ class ResumeAttemptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deviceId: str = Field(min_length=1, max_length=255)
-    resumeCause: Literal["page_refresh", "unexpected_exit", "normal_resume"]
+    resumeCause: Literal["page_refresh", "unexpected_exit", "normal_resume", "teacher_unlock"]
     clientEventId: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_validator(mode="after")

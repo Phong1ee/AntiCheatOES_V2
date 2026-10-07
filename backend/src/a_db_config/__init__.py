@@ -847,6 +847,9 @@ class Attempt(Base):
     locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     locked_by: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     lock_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    paused_total_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    awaiting_student_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
     submit_request_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     # The policy accepted before Start; later ExamSetting edits never rewrite it.
     anti_cheat_policy_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

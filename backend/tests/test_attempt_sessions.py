@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from src.controller.teacherController.examController import ExamController
@@ -91,6 +92,18 @@ class AttemptSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "device does not match"):
                 examModel.resumeAttempt(1, 2, "STU001", "browser-b")
 
+    def test_teacher_unlock_resume_requires_a_teacher_created_waiting_state(self):
+        connection = _Connection({
+            "attempt_id": 2, "exam_id": 1, "student_id": "STU001", "attempt_no": 1,
+            "status": "in_progress", "submitted_at": None, "end_time": None,
+            "score": None, "violation_count": 0,
+            "device_id_hash": examModel._sha256("browser-a"),
+            "awaiting_student_resume": False,
+        })
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            with self.assertRaisesRegex(Exception, "not awaiting teacher-unlock"):
+                examModel.resumeAttempt(1, 2, "STU001", "browser-a", resume_teacher_pause=True)
+
     def test_heartbeat_requires_session_and_only_updates_heartbeat(self):
         device_id, token = "browser-a", "token"
         connection = _Connection({
@@ -117,14 +130,48 @@ class AttemptSessionTests(unittest.TestCase):
         self.assertEqual(state["termination_source"], "teacher")
         self.assertNotIn("UPDATE attempt", "\n".join(query for query, _ in connection.cursor_instance.calls))
 
+    def test_heartbeat_reports_locked_state_without_updating_the_heartbeat(self):
+        device_id, token = "browser-a", "token"
+        connection = _Connection({
+            "last_heartbeat_at": "now", "violation_count": 4, "status": "in_progress",
+            "submitted_at": None, "end_time": None, "is_locked": True,
+            "lock_reason": "Review in progress",
+            "device_id_hash": examModel._sha256(device_id), "session_token_hash": examModel._sha256(token),
+        })
+        with patch.object(examModel, "get_db_connection", return_value=connection):
+            state = examModel.heartbeatAttempt(1, 2, "STU001", device_id, token)
+        self.assertTrue(state["is_locked"])
+        self.assertEqual(state["lock_reason"], "Review in progress")
+        self.assertNotIn("UPDATE attempt", "\n".join(query for query, _ in connection.cursor_instance.calls))
+
     def test_page_refresh_uses_event_engine_response_without_resetting_count(self):
-        attempt = {"attempt_id": 2, "status": "in_progress", "violation_count": 4}
-        event_state = {"violationCount": 5, "terminated": False, "attemptStatus": "in_progress"}
-        with patch.object(examModel, "getAssignedExamById", return_value={"start_time": None, "end_time": None}), patch.object(examModel, "get_database_now"), patch.object(examModel, "resumeAttempt", return_value=(attempt, "new-token", False)), patch.object(examModel, "getExamSettings", return_value={"anti_cheat_enabled": True, "violation_limit": 8}), patch.object(examModel, "recordAntiCheatEvent", return_value=event_state) as record:
+        attempt = {"attempt_id": 2, "status": "in_progress", "violation_count": 4, "start_time": datetime(2026, 10, 7, 10, 0, 0)}
+        event_state = {
+            "eventAccepted": True, "violationCount": 5, "terminated": False,
+            "attemptStatus": "in_progress", "measureViolationCount": 2,
+            "measureThreshold": 8, "remainingViolations": 6,
+        }
+        with patch.object(examModel, "getAssignedExamById", return_value={"start_time": None, "end_time": None, "duration_minutes": 60}), patch.object(examModel, "get_database_now", return_value=datetime(2026, 10, 7, 10, 1, 0)), patch.object(examModel, "resumeAttempt", return_value=(attempt, "new-token", False)), patch.object(examModel, "getExamSettings", return_value={"anti_cheat_enabled": True, "violation_limit": 8}), patch.object(examModel, "recordAntiCheatEvent", return_value=event_state) as record:
             result = ExamController.resumeAttempt("STU001", "student", 1, 2, "browser-a", "page_refresh", "reload-1")
         self.assertEqual(result["violationCount"], 5)
         self.assertEqual(result["sessionToken"], "new-token")
+        self.assertTrue(result["refreshViolationRecorded"])
+        self.assertEqual((result["measureViolationCount"], result["measureThreshold"]), (2, 8))
         self.assertEqual(record.call_args.args[2]["clientEventId"], "reload-1")
+
+    def test_teacher_pause_extends_the_attempt_timer_but_not_exam_end(self):
+        exam = {"duration_minutes": 10, "end_time": None}
+        attempt = {
+            "start_time": datetime(2026, 10, 7, 10, 0, 0),
+            "paused_at": datetime(2026, 10, 7, 10, 2, 0),
+            "paused_total_seconds": 30,
+        }
+        payload = ExamController._timer_payload(exam, attempt, datetime(2026, 10, 7, 10, 5, 0))
+        self.assertEqual(payload["remainingSeconds"], 510)
+
+        hard_deadline = {"duration_minutes": 10, "end_time": datetime(2026, 10, 7, 10, 4, 0)}
+        capped = ExamController._timer_payload(hard_deadline, attempt, datetime(2026, 10, 7, 10, 5, 0))
+        self.assertEqual(capped["remainingSeconds"], 0)
 
     def test_start_does_not_create_a_second_open_attempt_for_api_calls(self):
         with patch.object(ExamController, "_validateStudentExamAccess", return_value={

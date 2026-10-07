@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from src.a_db_config.config import get_db_connection
@@ -46,12 +46,22 @@ def create_attempt_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def attempt_pause_seconds(attempt: dict, database_now) -> int:
+    """Include an active teacher pause without trusting browser time."""
+    total = int(attempt.get("paused_total_seconds") or 0)
+    paused_at = attempt.get("paused_at")
+    if paused_at and database_now:
+        total += max(0, int((database_now - paused_at).total_seconds()))
+    return total
+
+
 def _get_attempt_for_bound_session(cursor, exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> dict:
     """Load an owned attempt after validating its bound browser session."""
     cursor.execute(
         """
         SELECT device_id_hash, session_token_hash, status, submitted_at, end_time,
-               is_locked, termination_reason, violation_count, last_heartbeat_at
+               is_locked, lock_reason, paused_at, paused_total_seconds, awaiting_student_resume,
+               termination_reason, violation_count, last_heartbeat_at
         FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
         """,
         (attempt_id, exam_id, student_id),
@@ -66,7 +76,16 @@ def _get_attempt_for_bound_session(cursor, exam_id: int, attempt_id: int, studen
     return attempt
 
 
-def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_id: str, session_token: str) -> None:
+def assertAttemptSession(
+    exam_id: int,
+    attempt_id: int,
+    student_id: str,
+    device_id: str,
+    session_token: str,
+    *,
+    allow_locked: bool = False,
+    allow_paused: bool = False,
+) -> dict:
     """Validate an active attempt session without exposing stored hashes."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -74,8 +93,11 @@ def assertAttemptSession(exam_id: int, attempt_id: int, student_id: str, device_
         attempt = _get_attempt_for_bound_session(cursor, exam_id, attempt_id, student_id, device_id, session_token)
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
-        if attempt.get("is_locked", False):
+        if attempt.get("is_locked", False) and not allow_locked:
             raise Exception("Attempt is locked by teacher")
+        if attempt.get("awaiting_student_resume", False) and not allow_paused:
+            raise Exception("Teacher unlocked this attempt; student confirmation is required")
+        return attempt
     finally:
         cursor.close()
         cnx.close()
@@ -156,6 +178,20 @@ def getStudentExams(school_id: str):
             THEN a.start_time
             ELSE NULL
         END) AS open_attempt_start_time
+        ,MAX(CASE
+            WHEN a.status = 'in_progress'
+             AND a.submitted_at IS NULL
+             AND a.end_time IS NULL
+            THEN a.paused_at
+            ELSE NULL
+        END) AS open_attempt_paused_at
+        ,MAX(CASE
+            WHEN a.status = 'in_progress'
+             AND a.submitted_at IS NULL
+             AND a.end_time IS NULL
+            THEN a.paused_total_seconds
+            ELSE 0
+        END) AS open_attempt_paused_total_seconds
     FROM student_exam se
     JOIN user u
         ON u.school_id = se.student_id
@@ -192,9 +228,16 @@ def getStudentExams(school_id: str):
 
             open_attempt_id = exam.pop("open_attempt_id", None)
             open_attempt_start_time = exam.pop("open_attempt_start_time", None)
+            open_attempt_paused_at = exam.pop("open_attempt_paused_at", None)
+            open_attempt_paused_total_seconds = int(exam.pop("open_attempt_paused_total_seconds", 0) or 0)
             has_open_attempt = open_attempt_id is not None
             if has_open_attempt and open_attempt_start_time:
-                duration_expiry = open_attempt_start_time + timedelta(minutes=int(exam["duration_minutes"] or 0))
+                pause_seconds = open_attempt_paused_total_seconds
+                if open_attempt_paused_at:
+                    pause_seconds += max(0, int((now_time - open_attempt_paused_at).total_seconds()))
+                duration_expiry = open_attempt_start_time + timedelta(
+                    minutes=int(exam["duration_minutes"] or 0), seconds=pause_seconds,
+                )
                 expires_at = min(duration_expiry, exam["end_time"]) if exam["end_time"] else duration_expiry
                 has_open_attempt = expires_at > now_time
 
@@ -541,7 +584,8 @@ def getOpenAttempt(exam_id: int, student_id: str):
     cursor = cnx.cursor(dictionary=True)
     query = """
     SELECT attempt_id, attempt_no, exam_id, student_id, start_time, status, last_saved_at,
-           violation_count, device_id_hash, anti_cheat_policy_snapshot
+           violation_count, device_id_hash, anti_cheat_policy_snapshot,
+           paused_at, paused_total_seconds, awaiting_student_resume
     FROM attempt
     WHERE exam_id = %s
       AND student_id = %s
@@ -585,9 +629,10 @@ def createAttempt(
         device_id_hash,
         session_token_hash,
         last_heartbeat_at,
-        anti_cheat_policy_snapshot
+        anti_cheat_policy_snapshot,
+        is_locked
     )
-    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress', %s, %s, NOW(), %s)
+    VALUES (%s, %s, %s, NULL, NOW(), NULL, NULL, 'in_progress', %s, %s, NOW(), %s, 0)
     """
     try:
         cnx.start_transaction()
@@ -901,7 +946,8 @@ def getAttemptById(attempt_id: int):
     query = """
     SELECT attempt_id, exam_id, student_id, attempt_no, score, start_time, end_time,
            submitted_at, status, last_saved_at, violation_count, last_violation_at,
-           device_id_hash, session_token_hash, last_heartbeat_at, anti_cheat_policy_snapshot
+           device_id_hash, session_token_hash, last_heartbeat_at, anti_cheat_policy_snapshot,
+           is_locked, lock_reason, paused_at, paused_total_seconds, awaiting_student_resume
     FROM attempt
     WHERE attempt_id = %s
     """
@@ -1288,6 +1334,7 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
         cursor.execute(
             """
             SELECT a.status, a.submitted_at, a.end_time, a.start_time, a.last_saved_at, a.is_locked,
+                   a.paused_at, a.paused_total_seconds, a.awaiting_student_resume,
                    e.duration_minutes, e.end_time AS exam_end_time
             FROM attempt a JOIN exam e ON e.exam_id = a.exam_id
             WHERE a.attempt_id = %s FOR UPDATE
@@ -1299,9 +1346,13 @@ def saveAttemptAnswer(attempt_id: int, exam_id: int, question_id: int, answer: d
             raise Exception("Attempt is no longer in progress")
         if attempt.get("is_locked", False):
             raise Exception("Attempt is locked by teacher")
-        cursor.execute("SELECT NOW() AS database_now")
-        database_now = cursor.fetchone()["database_now"]
-        duration_expiry = attempt["start_time"] + timedelta(minutes=int(attempt["duration_minutes"] or 0))
+        if attempt.get("awaiting_student_resume", False):
+            raise Exception("Teacher unlocked this attempt; student confirmation is required")
+        database_now = datetime.now()
+        duration_expiry = attempt["start_time"] + timedelta(
+            minutes=int(attempt["duration_minutes"] or 0),
+            seconds=attempt_pause_seconds(attempt, database_now),
+        )
         expires_at = min(duration_expiry, attempt["exam_end_time"]) if attempt["exam_end_time"] else duration_expiry
         if database_now >= expires_at:
             cnx.rollback()
@@ -1468,7 +1519,9 @@ def submitAttempt(attempt_id: int, exam_id: int, answers: list, submit_request_i
     return finalizeAttempt(attempt_id, exam_id, answers, submit_request_id=submit_request_id)
 
 
-def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str) -> tuple[dict, str, bool]:
+def resumeAttempt(
+    exam_id: int, attempt_id: int, student_id: str, device_id: str, *, resume_teacher_pause: bool = False,
+) -> tuple[dict, str, bool]:
     """Claim a legacy attempt once or rotate the session on its bound browser."""
     cnx = get_db_connection()
     cursor = cnx.cursor(dictionary=True)
@@ -1476,8 +1529,9 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
         cnx.start_transaction()
         cursor.execute(
             """
-            SELECT attempt_id, exam_id, student_id, attempt_no, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash, anti_cheat_policy_snapshot, is_locked
+            SELECT attempt_id, exam_id, student_id, attempt_no, status, start_time, submitted_at, end_time,
+                   score, violation_count, device_id_hash, anti_cheat_policy_snapshot, is_locked,
+                   paused_at, paused_total_seconds, awaiting_student_resume
             FROM attempt WHERE attempt_id = %s AND exam_id = %s AND student_id = %s FOR UPDATE
             """,
             (attempt_id, exam_id, student_id),
@@ -1487,19 +1541,43 @@ def resumeAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: str
             raise Exception("Attempt is no longer in progress")
         if attempt.get("is_locked", False):
             raise Exception("Attempt is locked by teacher")
+        if attempt.get("awaiting_student_resume", False) and not resume_teacher_pause:
+            raise Exception("Teacher unlocked this attempt; student confirmation is required")
+        if resume_teacher_pause and not attempt.get("awaiting_student_resume", False):
+            # Only the waiting state created by a teacher unlock may consume a
+            # pause.  A client must not be able to manufacture a resume event.
+            raise Exception("Attempt is not awaiting teacher-unlock confirmation")
         device_hash = _sha256(device_id)
         claimed_legacy = attempt["device_id_hash"] is None
         if not claimed_legacy and not hmac.compare_digest(attempt["device_id_hash"], device_hash):
             raise Exception("Attempt device does not match")
         session_token = create_attempt_session_token()
+        database_now = datetime.now()
+        paused_total_seconds = int(attempt.get("paused_total_seconds") or 0)
+        if resume_teacher_pause:
+            paused_total_seconds = attempt_pause_seconds(attempt, database_now)
         cursor.execute(
             """
             UPDATE attempt
-            SET device_id_hash = %s, session_token_hash = %s, last_heartbeat_at = NOW()
+            SET device_id_hash = %s, session_token_hash = %s, last_heartbeat_at = %s,
+                paused_at = %s, paused_total_seconds = %s, awaiting_student_resume = %s
             WHERE attempt_id = %s
             """,
-            (device_hash, _sha256(session_token), attempt_id),
+            (
+                device_hash, _sha256(session_token), database_now,
+                None if resume_teacher_pause else attempt.get("paused_at"), paused_total_seconds,
+                False if resume_teacher_pause else bool(attempt.get("awaiting_student_resume", False)), attempt_id,
+            ),
         )
+        if resume_teacher_pause:
+            cursor.execute(
+                """
+                INSERT INTO exam_event (attempt_id, event_type, event_timestamp, details, source, is_violation)
+                VALUES (%s, 'ATTEMPT_RESUMED_BY_STUDENT', %s, 'Student confirmed continuation after teacher unlock', 'system', 0)
+                """,
+                (attempt_id, database_now),
+            )
+            attempt.update(paused_at=None, paused_total_seconds=paused_total_seconds, awaiting_student_resume=False)
         if claimed_legacy:
             cursor.execute(
                 """
@@ -1537,7 +1615,25 @@ def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: 
         if attempt["status"] != "in_progress" or attempt["submitted_at"] or attempt["end_time"]:
             raise Exception("Attempt is no longer in progress")
         if attempt.get("is_locked", False):
-            raise Exception("Attempt is locked by teacher")
+            # This is an authorized status poll, not a heartbeat update. It lets
+            # the open student page observe a later teacher unlock.
+            return {
+                "last_heartbeat_at": attempt.get("last_heartbeat_at"),
+                "violation_count": attempt.get("violation_count") or 0,
+                "status": "in_progress",
+                "is_locked": True,
+                "lock_reason": attempt.get("lock_reason"),
+                "terminated": False,
+            }
+        if attempt.get("awaiting_student_resume", False):
+            return {
+                "last_heartbeat_at": attempt.get("last_heartbeat_at"),
+                "violation_count": attempt.get("violation_count") or 0,
+                "status": "in_progress",
+                "is_locked": False,
+                "awaiting_student_resume": True,
+                "terminated": False,
+            }
         cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s AND is_locked = 0", (attempt_id,))
         if getattr(cursor, "rowcount", 1) != 1:
             raise Exception("Attempt is locked by teacher")
@@ -1561,7 +1657,7 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
         cursor.execute(
             """
             SELECT attempt_id, exam_id, student_id, status, submitted_at, end_time,
-                   score, violation_count, device_id_hash, session_token_hash, is_locked,
+                   score, violation_count, device_id_hash, session_token_hash, is_locked, awaiting_student_resume,
                    anti_cheat_policy_snapshot
             FROM attempt
             WHERE attempt_id = %s AND exam_id = %s AND student_id = %s
@@ -1574,6 +1670,8 @@ def recordAntiCheatEvent(exam_id: int, student_id: str, event: dict, device_id: 
             raise Exception("Attempt does not belong to student")
         if attempt.get("is_locked", False):
             raise Exception("Attempt is locked by teacher")
+        if attempt.get("awaiting_student_resume", False):
+            raise Exception("Teacher unlocked this attempt; student confirmation is required")
         if device_id and (not attempt["device_id_hash"] or not hmac.compare_digest(attempt["device_id_hash"], _sha256(device_id))):
             raise Exception("Attempt device does not match")
         if session_token and (not attempt["session_token_hash"] or not hmac.compare_digest(attempt["session_token_hash"], _sha256(session_token))):

@@ -45,7 +45,7 @@ interface RawVerifyCodeResult {
 
 interface RawRestore {
   exam: { exam_id: number; title: string; duration_minutes: number };
-  attempt: { attempt_id: number; attempt_no: number; status: string; start_time?: string; lastSavedAt?: string | null };
+  attempt: { attempt_id: number; attempt_no: number; status: string; start_time?: string; lastSavedAt?: string | null; isLocked?: boolean; lockReason?: string | null };
   questions?: RawQuestion[];
   serverTime: string;
   expiresAt: string;
@@ -122,6 +122,13 @@ export interface AntiCheatEventResult {
   warningMessage?: string | null;
 }
 
+export interface RefreshViolationWarning {
+  violationCount: number;
+  measureViolationCount: number;
+  measureThreshold: number;
+  remainingViolations: number | null;
+}
+
 export interface ResumeAttemptResult {
   antiCheatEnabled: boolean;
   attemptId: number;
@@ -132,6 +139,10 @@ export interface ResumeAttemptResult {
   violationCount: number;
   violationLimit: number;
   antiCheatMeasures: AntiCheatMeasures;
+  serverTime: string;
+  expiresAt: string;
+  remainingSeconds: number;
+  refreshViolation?: RefreshViolationWarning;
 }
 
 export interface RestoreAttemptResult {
@@ -153,6 +164,9 @@ export interface AttemptHeartbeatResult {
   attemptId: number;
   attemptStatus: string;
   violationCount: number;
+  isLocked?: boolean;
+  lockReason?: string | null;
+  awaitingStudentResume?: boolean;
   lastHeartbeatAt?: string | null;
   terminated: boolean;
   terminationReason?: string | null;
@@ -242,7 +256,7 @@ export const studentExamService = {
     const { data } = await apiClient.get<RawRestore & Record<string, unknown>>(`/api/exams/${examId}/attempts/${attemptId}`, { headers: attemptSessionStorage.headers(attemptId) });
     return {
       exam: { examId: Number(data.exam.exam_id), title: data.exam.title, durationMinutes: Number(data.exam.duration_minutes) },
-      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0) },
+      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0), isLocked: Boolean(data.attempt.isLocked), lockReason: typeof data.attempt.lockReason === "string" ? data.attempt.lockReason : null },
       questions: (data.questions ?? []).map(q => ({ ...normalizeQuestion(q), attemptId })), serverTime: data.serverTime,
       expiresAt: data.expiresAt, remainingSeconds: Number(data.remainingSeconds), settings: normalizeSettings(data.settings),
       antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures ?? data.settings?.anti_cheat_measures, Number(data.violationLimit ?? 5)),
@@ -269,7 +283,7 @@ export const studentExamService = {
   },
 
 
-  async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume", clientEventId?: string): Promise<ResumeAttemptResult> {
+  async resume(examId: string | number, attemptId: number, resumeCause: "page_refresh" | "unexpected_exit" | "normal_resume" | "teacher_unlock", clientEventId?: string): Promise<ResumeAttemptResult> {
     const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
     const pendingRefreshId = resumeCause === "normal_resume" && navigation?.type === "reload" ? attemptSessionStorage.getPendingRefresh(attemptId) : null;
     const actualCause = pendingRefreshId ? "page_refresh" : resumeCause;
@@ -290,12 +304,23 @@ export const studentExamService = {
       attemptId: Number(data.attemptId ?? attemptId),
       attemptStatus: String(data.attemptStatus ?? "in_progress"),
       // This only controls the warning UI; the server remains authoritative for the event and count.
-      refreshViolationRecorded: actualCause === "page_refresh" && antiCheatEnabled,
-      remainingViolations: antiCheatEnabled ? Math.max(violationLimit - violationCount, 0) : null,
+      refreshViolationRecorded: Boolean(data.refreshViolationRecorded),
+      remainingViolations: data.remainingViolations === null || data.remainingViolations === undefined ? null : Number(data.remainingViolations),
       terminated: Boolean(data.terminated),
       violationCount,
       violationLimit,
       antiCheatMeasures,
+      serverTime: String(data.serverTime),
+      expiresAt: String(data.expiresAt),
+      remainingSeconds: Number(data.remainingSeconds),
+      refreshViolation: data.refreshViolationRecorded && data.measureViolationCount !== null && data.measureViolationCount !== undefined && data.measureThreshold !== null && data.measureThreshold !== undefined
+        ? {
+            violationCount,
+            measureViolationCount: Number(data.measureViolationCount),
+            measureThreshold: Number(data.measureThreshold),
+            remainingViolations: data.remainingViolations === null || data.remainingViolations === undefined ? null : Number(data.remainingViolations),
+          }
+        : undefined,
     };
   },
 

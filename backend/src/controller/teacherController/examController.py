@@ -68,7 +68,10 @@ class ExamController:
         """Calculate the exam clock from server-side timestamps only."""
         server_time = database_now or examModel.get_database_now()
         start_time = attempt.get("start_time") or server_time
-        duration_expiry = start_time + timedelta(minutes=int(exam["duration_minutes"] or 0))
+        pause_seconds = examModel.attempt_pause_seconds(attempt, server_time)
+        duration_expiry = start_time + timedelta(
+            minutes=int(exam["duration_minutes"] or 0), seconds=pause_seconds,
+        )
         exam_end = exam.get("end_time")
         expires_at = min(duration_expiry, exam_end) if exam_end else duration_expiry
         remaining_seconds = max(0, int((expires_at - server_time).total_seconds()))
@@ -272,7 +275,11 @@ class ExamController:
         ):
             raise Exception("Attempt does not belong to student")
         if device_id and session_token:
-            examModel.assertAttemptSession(exam_id, attempt_id, school_id, device_id, session_token)
+            # A locked student may still restore enough state to display the
+            # waiting screen and poll for an unlock; writes remain blocked.
+            examModel.assertAttemptSession(
+                exam_id, attempt_id, school_id, device_id, session_token, allow_locked=True, allow_paused=True,
+            )
 
         settings = {"sequential_navigation": False, **examModel.getExamSettings(exam_id)}
         snapshot_questions = examModel.getExamQuestions(exam_id, attempt_id)
@@ -312,6 +319,9 @@ class ExamController:
                 "start_time": attempt["start_time"],
                 "lastSavedAt": attempt.get("last_saved_at"),
                 "violationCount": int(attempt.get("violation_count") or 0),
+                "isLocked": bool(attempt.get("is_locked", False) or attempt.get("awaiting_student_resume", False)),
+                "lockReason": attempt.get("lock_reason"),
+                "awaitingStudentResume": bool(attempt.get("awaiting_student_resume", False)),
             },
             "antiCheatEnabled": anti_cheat_enabled,
             "violationCount": int(attempt.get("violation_count") or 0),
@@ -402,7 +412,10 @@ class ExamController:
             raise Exception("Exam is not open yet")
         if exam.get("end_time") and now_time > exam["end_time"]:
             raise Exception("Exam has closed")
-        attempt, session_token, _claimed_legacy = examModel.resumeAttempt(exam_id, attempt_id, school_id, device_id)
+        resume_teacher_pause = resume_cause == "teacher_unlock"
+        attempt, session_token, _claimed_legacy = examModel.resumeAttempt(
+            exam_id, attempt_id, school_id, device_id, resume_teacher_pause=resume_teacher_pause,
+        )
         policy = examModel.getAttemptAntiCheatPolicy(attempt, exam_id)
         measures = policy["anti_cheat_measures"]
         event_state = None
@@ -432,6 +445,13 @@ class ExamController:
             "antiCheatMeasures": measures,
             "terminated": event_state["terminated"] if event_state else attempt["status"] == "terminated",
             "attemptStatus": event_state["attemptStatus"] if event_state else attempt["status"],
+            # Keep the warning UI aligned with the per-rule transaction result;
+            # the aggregate violation count is not a rule count.
+            "refreshViolationRecorded": bool(event_state and event_state.get("eventAccepted")),
+            "measureThreshold": event_state.get("measureThreshold") if event_state else None,
+            "measureViolationCount": event_state.get("measureViolationCount") if event_state else None,
+            "remainingViolations": event_state.get("remainingViolations") if event_state else None,
+            **ExamController._timer_payload(exam, attempt, examModel.get_database_now()),
         }
 
     @staticmethod
@@ -445,6 +465,9 @@ class ExamController:
             "attemptStatus": state["status"],
             "violationCount": int(state["violation_count"] or 0),
             "lastHeartbeatAt": state.get("last_heartbeat_at"),
+            "isLocked": bool(state.get("is_locked", False)),
+            "lockReason": state.get("lock_reason"),
+            "awaitingStudentResume": bool(state.get("awaiting_student_resume", False)),
             "terminated": bool(state.get("terminated", False)),
             "terminationReason": state.get("termination_reason"),
             "terminationSource": state.get("termination_source"),

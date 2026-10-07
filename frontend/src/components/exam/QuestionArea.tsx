@@ -74,35 +74,47 @@ export function QuestionArea({
       {(question.type === 'multiple-choice' || question.type === 'true-false') && question.options && (
             <div className="space-y-3">
               {question.options.map((option, index) => {
-                const optionLabel = question.type === 'true-false' ? (trueFalseSemantic(option.text, index, option) === 'true' ? 'True' : 'False') : String.fromCharCode(65 + index);
-                const isSelected = answer && 'selectedOptionId' in answer && answer.selectedOptionId === option.id;
+            const isTrueFalse = question.type === 'true-false';
+            const optionLabel = String.fromCharCode(65 + index);
+            const optionText = isTrueFalse
+              ? trueFalseSemantic(option.text, index, option) === 'true' ? 'True' : 'False'
+              : option.text;
+            const isSelected = answer && 'selectedOptionId' in answer && answer.selectedOptionId === option.id;
 
-                return (
-                  <label
-                    key={option.id}
-                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                      isSelected
-                        ? 'border-teal-500 bg-teal-50'
-                        : 'border-gray-200 hover:border-teal-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    <input
-                      aria-label={`Option ${optionLabel} for question ${displayNumber ?? currentQuestion + 1}`}
-                      type="radio"
-                      name={`question-${question.id}`}
-                      value={option.id}
-                      checked={isSelected}
-                      onChange={() => onAnswerChange(question.id, { selectedOptionId: option.id })}
-                      className="mt-1"
+            return (
+              <label
+                key={option.id}
+                className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all focus-within:ring-2 focus-within:ring-teal-500 focus-within:ring-offset-2 ${
+                  isSelected
+                    ? 'border-teal-500 bg-teal-50'
+                    : 'border-gray-200 hover:border-teal-300 hover:bg-gray-50'
+                }`}
+              >
+                <input
+                  aria-label={`Option ${optionLabel} for question ${displayNumber ?? currentQuestion + 1}`}
+                  type="radio"
+                  name={`question-${question.id}`}
+                  value={option.id}
+                  checked={isSelected}
+                  onChange={() => onAnswerChange(question.id, { selectedOptionId: option.id })}
+                  className="sr-only"
+                />
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className={`inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full px-2 text-sm font-medium ${
+                    isSelected ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-700'
+                  }`}>
+                    {optionLabel}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <RichContent
+                      content={isTrueFalse ? { ...option, rich_html: null } : option}
+                      text={optionText}
+                      attemptId={question.attemptId}
                     />
-                    <div className="flex-1">
-                      <span className="inline-flex items-center justify-center h-6 min-w-6 px-2 rounded-full bg-gray-200 text-sm mr-3">
-                        {optionLabel}
-                      </span>
-                      <RichContent content={option} text={option.text} attemptId={question.attemptId} />
-                    </div>
-                  </label>
-                );
+                  </div>
+                </div>
+              </label>
+            );
               })}
             </div>
           )}

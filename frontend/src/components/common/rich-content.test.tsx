@@ -191,8 +191,11 @@ it('keeps true/false semantics when media-only options are reversed', async () =
   const question: StudentQuestion = { id: 1, text: 'Q', type: 'true-false', points: 1, options: [{ id: 12, text: '', semantic_value: 'false', audio_media_id: 'b'.repeat(64) }, { id: 11, text: '', semantic_value: 'true', image_media_id: 'a'.repeat(64) }] };
   await render(<QuestionPage questions={[question]} allQuestions={[question]} answers={{ 1: { selectedOptionId: 11 } }} onAnswerChange={() => {}} onToggleMark={() => {}} />);
   const radios = [...container.querySelectorAll('input[type=radio]')] as HTMLInputElement[];
-  expect(radios[0].getAttribute('aria-label')).toContain('False');
-  expect(radios[1].getAttribute('aria-label')).toContain('True');
+  expect(radios[0].getAttribute('aria-label')).toContain('Option A');
+  expect(radios[1].getAttribute('aria-label')).toContain('Option B');
+  expect(radios.every(radio => radio.classList.contains('sr-only'))).toBe(true);
+  expect(container.textContent?.match(/False/g)).toHaveLength(1);
+  expect(container.textContent?.match(/True/g)).toHaveLength(1);
   expect(radios[1].checked).toBe(true);
 });
 

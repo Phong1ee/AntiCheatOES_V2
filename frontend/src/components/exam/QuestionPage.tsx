@@ -12,7 +12,7 @@ export function QuestionPage({ questions, allQuestions, answers, marked = [], on
     const displayNumber = displayNumbers[questionIndex]?.label ?? String(questionIndex + 1);
     const groupNumber = displayNumbers[questionIndex]?.groupNumber;
     return <section key={question.id} aria-label={`Question ${displayNumber}`}>
-      {first && <div className="mx-auto mb-4 w-full min-w-0 max-w-7xl rounded-lg border border-teal-200 bg-white p-5"><h2 className="font-semibold">{block.kind === 'parent' ? 'Passage / parent stimulus' : 'Question group'}{groupNumber ? ` ${groupNumber}` : ''}: {block.title}{question.layout?.continuation ? ' (continued)' : ''}</h2><RichContent content={block} attemptId={question.attemptId} /></div>}
+      {first && <div id={block.block_id ? `group-${block.block_id}` : undefined} className="mx-auto mb-4 w-full min-w-0 max-w-7xl rounded-lg border border-teal-200 bg-white p-5"><h2 className="font-semibold">{block.kind === 'parent' ? 'Passage / parent stimulus' : 'Question group'}{groupNumber ? ` ${groupNumber}` : ''}: {block.title}{question.layout?.continuation ? ' (continued)' : ''}</h2><RichContent content={block} attemptId={question.attemptId} /></div>}
       <QuestionArea hideNavigation question={question} currentQuestion={questionIndex} displayNumber={displayNumber} totalQuestions={allQuestions.length} answer={answers[question.id]} onAnswerChange={onAnswerChange} onPrevious={() => {}} onNext={() => {}} sequentialNavigation={false} currentAnswerIsValid isSavingNext={false} isMarked={marked.includes(question.id)} onToggleMark={() => onToggleMark(question.id)} />
     </section>;
   })}</div>;

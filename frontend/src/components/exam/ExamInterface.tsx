@@ -1,10 +1,11 @@
 import { QuestionPage } from "./QuestionPage";
-import { questionPages, pageIndexForQuestion } from "./question-pages";
+import { questionPages, pageIndexForQuestion, questionPagesByGroup, getGroupsInfo } from "./question-pages";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Lock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import { ExamTopBar } from "./ExamTopBar";
 import { QuestionArea } from "./QuestionArea";
 import { QuestionPanel } from "./QuestionPanel";
+import { Button } from "../ui/button";
 import { SubmitConfirmDialog } from "./SubmitConfirmDialog";
 import { ExamSubmitted } from "./ExamSubmitted";
 import { ViolationWarningDialog } from "./ViolationWarningDialog";
@@ -91,6 +92,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const unlockSettlingUntilRef = useRef(0);
   const heartbeatInFlightRef = useRef(false);
   const heartbeatRequestRef = useRef(0);
+  const questionContentRef = useRef<HTMLDivElement>(null);
 
   // Both flags matter: examEnding covers submit/termination, and the exit ref
   // covers a deliberate exit, which is cleared a tick after fullscreenchange.
@@ -439,7 +441,7 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   };
 
   const handleNextQuestion = useCallback(async () => {
-    const pages = questionPages(questions, settings.questionsPerPage);
+    const pages = questionPagesByGroup(questions, settings.questionsPerPage);
     const pageIndex = pageIndexForQuestion(pages, questions[currentQuestion]?.id);
     if (pageIndex >= pages.length - 1 || nextInFlightRef.current) return;
     if (settings.sequentialNavigation) {
@@ -468,6 +470,30 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
       return nextMarks;
     });
   }, [attemptId]);
+
+  const handleQuestionSelect = useCallback((selectedIndex: number) => {
+    const selectedQuestion = questions[selectedIndex];
+    if (!selectedQuestion) return;
+
+    const pages = questionPagesByGroup(questions, settings.questionsPerPage);
+    const currentPageIndex = pageIndexForQuestion(pages, questions[currentQuestion]?.id);
+    const selectedPageIndex = pageIndexForQuestion(pages, selectedQuestion.id);
+
+    // Get the group ID of the selected question
+    const groupId = selectedQuestion.layout?.block?.block_id;
+
+    // If same page and it's a group, scroll to the group
+    if (currentPageIndex === selectedPageIndex && groupId) {
+      const groupElement = questionContentRef.current?.querySelector(`#group-${groupId}`);
+      if (groupElement) {
+        groupElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+    }
+
+    // Otherwise, navigate to the question/group
+    setCurrentQuestion(selectedIndex);
+  }, [currentQuestion, questions, settings.questionsPerPage]);
 
   const returnToFullscreen = async () => {
     setSubmitError(null);
@@ -562,15 +588,15 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
   const answeredCount = questions.filter((question) => isAnswered(answers[question.id])).length;
   const unansweredQuestions = questions.filter((question) => !isAnswered(answers[question.id])).map((question) => question.id);
   const current = questions[currentQuestion];
-  const pages = questionPages(questions, settings.questionsPerPage);
+  const pages = questionPagesByGroup(questions, settings.questionsPerPage);
   const pageIndex = pageIndexForQuestion(pages, current.id);
   const pageQuestions = pages[pageIndex];
   const currentAnswerIsValid = pageQuestions.every(q => isAnswered(answers[q.id]));
   return <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 flex flex-col">
     <ExamTopBar examTitle={examTitle} timeRemaining={timeRemaining} onSubmit={() => setShowSubmitDialog(true)} antiCheatEnabled={antiCheatEnabled} violationCount={violationCount} />
     {mediaStream && cameraMonitoringEnabled && <WebcamMonitor stream={mediaStream} />}
-    <div className="flex-1 flex overflow-hidden"><div className="flex-1 overflow-y-auto p-4 sm:p-6"><QuestionPage questions={pageQuestions} allQuestions={questions} answers={answers} marked={markedQuestionIds} onAnswerChange={handleAnswerChange} onToggleMark={toggleMarkedQuestion} /><div className="mx-auto mt-6 flex w-full max-w-7xl justify-between"><button type="button" disabled={settings.sequentialNavigation || pageIndex === 0} onClick={() => setCurrentQuestion(questions.findIndex(q => q.id === pages[pageIndex - 1][0].id))}>Previous page</button><span>Page {pageIndex + 1} / {pages.length}</span><button type="button" disabled={pageIndex === pages.length - 1 || (settings.sequentialNavigation && (!currentAnswerIsValid || isSavingNext))} onClick={() => void handleNextQuestion()}>{isSavingNext ? 'Saving…' : 'Next page'}</button></div></div>
-      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} currentPageQuestionIds={pageQuestions.map(q => q.id)} onQuestionSelect={setCurrentQuestion} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
+    <div className="flex-1 flex overflow-hidden"><div ref={questionContentRef} className="flex-1 overflow-y-auto p-4 sm:p-6"><QuestionPage questions={pageQuestions} allQuestions={questions} answers={answers} marked={markedQuestionIds} onAnswerChange={handleAnswerChange} onToggleMark={toggleMarkedQuestion} /><div className="mx-auto mt-6 flex w-full max-w-7xl items-center justify-between gap-3"><Button type="button" variant="outline" disabled={settings.sequentialNavigation || pageIndex === 0} onClick={() => setCurrentQuestion(questions.findIndex(q => q.id === pages[pageIndex - 1][0].id))}><ChevronLeft aria-hidden="true" />Previous page</Button><span className="text-sm text-gray-600">Page {pageIndex + 1} / {pages.length}</span><Button type="button" variant="outline" disabled={pageIndex === pages.length - 1 || (settings.sequentialNavigation && (!currentAnswerIsValid || isSavingNext))} onClick={() => void handleNextQuestion()}>{isSavingNext ? 'Saving…' : 'Next page'}<ChevronRight aria-hidden="true" /></Button></div></div>
+      <QuestionPanel questions={questions} currentQuestion={currentQuestion} answers={answers} isOnline={isOnline} saveStatus={saveStatus} currentPageQuestionIds={pageQuestions.map(q => q.id)} onQuestionSelect={handleQuestionSelect} answeredCount={answeredCount} unansweredQuestions={unansweredQuestions} sequentialNavigation={settings.sequentialNavigation} markedQuestionIds={markedQuestionIds} /></div>
     <SubmitConfirmDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog} onConfirm={() => { setShowSubmitDialog(false); void submit(); }} answeredCount={answeredCount} totalQuestions={questions.length} />
     {submitError && <div className="fixed bottom-4 right-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">{submitError}</div>}
     {/* This dialog is the whole fullscreen gate: while locked it stays open, its

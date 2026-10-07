@@ -28,6 +28,10 @@ it('keeps group controls out of the question editor and retains the draft on mod
   await act(async () => checkbox.click());
   await act(async () => button(dialog, 'Create group from selected').click());
   expect(dialog.textContent).toContain('Question Group 1');
+  expect(dialog.querySelectorAll('.structure-block-settings')).toHaveLength(1);
+  expect(dialog.querySelectorAll('.structure-block-settings .structure-check')).toHaveLength(1);
+  expect(dialog.textContent).not.toContain('Keep together when it fits a page');
+  expect(dialog.textContent).not.toContain('Keep all questions on one page (students scroll)');
   expect(dirty).toHaveBeenLastCalledWith(true);
   await act(async () => button(dialog, 'Close').click());
   expect(document.querySelector('[role=dialog]')).toBeNull();
@@ -44,6 +48,8 @@ it('opens preview separately and explains why unsaved questions block preview', 
   await act(async () => button(container, 'Student preview').click());
   const dialog = document.querySelector('[role=dialog]') as HTMLElement;
   expect(dialog.textContent).toContain('Save question and pool changes');
+  expect(dialog.textContent).not.toContain('The saved exam as students will see it.');
+  expect(dialog.textContent).not.toContain('Random seed');
   expect(button(dialog, 'Preview saved exam').disabled).toBe(true);
   expect(dialog.textContent).not.toContain('Ungrouped questions');
 });

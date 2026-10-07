@@ -79,7 +79,6 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
       <Button type="button" variant="outline" className="structure-action" onClick={() => setOpen(true)}><Layers3 />Manage question groups</Button>
       <span className="structure-summary">{structure ? `${structure.blocks.length} group${structure.blocks.length === 1 ? '' : 's'} · ${structure.standalone.length} ungrouped question${structure.standalone.length === 1 ? '' : 's'}` : 'Groups, reading passages & page order'}</span>
       {dirty && <span className="structure-draft" role="status">Unsaved structure · draft retained</span>}
-      <Button type="button" variant="link" className="structure-preview-link" onClick={() => setPreviewOpen(true)}><Eye />Student preview</Button>
     </div>
     <DialogContent className="question-structure-dialog oes-dialog-rounded" onInteractOutside={e => { if (busy) e.preventDefault(); }} onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}>
       <DialogHeader className="structure-modal-header">
@@ -88,7 +87,6 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
       </DialogHeader>
       <nav className="structure-tabs" aria-label="Question group tools">
         <button type="button" aria-pressed="true"><Layers3 size={16} />Groups & page order</button>
-        <button type="button" aria-pressed="false" onClick={() => { setOpen(false); setPreviewOpen(true); }}><Eye size={16} />Student preview (opens a larger window)</button>
       </nav>
       <div className="structure-modal-body">
         {questionDirty && <p className="structure-notice" role="status">Save question and pool changes before saving structure or previewing.</p>}

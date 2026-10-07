@@ -50,7 +50,6 @@ it('opens preview separately and explains why unsaved questions block preview', 
   expect(dialog.textContent).toContain('Save question and pool changes');
   expect(dialog.textContent).not.toContain('The saved exam as students will see it.');
   expect(dialog.textContent).not.toContain('Random seed');
-  expect(button(dialog, 'Preview saved exam').disabled).toBe(true);
   expect(dialog.textContent).not.toContain('Ungrouped questions');
 });
 

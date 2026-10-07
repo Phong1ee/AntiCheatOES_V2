@@ -125,7 +125,7 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
         <DialogTitle>Student preview</DialogTitle>
         <DialogDescription className="sr-only">Preview of the saved exam as a student would see it.</DialogDescription>
       </DialogHeader>
-      <div className="structure-preview-controls structure-preview-bar"><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label><Button type="button" className="structure-primary structure-preview-load" disabled={busy || dirty || questionDirty} onClick={() => void loadPreview()}><Eye />Preview saved exam</Button></div>
+      <div className="structure-preview-controls structure-preview-bar"><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label></div>
       <div className="structure-modal-body">
         {(questionDirty || dirty) && <p className="structure-notice" role="status">{questionDirty ? 'Save question and pool changes before saving structure or previewing.' : 'Save your structure changes before previewing.'}</p>}
         {error && <p role="alert" className="structure-error">{error}</p>}

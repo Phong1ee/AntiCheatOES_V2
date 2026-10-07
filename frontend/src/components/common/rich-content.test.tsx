@@ -100,10 +100,11 @@ it('numbers grouped questions hierarchically and marks a group answered only whe
   const panelProps = { questions, currentQuestion: 3, answers: { 1: { answerText: 'done' } }, markedQuestionIds: [], answeredCount: 1, unansweredQuestions: [2, 3, 4], onQuestionSelect: vi.fn(), isOnline: true, saveStatus: 'Saved', sequentialNavigation: false };
   await render(<QuestionPage questions={questions.slice(0, 2)} allQuestions={questions} answers={{}} onAnswerChange={() => {}} onToggleMark={() => {}} />);
   expect(container.textContent).toContain('Question group 1: Algebra');
-  expect(container.textContent).toContain('Question 1.1 of 4');
+  expect(container.textContent).toContain('Question 1.1');
+  expect(container.textContent).toContain('Question 1.2');
 
   await render(<panel.QuestionPanel {...panelProps} />);
-  const tile = (label: string) => container.querySelector(`button[aria-label="Question group ${label}"]`)!;
+  const tile = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="Question group ${label}"]`)!;
   expect(container.querySelectorAll('.grid button')).toHaveLength(2);
   expect(tile('1').textContent).toBe('1');
   expect(tile('1').className).not.toContain('bg-green-100');

@@ -20,14 +20,14 @@ it('keeps group controls out of the question editor and retains the draft on mod
   const dirty = vi.fn();
   await act(async () => root.render(<QuestionStructurePanel examId={1} subjectId="SUB" onSaved={async () => {}} onDirtyChange={dirty} />));
   expect(document.querySelector('[role=dialog]')).toBeNull();
-  expect(container.textContent).not.toContain('Standalone questions');
+  expect(container.textContent).not.toContain('Ungrouped questions');
   await act(async () => button(container, 'Manage question groups').click());
   let dialog = document.querySelector('[role=dialog]') as HTMLElement;
   expect(dialog).not.toBeNull();
   const checkbox = dialog.querySelector('input[type=checkbox]') as HTMLInputElement;
   await act(async () => checkbox.click());
   await act(async () => button(dialog, 'Create group from selected').click());
-  expect(dialog.textContent).toContain('Question group 1');
+  expect(dialog.textContent).toContain('Question Group 1');
   expect(dirty).toHaveBeenLastCalledWith(true);
   await act(async () => button(dialog, 'Close').click());
   expect(document.querySelector('[role=dialog]')).toBeNull();
@@ -35,8 +35,8 @@ it('keeps group controls out of the question editor and retains the draft on mod
   expect(window.confirm).not.toHaveBeenCalled();
   await act(async () => button(container, 'Manage question groups').click());
   dialog = document.querySelector('[role=dialog]') as HTMLElement;
-  expect(dialog.textContent).toContain('Question group 1');
-  expect(dialog.querySelector('.structure-question-list')?.textContent).toContain('Question #1');
+  expect(dialog.textContent).toContain('Question Group 1');
+  expect(dialog.querySelector('.structure-question-list .structure-question-name')?.textContent).toBe('1.1');
 });
 
 it('opens preview separately and explains why unsaved questions block preview', async () => {
@@ -45,7 +45,7 @@ it('opens preview separately and explains why unsaved questions block preview', 
   const dialog = document.querySelector('[role=dialog]') as HTMLElement;
   expect(dialog.textContent).toContain('Save question and pool changes');
   expect(button(dialog, 'Preview saved exam').disabled).toBe(true);
-  expect(dialog.textContent).not.toContain('Standalone questions');
+  expect(dialog.textContent).not.toContain('Ungrouped questions');
 });
 
 it('saves multiple questions pinned to the same page and the page-size setting', async () => {

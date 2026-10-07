@@ -130,7 +130,7 @@ export function QuestionPanel({
                       : 'bg-teal-600 text-white ring-2 ring-teal-300'
                     : isMarked
                     ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-400 hover:bg-amber-200'
-                    : isGroupAnswered
+                    : isAnswered
                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
                     : isLocked
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'

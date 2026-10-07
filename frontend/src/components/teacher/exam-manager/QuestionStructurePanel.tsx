@@ -27,7 +27,6 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
   const [selected, setSelected] = useState<number[]>([]);
   const [shuffle, setShuffle] = useState(false);
   const [optionShuffle, setOptionShuffle] = useState(false);
-  const [mobile, setMobile] = useState(false);
   const [pending, setPending] = useState<{ title: string; description: string; label: string; run: () => void } | null>(null);
   const itemById = new Map(questionItems.map(item => [item.id, item]));
   const numberOf = (qid: number) => itemById.get(qid)?.number ?? qid;
@@ -126,11 +125,11 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
         <DialogTitle>Student preview</DialogTitle>
         <DialogDescription className="sr-only">Preview of the saved exam as a student would see it.</DialogDescription>
       </DialogHeader>
-      <div className="structure-preview-controls structure-preview-bar"><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label><label className="structure-check"><input type="checkbox" checked={mobile} onChange={e => setMobile(e.target.checked)} />Phone width</label><Button type="button" className="structure-primary structure-preview-load" disabled={busy || dirty || questionDirty} onClick={() => void loadPreview()}><Eye />Preview saved exam</Button></div>
+      <div className="structure-preview-controls structure-preview-bar"><label className="structure-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} />Shuffle questions</label><label className="structure-check"><input type="checkbox" checked={optionShuffle} onChange={e => setOptionShuffle(e.target.checked)} />Shuffle options</label><Button type="button" className="structure-primary structure-preview-load" disabled={busy || dirty || questionDirty} onClick={() => void loadPreview()}><Eye />Preview saved exam</Button></div>
       <div className="structure-modal-body">
         {(questionDirty || dirty) && <p className="structure-notice" role="status">{questionDirty ? 'Save question and pool changes before saving structure or previewing.' : 'Save your structure changes before previewing.'}</p>}
         {error && <p role="alert" className="structure-error">{error}</p>}
-        {preview.length > 0 ? <StudentQuestionPreview questions={preview} mobile={mobile} /> : <div className="structure-empty"><Eye size={24} /><p>{busy ? 'Loading preview…' : 'Save your changes, then load the student preview.'}</p></div>}
+        {preview.length > 0 ? <StudentQuestionPreview questions={preview} mobile={false} /> : <div className="structure-empty"><Eye size={24} /><p>{busy ? 'Loading preview…' : 'Save your changes, then load the student preview.'}</p></div>}
       </div>
       <div className="structure-modal-footer"><span /><Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button></div>
     </DialogContent>

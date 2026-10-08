@@ -43,6 +43,19 @@ it('keeps group controls out of the question editor and retains the draft on mod
   expect(dialog.querySelector('.structure-question-list .structure-question-name')?.textContent).toBe('1.1');
 });
 
+it('opens preview from dialog and explains why unsaved questions block preview', async () => {
+  await act(async () => root.render(<QuestionStructurePanel examId={1} subjectId="SUB" questionDirty onSaved={async () => {}} />));
+  await act(async () => button(container, 'Manage question groups').click());
+  let dialog = document.querySelector('[role=dialog]') as HTMLElement;
+  expect(dialog).not.toBeNull();
+  await act(async () => button(dialog, 'Student preview').click());
+  dialog = document.querySelector('[role=dialog]') as HTMLElement;
+  expect(dialog.textContent).toContain('Save question and pool changes');
+  expect(dialog.textContent).not.toContain('The saved exam as students will see it.');
+  expect(dialog.textContent).not.toContain('Random seed');
+  expect(dialog.textContent).not.toContain('Ungrouped questions');
+});
+
 it('saves multiple questions pinned to the same page and the page-size setting', async () => {
   vi.mocked(apiClient.put).mockResolvedValue({ data: { version: 2, layout: [] } });
   await act(async () => root.render(<QuestionStructurePanel examId={1} subjectId="SUB" onSaved={async () => {}} />));

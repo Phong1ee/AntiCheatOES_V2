@@ -87,6 +87,7 @@ export function QuestionStructurePanel({ examId, subjectId, onSaved, revision, q
       </DialogHeader>
       <nav className="structure-tabs" aria-label="Question group tools">
         <button type="button" aria-pressed="true"><Layers3 size={16} />Groups & page order</button>
+        <button type="button" aria-pressed="false" onClick={() => { setOpen(false); setPreviewOpen(true); }}><Eye size={16} />Student preview</button>
       </nav>
       <div className="structure-modal-body">
         {questionDirty && <p className="structure-notice" role="status">Save question and pool changes before saving structure or previewing.</p>}

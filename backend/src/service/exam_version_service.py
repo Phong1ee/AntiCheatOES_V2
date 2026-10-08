@@ -11,9 +11,16 @@ STARTED_EXAM_LOCK_MESSAGE = (
 
 
 def exam_has_started_attempts(db: Session, exam_id: int) -> bool:
-    """True when any student has an attempt of any status on the exam."""
+    """True when any student has an active/in-progress attempt on the exam."""
     return (
-        db.query(Attempt.attempt_id).filter(Attempt.exam_id == exam_id).first()
+        db.query(Attempt.attempt_id)
+        .filter(
+            Attempt.exam_id == exam_id,
+            Attempt.status == AttemptStatus.in_progress,
+            Attempt.submitted_at.is_(None),
+            Attempt.end_time.is_(None),
+        )
+        .first()
         is not None
     )
 

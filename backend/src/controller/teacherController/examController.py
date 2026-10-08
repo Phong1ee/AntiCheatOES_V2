@@ -319,7 +319,7 @@ class ExamController:
                 "start_time": attempt["start_time"],
                 "lastSavedAt": attempt.get("last_saved_at"),
                 "violationCount": int(attempt.get("violation_count") or 0),
-                "isLocked": bool(attempt.get("is_locked", False) or attempt.get("awaiting_student_resume", False)),
+                "isLocked": bool(attempt.get("is_locked", False)),
                 "lockReason": attempt.get("lock_reason"),
                 "awaitingStudentResume": bool(attempt.get("awaiting_student_resume", False)),
             },

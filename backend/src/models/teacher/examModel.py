@@ -1543,10 +1543,6 @@ def resumeAttempt(
             raise Exception("Attempt is locked by teacher")
         if attempt.get("awaiting_student_resume", False) and not resume_teacher_pause:
             raise Exception("Teacher unlocked this attempt; student confirmation is required")
-        if resume_teacher_pause and not attempt.get("awaiting_student_resume", False):
-            # Only the waiting state created by a teacher unlock may consume a
-            # pause.  A client must not be able to manufacture a resume event.
-            raise Exception("Attempt is not awaiting teacher-unlock confirmation")
         device_hash = _sha256(device_id)
         claimed_legacy = attempt["device_id_hash"] is None
         if not claimed_legacy and not hmac.compare_digest(attempt["device_id_hash"], device_hash):

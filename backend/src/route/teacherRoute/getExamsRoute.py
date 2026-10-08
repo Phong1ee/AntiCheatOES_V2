@@ -317,7 +317,6 @@ def sync_assignments(
                 status_code=409,
                 detail="Cannot assign new students to an exam while students are actively taking it",
             )
-        # Adding students stays allowed after students start; removal is rejected below.
         claim_exam_version(
             db, exam_id, teacher_school_id, request.expected_version,
             allow_started_exam=True,

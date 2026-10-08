@@ -1541,6 +1541,8 @@ def resumeAttempt(
             raise Exception("Attempt is no longer in progress")
         if attempt.get("is_locked", False):
             raise Exception("Attempt is locked by teacher")
+        if resume_teacher_pause and not attempt.get("awaiting_student_resume", False):
+            raise Exception("Attempt is not awaiting teacher-unlock confirmation")
         if attempt.get("awaiting_student_resume", False) and not resume_teacher_pause:
             raise Exception("Teacher unlocked this attempt; student confirmation is required")
         device_hash = _sha256(device_id)
@@ -1630,9 +1632,14 @@ def heartbeatAttempt(exam_id: int, attempt_id: int, student_id: str, device_id: 
                 "awaiting_student_resume": True,
                 "terminated": False,
             }
-        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s AND is_locked = 0", (attempt_id,))
-        if getattr(cursor, "rowcount", 1) != 1:
+        # MySQL reports changed rows by default, so an unchanged timestamp in the
+        # same second must not be mistaken for a teacher lock. Re-check the flag
+        # under a row lock instead, which also serializes against the teacher lock.
+        cursor.execute("SELECT is_locked FROM attempt WHERE attempt_id = %s FOR UPDATE", (attempt_id,))
+        locked_row = cursor.fetchone()
+        if not locked_row or locked_row["is_locked"]:
             raise Exception("Attempt is locked by teacher")
+        cursor.execute("UPDATE attempt SET last_heartbeat_at = NOW() WHERE attempt_id = %s", (attempt_id,))
         cnx.commit()
         cursor.execute("SELECT last_heartbeat_at, violation_count, status, is_locked FROM attempt WHERE attempt_id = %s", (attempt_id,))
         return cursor.fetchone()

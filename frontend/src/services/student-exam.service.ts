@@ -45,7 +45,7 @@ interface RawVerifyCodeResult {
 
 interface RawRestore {
   exam: { exam_id: number; title: string; duration_minutes: number };
-  attempt: { attempt_id: number; attempt_no: number; status: string; start_time?: string; lastSavedAt?: string | null; isLocked?: boolean; lockReason?: string | null };
+  attempt: { attempt_id: number; attempt_no: number; status: string; start_time?: string; lastSavedAt?: string | null; isLocked?: boolean; lockReason?: string | null; awaitingStudentResume?: boolean };
   questions?: RawQuestion[];
   serverTime: string;
   expiresAt: string;
@@ -256,7 +256,7 @@ export const studentExamService = {
     const { data } = await apiClient.get<RawRestore & Record<string, unknown>>(`/api/exams/${examId}/attempts/${attemptId}`, { headers: attemptSessionStorage.headers(attemptId) });
     return {
       exam: { examId: Number(data.exam.exam_id), title: data.exam.title, durationMinutes: Number(data.exam.duration_minutes) },
-      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0), isLocked: Boolean(data.attempt.isLocked), lockReason: typeof data.attempt.lockReason === "string" ? data.attempt.lockReason : null },
+      attempt: { attemptId: Number(data.attempt.attempt_id), attemptNo: Number(data.attempt.attempt_no), status: data.attempt.status, startTime: data.attempt.start_time, lastSavedAt: data.attempt.lastSavedAt, violationCount: Number(data.violationCount ?? 0), isLocked: Boolean(data.attempt.isLocked), lockReason: typeof data.attempt.lockReason === "string" ? data.attempt.lockReason : null, awaitingStudentResume: Boolean(data.attempt.awaitingStudentResume) },
       questions: (data.questions ?? []).map(q => ({ ...normalizeQuestion(q), attemptId })), serverTime: data.serverTime,
       expiresAt: data.expiresAt, remainingSeconds: Number(data.remainingSeconds), settings: normalizeSettings(data.settings),
       antiCheatEnabled: Boolean(data.antiCheatEnabled), violationCount: Number(data.violationCount ?? 0), violationLimit: Number(data.violationLimit ?? 5), antiCheatMeasures: normalizeAntiCheatMeasures(data.antiCheatMeasures ?? data.settings?.anti_cheat_measures, Number(data.violationLimit ?? 5)),

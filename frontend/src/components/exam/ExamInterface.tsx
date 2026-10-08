@@ -235,7 +235,9 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
     }
     // Keep the lock screen stable after the teacher unlocks. The student must
     // explicitly return to the exam instead of being switched mid-render.
-    if (isTeacherLocked && state.attemptStatus === "in_progress") setTeacherUnlockReady(true);
+    // Only the server's unlock-confirmation state may show "Attempt unlocked".
+    // An unlocked poll without it must not be treated as a teacher unlock.
+    if (isTeacherLocked && state.attemptStatus === "in_progress" && state.awaitingStudentResume) setTeacherUnlockReady(true);
     return false;
   }, [attemptId, examId, handleTeacherLock, handleTeacherTermination, isTeacherLocked]);
 
@@ -339,9 +341,12 @@ export function ExamInterface({ examId, onExit, mediaStream, preloadedAntiCheatR
         // explicit Resume flow may turn a pending page refresh into a violation.
         const restored = await studentExamService.restore(examId, hint.attemptId!);
         setAttemptId(restored.attempt.attemptId); setAttemptStatus(restored.attempt.status); setExamTitle(restored.exam.title); setQuestions(restored.questions);
-        const restoredLocked = Boolean(restored.attempt.isLocked);
+        // A teacher unlock waiting for student confirmation is shown as unlocked,
+        // so a refresh cannot turn it back into a lock or silently enter the exam.
+        const awaitingUnlock = Boolean(restored.attempt.awaitingStudentResume);
+        const restoredLocked = Boolean(restored.attempt.isLocked) || awaitingUnlock;
         setIsTeacherLocked(restoredLocked);
-        setTeacherUnlockReady(false);
+        setTeacherUnlockReady(awaitingUnlock);
         examEndingRef.current = restoredLocked;
         const saved = restored.questions.reduce<StudentAnswers>((all, question) => question.savedAnswer ? { ...all, [question.id]: question.savedAnswer } : all, {});
         persistedAnsweredRef.current = new Set(

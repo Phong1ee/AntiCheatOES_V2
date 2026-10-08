@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from src.a_db_config import (
+    Attempt,
+    AttemptStatus,
     ChapterQuestion,
     CourseClass,
     Exam,
@@ -303,6 +305,18 @@ def sync_assignments(
     teacher_school_id = current_user["school_id"]
     try:
         exam = _owned_exam(db, exam_id, teacher_school_id)
+        # Check if any student has an active attempt
+        active_attempts = db.query(func.count(Attempt.attempt_id)).filter(
+            Attempt.exam_id == exam_id,
+            Attempt.status == AttemptStatus.in_progress,
+            Attempt.submitted_at.is_(None),
+            Attempt.end_time.is_(None),
+        ).scalar()
+        if active_attempts and active_attempts > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot assign new students to an exam while students are actively taking it",
+            )
         # Adding students stays allowed after students start; removal is rejected below.
         claim_exam_version(
             db, exam_id, teacher_school_id, request.expected_version,
